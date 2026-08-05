@@ -1,10 +1,6 @@
-# FastMCP
+# ViteMCP
 
 A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable of handling client sessions.
-
-> [!NOTE]
->
-> For a Python implementation, see [FastMCP](https://github.com/jlowin/fastmcp).
 
 ## Features
 
@@ -36,48 +32,48 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [In-memory transport](#unit-testing-with-an-in-memory-transport) for unit testing without binding a port
 - CLI for [testing](#test-with-mcp-cli) and [debugging](#inspect-with-mcp-inspector)
 
-## When to use FastMCP over the official SDK?
+## When to use ViteMCP over the official SDK?
 
-FastMCP is built on top of the official SDK.
+ViteMCP is built on top of the official SDK.
 
 The official SDK provides foundational blocks for building MCPs, but leaves many implementation details to you:
 
-- [Initiating and configuring](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L664-L744) all the server components
-- [Handling of connections](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L760-L850)
-- [Handling of tools](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1303-L1498)
-- [Handling of responses](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L989-L1060)
-- [Handling of resources](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1151-L1242)
-- Adding [prompts](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L760-L850), [resources](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L960-L962), [resource templates](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L964-L987)
-- Embedding [resources](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1569-L1643), [image](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L51-L111) and [audio](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L113-L173) content blocks
+- [Initiating and configuring](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L664-L744) all the server components
+- [Handling of connections](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L760-L850)
+- [Handling of tools](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1303-L1498)
+- [Handling of responses](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L989-L1060)
+- [Handling of resources](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1151-L1242)
+- Adding [prompts](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L760-L850), [resources](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L960-L962), [resource templates](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L964-L987)
+- Embedding [resources](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1569-L1643), [image](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L51-L111) and [audio](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L113-L173) content blocks
 
-FastMCP eliminates this complexity by providing an opinionated framework that:
+ViteMCP eliminates this complexity by providing an opinionated framework that:
 
 - Handles all the boilerplate automatically
 - Provides simple, intuitive APIs for common tasks
 - Includes built-in best practices and error handling
 - Lets you focus on your MCP's core functionality
 
-**When to choose FastMCP:** You want to build MCP servers quickly without dealing with low-level implementation details.
+**When to choose ViteMCP:** You want to build MCP servers quickly without dealing with low-level implementation details.
 
-**When to use the official SDK:** You need maximum control or have specific architectural requirements. In this case, we encourage referencing FastMCP's implementation to avoid common pitfalls.
+**When to use the official SDK:** You need maximum control or have specific architectural requirements. In this case, we encourage referencing ViteMCP's implementation to avoid common pitfalls.
 
 ## Installation
 
 ```bash
-npm install fastmcp
+npm install @vitemcp/server
 ```
 
 ## Quickstart
 
 > [!NOTE]
 >
-> There are many real-world examples of using FastMCP in the wild. See the [Showcase](#showcase) for examples.
+> There are many real-world examples of using ViteMCP in the wild. See the [Showcase](#showcase) for examples.
 
 ```ts
-import { FastMCP } from "fastmcp";
+import { ViteMCP } from "@vitemcp/server";
 import { z } from "zod"; // Or any validation library that supports Standard Schema
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
 });
@@ -104,23 +100,23 @@ _That's it!_ You have a working MCP server.
 You can test the server in terminal with:
 
 ```bash
-git clone https://github.com/punkpeye/fastmcp.git
-cd fastmcp
+git clone https://github.com/vitemcp/vitemcp.git
+cd vitemcp
 
 pnpm install
 pnpm build
 
 # Test the addition server example using CLI:
-npx fastmcp dev src/examples/addition.ts
+npx @vitemcp/server dev src/examples/addition.ts
 # Test the addition server example using MCP Inspector:
-npx fastmcp inspect src/examples/addition.ts
+npx @vitemcp/server inspect src/examples/addition.ts
 ```
 
 If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
 
 ### Remote Server Options
 
-FastMCP supports multiple transport options for remote communication, allowing an MCP hosted on a remote machine to be accessed over the network.
+ViteMCP supports multiple transport options for remote communication, allowing an MCP hosted on a remote machine to be accessed over the network.
 
 #### HTTP Streaming
 
@@ -191,7 +187,7 @@ await client.connect(transport);
 
 ##### HTTPS Support
 
-FastMCP supports HTTPS for secure connections by providing SSL certificate options:
+ViteMCP supports HTTPS for secure connections by providing SSL certificate options:
 
 ```ts
 server.start({
@@ -225,7 +221,7 @@ See the [https-server example](src/examples/https-server.ts) for a complete demo
 
 ##### CORS Configuration
 
-By default, FastMCP enables CORS with a standard set of allowed headers. You can customize the CORS behavior by passing a `cors` option:
+By default, ViteMCP enables CORS with a standard set of allowed headers. You can customize the CORS behavior by passing a `cors` option:
 
 ```ts
 server.start({
@@ -261,11 +257,11 @@ The `cors` option accepts:
   - `credentials` - boolean to allow credentials
   - `maxAge` - preflight cache duration in seconds
 
-The `CorsOptions` type is exported from `fastmcp` for convenience.
+The `CorsOptions` type is exported from `vitemcp` for convenience.
 
 #### Custom HTTP Routes
 
-FastMCP allows you to add custom HTTP routes alongside MCP endpoints, enabling you to build comprehensive HTTP services that include REST APIs, webhooks, admin interfaces, and more - all within the same server process.
+ViteMCP allows you to add custom HTTP routes alongside MCP endpoints, enabling you to build comprehensive HTTP services that include REST APIs, webhooks, admin interfaces, and more - all within the same server process.
 
 ```ts
 const app = server.getApp();
@@ -317,19 +313,19 @@ Routes are matched in the order they are registered, allowing you to define spec
 
 ##### Public and Protected Routes
 
-Custom Hono routes are public unless you add your own route middleware or authentication checks. For protected custom routes, put your auth logic in a reusable helper and call it from both FastMCP's `authenticate` option and your Hono route handlers:
+Custom Hono routes are public unless you add your own route middleware or authentication checks. For protected custom routes, put your auth logic in a reusable helper and call it from both ViteMCP's `authenticate` option and your Hono route handlers:
 
 ```ts
 import type { IncomingMessage } from "node:http";
 import type { Context } from "hono";
-import { FastMCP } from "fastmcp";
+import { ViteMCP } from "@vitemcp/server";
 
 async function authenticateRequest(request: IncomingMessage) {
   const apiKey = request.headers["x-api-key"];
   return apiKey === "123" ? { userId: "123" } : undefined;
 }
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
   authenticate: authenticateRequest,
@@ -384,16 +380,16 @@ See the [custom-routes example](src/examples/custom-routes.ts) for a complete de
 
 #### Edge Runtime Support
 
-FastMCP supports edge runtimes like Cloudflare Workers, enabling deployment of MCP servers to the edge with minimal latency worldwide.
+ViteMCP supports edge runtimes like Cloudflare Workers, enabling deployment of MCP servers to the edge with minimal latency worldwide.
 
-##### Choosing Between FastMCP and EdgeFastMCP
+##### Choosing Between ViteMCP and EdgeViteMCP
 
-| Use Case                        | Class         | Import                                       |
-| ------------------------------- | ------------- | -------------------------------------------- |
-| Node.js, Express, Bun           | `FastMCP`     | `import { FastMCP } from "fastmcp"`          |
-| Cloudflare Workers, Deno Deploy | `EdgeFastMCP` | `import { EdgeFastMCP } from "fastmcp/edge"` |
+| Use Case                        | Class         | Import                                               |
+| ------------------------------- | ------------- | ---------------------------------------------------- |
+| Node.js, Express, Bun           | `ViteMCP`     | `import { ViteMCP } from "@vitemcp/server"`          |
+| Cloudflare Workers, Deno Deploy | `EdgeViteMCP` | `import { EdgeViteMCP } from "@vitemcp/server/edge"` |
 
-| Feature              | FastMCP                        | EdgeFastMCP                            |
+| Feature              | ViteMCP                        | EdgeViteMCP                            |
 | -------------------- | ------------------------------ | -------------------------------------- |
 | Runtime              | Node.js                        | Edge (V8 isolates)                     |
 | Start method         | `server.start({ port })`       | `export default server`                |
@@ -403,7 +399,7 @@ FastMCP supports edge runtimes like Cloudflare Workers, enabling deployment of M
 | OAuth/Authentication | Built-in `authenticate` option | Use Hono middleware (built-in planned) |
 | Custom routes        | `server.getApp()`              | `server.getApp()`                      |
 
-> **Note:** Built-in authentication for EdgeFastMCP is planned for a future release. Both FastMCP and EdgeFastMCP use Hono internally, so there's no technical barrier—EdgeFastMCP was simply written before OAuth was added to FastMCP. PRs are welcome to add an `authenticate` option that accepts web `Request` instead of Node.js `http.IncomingMessage`.
+> **Note:** Built-in authentication for EdgeViteMCP is planned for a future release. Both ViteMCP and EdgeViteMCP use Hono internally, so there's no technical barrier—EdgeViteMCP was simply written before OAuth was added to ViteMCP. PRs are welcome to add an `authenticate` option that accepts web `Request` instead of Node.js `http.IncomingMessage`.
 >
 > In the meantime, use Hono middleware:
 >
@@ -419,13 +415,13 @@ FastMCP supports edge runtimes like Cloudflare Workers, enabling deployment of M
 
 ##### Cloudflare Workers
 
-To deploy FastMCP to Cloudflare Workers, use the `EdgeFastMCP` class from the `/edge` subpath:
+To deploy ViteMCP to Cloudflare Workers, use the `EdgeViteMCP` class from the `/edge` subpath:
 
 ```ts
-import { EdgeFastMCP } from "fastmcp/edge";
+import { EdgeViteMCP } from "@vitemcp/server/edge";
 import { z } from "zod";
 
-const server = new EdgeFastMCP({
+const server = new EdgeViteMCP({
   name: "My Edge Server",
   version: "1.0.0",
   description: "MCP server running on Cloudflare Workers",
@@ -490,7 +486,7 @@ See the [edge-cloudflare-worker example](src/examples/edge-cloudflare-worker.ts)
 
 #### Stateless Mode
 
-FastMCP supports stateless operation for HTTP streaming, where each request is handled independently without maintaining persistent sessions. This is ideal for serverless environments, load-balanced deployments, or when session state isn't required.
+ViteMCP supports stateless operation for HTTP streaming, where each request is handled independently without maintaining persistent sessions. This is ideal for serverless environments, load-balanced deployments, or when session state isn't required.
 
 In stateless mode:
 
@@ -517,10 +513,10 @@ You can also enable stateless mode using CLI arguments or environment variables:
 
 ```bash
 # Via CLI argument
-npx fastmcp dev src/server.ts --transport http-stream --port 8080 --stateless true
+npx @vitemcp/server dev src/server.ts --transport http-stream --port 8080 --stateless true
 
 # Via environment variable
-FASTMCP_STATELESS=true npx fastmcp dev src/server.ts
+VITEMCP_STATELESS=true npx @vitemcp/server dev src/server.ts
 ```
 
 The `/ready` health check endpoint will indicate when the server is running in stateless mode:
@@ -540,7 +536,7 @@ The `/ready` health check endpoint will indicate when the server is running in s
 
 [Tools](https://modelcontextprotocol.io/docs/concepts/tools) in MCP allow servers to expose executable functions that can be invoked by clients and used by LLMs to perform actions.
 
-FastMCP uses the [Standard Schema](https://standardschema.dev) specification for defining tool parameters. This allows you to use your preferred schema validation library (like Zod, ArkType, or Valibot) as long as it implements the spec.
+ViteMCP uses the [Standard Schema](https://standardschema.dev) specification for defining tool parameters. This allows you to use your preferred schema validation library (like Zod, ArkType, or Valibot) as long as it implements the spec.
 
 **Zod Example:**
 
@@ -611,7 +607,7 @@ npm install ajv ajv-formats
 ```
 
 ```typescript
-import { jsonSchemaAdapter } from "fastmcp";
+import { jsonSchemaAdapter } from "@vitemcp/server";
 
 server.addTool({
   name: "fetch-json-schema",
@@ -630,7 +626,7 @@ server.addTool({
 });
 ```
 
-Works for `outputSchema` too. Note that FastMCP advertises every tool schema
+Works for `outputSchema` too. Note that ViteMCP advertises every tool schema
 with `additionalProperties: false`, whatever your schema said — the same
 treatment Zod and Valibot schemas get.
 
@@ -671,11 +667,11 @@ When creating tools that don't require parameters, you have two options:
 
 > [!NOTE]
 >
-> Both approaches are fully compatible with all MCP clients, including Cursor. FastMCP automatically generates the proper schema in both cases.
+> Both approaches are fully compatible with all MCP clients, including Cursor. ViteMCP automatically generates the proper schema in both cases.
 
 #### Structured Tool Output
 
-Tools can declare an `outputSchema` and return structured data. FastMCP exposes that value as MCP `structuredContent`, while also returning a JSON text fallback for clients that only render text content.
+Tools can declare an `outputSchema` and return structured data. ViteMCP exposes that value as MCP `structuredContent`, while also returning a JSON text fallback for clients that only render text content.
 
 ```typescript
 server.addTool({
@@ -731,7 +727,7 @@ server.addTool({
 });
 ```
 
-When `outputSchema` is provided, FastMCP validates `structuredContent` before sending the tool result. Invalid structured output is returned to the client as a tool error instead of silently violating the advertised schema.
+When `outputSchema` is provided, ViteMCP validates `structuredContent` before sending the tool result. Invalid structured output is returned to the client as a tool error instead of silently violating the advertised schema.
 
 #### Tool Authorization
 
@@ -812,7 +808,7 @@ server.addTool({
 Use the `imageContent` to create a content object for an image:
 
 ```js
-import { imageContent } from "fastmcp";
+import { imageContent } from "@vitemcp/server";
 
 server.addTool({
   name: "download",
@@ -879,10 +875,10 @@ server.addTool({
 
 #### Configurable Ping Behavior
 
-FastMCP includes a configurable ping mechanism to maintain connection health. The ping behavior can be customized through server options:
+ViteMCP includes a configurable ping mechanism to maintain connection health. The ping behavior can be customized through server options:
 
 ```ts
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
   ping: {
@@ -905,14 +901,14 @@ This configurable approach helps reduce log verbosity and optimize performance f
 
 ### Health-check Endpoint
 
-When you run FastMCP with the `httpStream` transport you can optionally expose a
+When you run ViteMCP with the `httpStream` transport you can optionally expose a
 simple HTTP endpoint that returns a plain-text response useful for load-balancer
 or container orchestration liveness checks.
 
 Enable (or customise) the endpoint via the `health` key in the server options:
 
 ```ts
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
   health: {
@@ -946,10 +942,10 @@ The endpoint is ignored when the server is started with the `stdio` transport.
 
 #### Roots Management
 
-FastMCP supports [Roots](https://modelcontextprotocol.io/docs/concepts/roots) - Feature that allows clients to provide a set of filesystem-like root locations that can be listed and dynamically updated. The Roots feature can be configured or disabled in server options:
+ViteMCP supports [Roots](https://modelcontextprotocol.io/docs/concepts/roots) - Feature that allows clients to provide a set of filesystem-like root locations that can be listed and dynamically updated. The Roots feature can be configured or disabled in server options:
 
 ```ts
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
   roots: {
@@ -990,7 +986,7 @@ When a client doesn't support roots or when roots functionality is explicitly di
 Use the `audioContent` to create a content object for an audio:
 
 ```js
-import { audioContent } from "fastmcp";
+import { audioContent } from "@vitemcp/server";
 
 server.addTool({
   name: "download",
@@ -1111,10 +1107,10 @@ server.addTool({
 
 #### Custom Logger
 
-FastMCP allows you to provide a custom logger implementation to control how the server logs messages. This is useful for integrating with existing logging infrastructure or customizing log formatting.
+ViteMCP allows you to provide a custom logger implementation to control how the server logs messages. This is useful for integrating with existing logging infrastructure or customizing log formatting.
 
 ```ts
-import { FastMCP, Logger } from "fastmcp";
+import { ViteMCP, Logger } from "@vitemcp/server";
 
 class CustomLogger implements Logger {
   debug(...args: unknown[]): void {
@@ -1138,7 +1134,7 @@ class CustomLogger implements Logger {
   }
 }
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
   logger: new CustomLogger(),
@@ -1184,7 +1180,7 @@ The `log` object has the following methods:
 The errors that are meant to be shown to the user should be thrown as `UserError` instances:
 
 ```js
-import { UserError } from "fastmcp";
+import { UserError } from "@vitemcp/server";
 
 server.addTool({
   name: "download",
@@ -1245,14 +1241,14 @@ Progress notifications are only emitted when the client opts in by supplying a `
 
 #### Streaming Output
 
-FastMCP can stream partial results from tools while they're still executing, enabling responsive UIs and real-time feedback. This is particularly useful for:
+ViteMCP can stream partial results from tools while they're still executing, enabling responsive UIs and real-time feedback. This is particularly useful for:
 
 - Long-running operations that generate content incrementally
 - Progressive generation of text, images, or other media
 - Operations where users benefit from seeing immediate partial results
 
 > [!IMPORTANT]
-> `streamContent` is a **FastMCP extension, not part of the MCP specification**. It emits a `notifications/tool/streamContent` notification, which the MCP specification does not define — as of revision `2025-11-25` there is no standard mechanism for streaming tool output ([SEP-2998](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2998) is the in-progress proposal to add one).
+> `streamContent` is a **ViteMCP extension, not part of the MCP specification**. It emits a `notifications/tool/streamContent` notification, which the MCP specification does not define — as of revision `2025-11-25` there is no standard mechanism for streaming tool output ([SEP-2998](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2998) is the in-progress proposal to add one).
 >
 > Clients discard notifications they have no handler registered for, silently and without error. A client only sees streamed content if it registers a handler for the method (or sets a `fallbackNotificationHandler`), and **no client is known to render it as tool output** — MCP Inspector, for example, logs it in its notifications pane via a fallback handler, but the tool result itself still shows only what `execute` returned. Streaming is therefore mainly useful when you also control the client — see [Consuming streamed content](#consuming-streamed-content) below. If you need incremental updates that work on any client, use [`reportProgress`](#progress) with a `message` instead.
 
@@ -1291,7 +1287,7 @@ server.addTool({
 > [!WARNING]
 > Returning `undefined` from `execute` produces a tool result with empty `content`. If you stream everything and return nothing, the tool call resolves to an empty result with no indication that anything was lost — including on clients that do log the notification. Return the complete result as well, and treat streamed content purely as a progressive-rendering enhancement.
 
-The `streamingHint` annotation is advisory metadata. It is forwarded verbatim to clients in `tools/list`, but it does not enable or gate `streamContent`, and FastMCP itself never reads it. No client is known to act on it today, though [SEP-2998](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2998) proposes standardizing the same annotation name.
+The `streamingHint` annotation is advisory metadata. It is forwarded verbatim to clients in `tools/list`, but it does not enable or gate `streamContent`, and ViteMCP itself never reads it. No client is known to act on it today, though [SEP-2998](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2998) proposes standardizing the same annotation name.
 
 ##### Consuming streamed content
 
@@ -1500,7 +1496,7 @@ server.addResource({
 
 #### Subscribing to resource updates
 
-Clients can subscribe to a resource with the MCP [`resources/subscribe`](https://modelcontextprotocol.io/specification/2025-06-18/server/resources#subscriptions) method to be notified whenever its contents change. FastMCP advertises the `subscribe` capability automatically for any server that exposes resources, tracks each client's subscriptions, and lets you emit an update with `sendResourceUpdated`:
+Clients can subscribe to a resource with the MCP [`resources/subscribe`](https://modelcontextprotocol.io/specification/2025-06-18/server/resources#subscriptions) method to be notified whenever its contents change. ViteMCP advertises the `subscribe` capability automatically for any server that exposes resources, tracks each client's subscriptions, and lets you emit an update with `sendResourceUpdated`:
 
 ```ts
 server.addResource({
@@ -1516,7 +1512,7 @@ server.addResource({
 await server.sendResourceUpdated("file:///logs/app.log");
 ```
 
-`sendResourceUpdated` only notifies clients that have subscribed to the given URI, so it is safe to call whenever your data changes. FastMCP also advertises the `listChanged` capability for resources and prompts and emits `notifications/resources/list_changed` / `notifications/prompts/list_changed` automatically when you add or remove resources, resource templates, or prompts at runtime.
+`sendResourceUpdated` only notifies clients that have subscribed to the given URI, so it is safe to call whenever your data changes. ViteMCP also advertises the `listChanged` capability for resources and prompts and emits `notifications/resources/list_changed` / `notifications/prompts/list_changed` automatically when you add or remove resources, resource templates, or prompts at runtime.
 
 ### Resource templates
 
@@ -1581,7 +1577,7 @@ server.addResourceTemplate({
 
 ### Embedded Resources
 
-FastMCP provides a convenient `embedded()` method that simplifies including resources in tool responses. This feature reduces code duplication and makes it easier to reference resources from within tools.
+ViteMCP provides a convenient `embedded()` method that simplifies including resources in tool responses. This feature reduces code duplication and makes it easier to reference resources from within tools.
 
 #### Basic Usage
 
@@ -1785,16 +1781,21 @@ server.addPrompt({
 
 ### Authentication
 
-FastMCP supports OAuth 2.1 authentication with pre-configured providers, allowing you to secure your server with minimal setup.
+ViteMCP supports OAuth 2.1 authentication with pre-configured providers, allowing you to secure your server with minimal setup.
 
 #### OAuth with Pre-configured Providers
 
 Use the `auth` option with a provider to enable OAuth authentication:
 
 ```ts
-import { FastMCP, getAuthSession, GoogleProvider, requireAuth } from "fastmcp";
+import {
+  ViteMCP,
+  getAuthSession,
+  GoogleProvider,
+  requireAuth,
+} from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new GoogleProvider({
     baseUrl: "https://your-server.com",
     clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -1825,17 +1826,17 @@ server.addTool({
 
 | Provider         | Import    | Use Case               |
 | :--------------- | :-------- | :--------------------- |
-| `GoogleProvider` | `fastmcp` | Google OAuth           |
-| `GitHubProvider` | `fastmcp` | GitHub OAuth           |
-| `AzureProvider`  | `fastmcp` | Azure/Entra ID         |
-| `OAuthProvider`  | `fastmcp` | Any OAuth 2.0 provider |
+| `GoogleProvider` | `vitemcp` | Google OAuth           |
+| `GitHubProvider` | `vitemcp` | GitHub OAuth           |
+| `AzureProvider`  | `vitemcp` | Azure/Entra ID         |
+| `OAuthProvider`  | `vitemcp` | Any OAuth 2.0 provider |
 
 **Generic OAuth Provider** (for SAP, Auth0, Okta, etc.):
 
 ```ts
-import { FastMCP, OAuthProvider } from "fastmcp";
+import { ViteMCP, OAuthProvider } from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new OAuthProvider({
     authorizationEndpoint: process.env.OAUTH_AUTH_ENDPOINT!,
     baseUrl: "https://your-server.com",
@@ -1861,7 +1862,7 @@ import {
   requireAll,
   requireAny,
   getAuthSession,
-} from "fastmcp";
+} from "@vitemcp/server";
 
 // Require any authenticated user
 server.addTool({
@@ -1917,7 +1918,7 @@ server.addTool({
 Use `getAuthSession` for type-safe access to the OAuth session in your tool execute functions:
 
 ```typescript
-import { getAuthSession, GoogleSession } from "fastmcp";
+import { getAuthSession, GoogleSession } from "@vitemcp/server";
 
 server.addTool({
   canAccess: requireAuth,
@@ -1944,7 +1945,7 @@ server.addTool({
 For non-OAuth scenarios (API keys, custom tokens), use the `authenticate` option:
 
 ```ts
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
   authenticate: (request) => {
@@ -1971,7 +1972,7 @@ server.addTool({
 
 #### OAuth Proxy
 
-The `auth` option uses FastMCP's built-in **OAuth Proxy** that acts as a secure intermediary between MCP clients and upstream OAuth providers. The proxy handles the complete OAuth 2.1 authorization flow, including Dynamic Client Registration (DCR), PKCE, consent management, and token management with encryption and token swap patterns enabled by default.
+The `auth` option uses ViteMCP's built-in **OAuth Proxy** that acts as a secure intermediary between MCP clients and upstream OAuth providers. The proxy handles the complete OAuth 2.1 authorization flow, including Dynamic Client Registration (DCR), PKCE, consent management, and token management with encryption and token swap patterns enabled by default.
 
 **Key Features:**
 
@@ -1984,9 +1985,14 @@ The `auth` option uses FastMCP's built-in **OAuth Proxy** that acts as a secure 
 **Quick Start:**
 
 ```ts
-import { FastMCP, getAuthSession, GoogleProvider, requireAuth } from "fastmcp";
+import {
+  ViteMCP,
+  getAuthSession,
+  GoogleProvider,
+  requireAuth,
+} from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new GoogleProvider({
     baseUrl: "https://your-server.com",
     clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -2012,8 +2018,8 @@ server.addTool({
 For more control over OAuth behavior, you can use the `oauth` option directly:
 
 ```ts
-import { FastMCP } from "fastmcp";
-import { GoogleProvider } from "fastmcp/auth";
+import { ViteMCP } from "@vitemcp/server";
+import { GoogleProvider } from "@vitemcp/server/auth";
 
 const authProvider = new GoogleProvider({
   baseUrl: "https://your-server.com",
@@ -2022,7 +2028,7 @@ const authProvider = new GoogleProvider({
   scopes: ["openid", "profile", "email"],
 });
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   oauth: {
     authorizationServer: authProvider
@@ -2039,18 +2045,17 @@ const server = new FastMCP({
 
 - [OAuth Proxy Features](docs/oauth-proxy-features.md) - Complete feature list and capabilities
 - [OAuth Proxy Implementation Guide](docs/oauth-proxy-guide.md) - Setup and configuration
-- [Python vs TypeScript Comparison](docs/oauth-python-typescript.md) - Feature comparison
 
 #### OAuth Discovery Endpoints
 
-FastMCP also supports OAuth discovery endpoints for direct integration with OAuth providers, supporting both **MCP Specification 2025-03-26** and **MCP Specification 2025-06-18**. This provides standard discovery endpoints that comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9470 (OAuth 2.0 Protected Resource Metadata):
+ViteMCP also supports OAuth discovery endpoints for direct integration with OAuth providers, supporting both **MCP Specification 2025-03-26** and **MCP Specification 2025-06-18**. This provides standard discovery endpoints that comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9470 (OAuth 2.0 Protected Resource Metadata):
 
 ```ts
-import { FastMCP } from "fastmcp";
+import { ViteMCP } from "@vitemcp/server";
 import buildGetJwks from "get-jwks";
 import fastJwt, { type DecodedJwt } from "fast-jwt";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
   oauth: {
@@ -2130,7 +2135,7 @@ server.start({
 });
 ```
 
-With this configuration, FastMCP serves the issuer-path authorization server
+With this configuration, ViteMCP serves the issuer-path authorization server
 metadata at `/.well-known/oauth-authorization-server/issuer1`, while protected
 resource metadata remains available for the MCP endpoint at
 `/.well-known/oauth-protected-resource/issuer1/mcp`.
@@ -2159,7 +2164,7 @@ For JWT token validation, you can use libraries like [`get-jwks`](https://github
 If you are exposing your MCP server via HTTP, you may wish to allow clients to supply sensitive keys via headers, which can then be passed along to APIs that your tools interact with, allowing each client to supply their own API keys. This can be done by capturing the HTTP headers in the `authenticate` section and storing them in the session to be referenced by the tools later.
 
 ```ts
-import { FastMCP } from "fastmcp";
+import { ViteMCP } from "@vitemcp/server";
 import { IncomingHttpHeaders } from "http";
 
 // Define the session data type
@@ -2169,7 +2174,7 @@ interface SessionData {
 }
 
 // Create a server instance
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
   authenticate: async (request: any): Promise<SessionData> => {
@@ -2271,7 +2276,7 @@ Tool result: {
 
 #### Session ID and Request ID Tracking
 
-FastMCP automatically exposes session and request IDs to tool handlers through the context parameter. This enables per-session state management and request tracking.
+ViteMCP automatically exposes session and request IDs to tool handlers through the context parameter. This enables per-session state management and request tracking.
 
 **Session ID** (`context.sessionId`):
 
@@ -2287,10 +2292,10 @@ FastMCP automatically exposes session and request IDs to tool handlers through t
 - Useful for request tracing and debugging
 
 ```ts
-import { FastMCP } from "fastmcp";
+import { ViteMCP } from "@vitemcp/server";
 import { z } from "zod";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "Session Counter Server",
   version: "1.0.0",
 });
@@ -2356,7 +2361,7 @@ See [`src/examples/session-id-counter.ts`](src/examples/session-id-counter.ts) f
 You can provide instructions to the server using the `instructions` option:
 
 ```ts
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
   instructions:
@@ -2366,7 +2371,7 @@ const server = new FastMCP({
 
 ### Sessions
 
-The `session` object is an instance of `FastMCPSession` and it describes active client sessions.
+The `session` object is an instance of `ViteMCPSession` and it describes active client sessions.
 
 ```ts
 server.sessions;
@@ -2388,11 +2393,11 @@ server.on("disconnect", (event) => {
 });
 ```
 
-## `FastMCPSession`
+## `ViteMCPSession`
 
-`FastMCPSession` represents a client session and provides methods to interact with the client.
+`ViteMCPSession` represents a client session and provides methods to interact with the client.
 
-Refer to [Sessions](#sessions) for examples of how to obtain a `FastMCPSession` instance.
+Refer to [Sessions](#sessions) for examples of how to obtain a `ViteMCPSession` instance.
 
 ### `requestElicitation`
 
@@ -2539,7 +2544,7 @@ session.on("error", (event) => {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
-async function createTestClient(server: FastMCP) {
+async function createTestClient(server: ViteMCP) {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
 
@@ -2574,15 +2579,15 @@ Pass session auth as the second argument, equivalent to what your `authenticate`
 await server.connect(serverTransport, { id: 7, role: "admin" });
 ```
 
-`connect` returns the [`FastMCPSession`](#fastmcpsession), so you can assert on `session.clientCapabilities`, `session.roots`, and the rest. The transport's lifecycle belongs to you: `stop()` does not close transports passed to `connect`, so close the client (and the session, if you need `disconnect` to fire) when the test finishes.
+`connect` returns the [`ViteMCPSession`](#vitemcpsession), so you can assert on `session.clientCapabilities`, `session.roots`, and the rest. The transport's lifecycle belongs to you: `stop()` does not close transports passed to `connect`, so close the client (and the session, if you need `disconnect` to fire) when the test finishes.
 
 ### Test with `mcp-cli`
 
-The fastest way to test and debug your server is with `fastmcp dev`:
+The fastest way to test and debug your server is with `vitemcp dev`:
 
 ```bash
-npx fastmcp dev server.js
-npx fastmcp dev server.ts
+npx @vitemcp/server dev server.js
+npx @vitemcp/server dev server.ts
 ```
 
 This will run your server with [`mcp-cli`](https://github.com/wong2/mcp-cli) for testing and debugging your MCP server in the terminal.
@@ -2590,7 +2595,7 @@ This will run your server with [`mcp-cli`](https://github.com/wong2/mcp-cli) for
 To call a tool non-interactively (for example, in scripts or automated tests), pass `--tool` and optional JSON `--args`:
 
 ```bash
-npx fastmcp dev server.ts --tool add --args '{"a":1,"b":2}'
+npx @vitemcp/server dev server.ts --tool add --args '{"a":1,"b":2}'
 ```
 
 This prints the tool result as JSON and exits, instead of opening the interactive inspector. `--watch` has no effect in this mode, since the server is started for a single call.
@@ -2600,7 +2605,7 @@ This prints the tool result as JSON and exits, instead of opening the interactiv
 Another way is to use the official [`MCP Inspector`](https://modelcontextprotocol.io/docs/tools/inspector) to inspect your server with a Web UI:
 
 ```bash
-npx fastmcp inspect server.ts
+npx @vitemcp/server inspect server.ts
 ```
 
 ## FAQ
@@ -2623,15 +2628,15 @@ Follow the guide https://modelcontextprotocol.io/quickstart/user and add the fol
 }
 ```
 
-### How to run FastMCP behind a proxy?
+### How to run ViteMCP behind a proxy?
 
-Refer to this [issue](https://github.com/punkpeye/fastmcp/issues/25#issuecomment-3004568732) for an example of using FastMCP with `express` and `http-proxy-middleware`.
+Refer to this [issue](https://github.com/vitemcp/vitemcp/issues/25#issuecomment-3004568732) for an example of using ViteMCP with `express` and `http-proxy-middleware`.
 
 ## Showcase
 
 > [!NOTE]
 >
-> If you've developed a server using FastMCP, please [submit a PR](https://github.com/punkpeye/fastmcp) to showcase it here!
+> If you've developed a server using ViteMCP, please [submit a PR](https://github.com/vitemcp/vitemcp) to showcase it here!
 
 > [!NOTE]
 >
@@ -2644,7 +2649,7 @@ Refer to this [issue](https://github.com/punkpeye/fastmcp/issues/25#issuecomment
 - [drumnation/unsplash-smart-mcp-server](https://github.com/drumnation/unsplash-smart-mcp-server) – enables AI agents to seamlessly search, recommend, and deliver professional stock photos from Unsplash
 - [ssmanji89/halopsa-workflows-mcp](https://github.com/ssmanji89/halopsa-workflows-mcp) - HaloPSA Workflows integration with AI assistants
 - [aiamblichus/mcp-chat-adapter](https://github.com/aiamblichus/mcp-chat-adapter) – provides a clean interface for LLMs to use chat completion
-- [eyaltoledano/claude-task-master](https://github.com/eyaltoledano/claude-task-master) – advanced AI project/task manager powered by FastMCP
+- [eyaltoledano/claude-task-master](https://github.com/eyaltoledano/claude-task-master) – advanced AI project/task manager powered by ViteMCP
 - [cswkim/discogs-mcp-server](https://github.com/cswkim/discogs-mcp-server) - connects to the Discogs API for interacting with your music collection
 - [Panzer-Jack/feuse-mcp](https://github.com/Panzer-Jack/feuse-mcp) - Frontend Useful MCP Tools - Essential utilities for web developers to automate API integration and code generation
 - [sunra-ai/sunra-clients](https://github.com/sunra-ai/sunra-clients/tree/main/mcp-server) - Sunra.ai is a generative media platform built for developers, providing high-performance AI model inference capabilities.
@@ -2652,7 +2657,6 @@ Refer to this [issue](https://github.com/punkpeye/fastmcp/issues/25#issuecomment
 
 ## Acknowledgements
 
-- FastMCP is inspired by the [Python implementation](https://github.com/jlowin/fastmcp) by [Jonathan Lowin](https://github.com/jlowin).
 - Parts of codebase were adopted from [LiteMCP](https://github.com/wong2/litemcp).
 - Parts of codebase were adopted from [Model Context protocolでSSEをやってみる](https://dev.classmethod.jp/articles/mcp-sse/).
 

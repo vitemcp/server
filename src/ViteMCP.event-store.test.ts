@@ -13,9 +13,9 @@ test("passes eventStore through to mcp-proxy", async () => {
     startHTTPServer: startHTTPServerMock,
   }));
 
-  const { FastMCP } = await import("./FastMCP.js");
+  const { ViteMCP } = await import("./ViteMCP.js");
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });

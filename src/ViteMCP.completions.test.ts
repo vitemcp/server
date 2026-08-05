@@ -4,7 +4,7 @@ import { getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "timers/promises";
 import { describe, expect, it } from "vitest";
 
-import { FastMCP, FastMCPSession } from "./FastMCP.js";
+import { ViteMCP, ViteMCPSession } from "./ViteMCP.js";
 
 const runWithTestServer = async ({
   run,
@@ -16,16 +16,16 @@ const runWithTestServer = async ({
     session,
   }: {
     client: Client;
-    server: FastMCP;
-    session: FastMCPSession;
+    server: ViteMCP;
+    session: ViteMCPSession;
   }) => Promise<void>;
-  server?: FastMCP;
+  server?: ViteMCP;
 }) => {
   const port = await getRandomPort();
 
   const server =
     providedServer ??
-    new FastMCP({
+    new ViteMCP({
       name: "Test",
       version: "1.0.0",
     });
@@ -56,7 +56,7 @@ const runWithTestServer = async ({
       new URL(`http://127.0.0.1:${port}/mcp`),
     );
 
-    const session = await new Promise<FastMCPSession>((resolve, reject) => {
+    const session = await new Promise<ViteMCPSession>((resolve, reject) => {
       const timeout = setTimeout(
         () => reject(new Error("Connection timeout")),
         10000,
@@ -77,9 +77,9 @@ const runWithTestServer = async ({
   }
 };
 
-describe("FastMCP Completions", () => {
+describe("ViteMCP Completions", () => {
   it("supports prompt completions", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
     server.addPrompt({
       arguments: [
         {
@@ -123,7 +123,7 @@ describe("FastMCP Completions", () => {
   });
 
   it("supports resource completions", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
     server.addResourceTemplate({
       arguments: [{ name: "id", required: true }],
       complete: async (_name, value) => ({
@@ -157,7 +157,7 @@ describe("FastMCP Completions", () => {
   });
 
   it("prioritizes argument-level completion over prompt-level completion", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
     server.addPrompt({
       arguments: [
         {

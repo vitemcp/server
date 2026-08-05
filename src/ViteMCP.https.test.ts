@@ -3,15 +3,15 @@ import path from "path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 
-import { FastMCP } from "./FastMCP.js";
+import { ViteMCP } from "./ViteMCP.js";
 
 describe("HTTPS support", () => {
-  let server: FastMCP;
+  let server: ViteMCP;
   let port: number;
 
   beforeEach(() => {
     port = Math.floor(Math.random() * 10000) + 50000;
-    server = new FastMCP({
+    server = new ViteMCP({
       name: "HTTPS Test Server",
       version: "1.0.0",
     });

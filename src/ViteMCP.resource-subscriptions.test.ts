@@ -5,7 +5,7 @@ import { getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "timers/promises";
 import { describe, expect, it } from "vitest";
 
-import { FastMCP, FastMCPSession } from "./FastMCP.js";
+import { ViteMCP, ViteMCPSession } from "./ViteMCP.js";
 
 const runWithTestServer = async ({
   run,
@@ -17,16 +17,16 @@ const runWithTestServer = async ({
     session,
   }: {
     client: Client;
-    server: FastMCP;
-    session: FastMCPSession;
+    server: ViteMCP;
+    session: ViteMCPSession;
   }) => Promise<void>;
-  server?: FastMCP;
+  server?: ViteMCP;
 }) => {
   const port = await getRandomPort();
 
   const server =
     providedServer ??
-    new FastMCP({
+    new ViteMCP({
       name: "Test",
       version: "1.0.0",
     });
@@ -54,7 +54,7 @@ const runWithTestServer = async ({
       new URL(`http://127.0.0.1:${port}/mcp`),
     );
 
-    const session = await new Promise<FastMCPSession>((resolve, reject) => {
+    const session = await new Promise<ViteMCPSession>((resolve, reject) => {
       const timeout = setTimeout(
         () => reject(new Error("Connection timeout")),
         10000,
@@ -76,7 +76,7 @@ const runWithTestServer = async ({
 };
 
 const createServerWithResource = () => {
-  const server = new FastMCP({ name: "Test", version: "1.0.0" });
+  const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
   server.addResource({
     load: async () => ({ text: "content" }),
@@ -87,7 +87,7 @@ const createServerWithResource = () => {
   return server;
 };
 
-describe("FastMCP resource subscriptions", () => {
+describe("ViteMCP resource subscriptions", () => {
   it("advertises resource subscribe and listChanged capabilities", async () => {
     await runWithTestServer({
       run: async ({ client }) => {
@@ -101,7 +101,7 @@ describe("FastMCP resource subscriptions", () => {
   });
 
   it("advertises prompt listChanged capability", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addPrompt({
       load: async () => "hello",

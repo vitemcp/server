@@ -7,7 +7,7 @@ import { fetch } from "undici";
 import { expect, test } from "vitest";
 import { z } from "zod";
 
-import { FastMCP, FastMCPSession } from "./FastMCP.js";
+import { ViteMCP, ViteMCPSession } from "./ViteMCP.js";
 
 const runWithTestServer = async ({
   run,
@@ -21,16 +21,16 @@ const runWithTestServer = async ({
   }: {
     client: Client;
     port: number;
-    server: FastMCP;
-    session: FastMCPSession;
+    server: ViteMCP;
+    session: ViteMCPSession;
   }) => Promise<void>;
-  server?: () => Promise<FastMCP>;
+  server?: () => Promise<ViteMCP>;
 }) => {
   const port = await getRandomPort();
 
   const server = createServer
     ? await createServer()
-    : new FastMCP({
+    : new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -57,7 +57,7 @@ const runWithTestServer = async ({
       new URL(`http://localhost:${port}/sse`),
     );
 
-    const session = await new Promise<FastMCPSession>((resolve) => {
+    const session = await new Promise<ViteMCPSession>((resolve) => {
       server.on("connect", async (event) => {
         await event.session.waitForReady();
         resolve(event.session);
@@ -82,7 +82,7 @@ test("custom routes handle GET requests", async () => {
       expect(data).toEqual({ message: "Hello from custom route" });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -114,7 +114,7 @@ test("custom routes handle POST requests with JSON body", async () => {
       expect(data.received).toEqual(payload);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -151,7 +151,7 @@ test("custom routes handle path parameters", async () => {
       expect(data2).toEqual({ postId: "789", userId: "456" });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -189,7 +189,7 @@ test("custom routes handle query parameters", async () => {
       expect(data.query.tags).toEqual(["a", "b"]);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -239,7 +239,7 @@ test("custom routes handle different HTTP methods", async () => {
       expect(optionsResponse.status).toBe(204);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -291,7 +291,7 @@ test("custom routes return proper status codes", async () => {
       expect(response3.status).toBe(204);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -326,7 +326,7 @@ test("custom routes handle HTML responses", async () => {
       expect(html).toContain("<h1>Hello</h1>");
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -351,7 +351,7 @@ test("custom routes handle errors gracefully", async () => {
       expect(data.error).toBe("Something went wrong");
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -390,7 +390,7 @@ test("custom routes work alongside MCP endpoints", async () => {
       expect(healthResponse.status).toBe(200);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -428,7 +428,7 @@ test("custom routes with wildcard patterns", async () => {
       expect(data.path).toBe("/static/css/style.css");
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -457,7 +457,7 @@ test("custom routes respect route order", async () => {
       expect(data2.route).toBe("wildcard");
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -486,7 +486,7 @@ test("custom routes with authentication", { timeout: 10000 }, async () => {
   }
 
   const port = await getRandomPort();
-  const server = new FastMCP<TestAuth>({
+  const server = new ViteMCP<TestAuth>({
     authenticate: async (req) => {
       const authHeader = req.headers.authorization;
       if (authHeader === "Bearer valid-token") {
@@ -554,7 +554,7 @@ test("routes return 404 for non-existent paths", async () => {
       expect(response.status).toBe(404);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -588,7 +588,7 @@ test("custom routes handle text body parsing", async () => {
       expect(data).toEqual({ length: 13, received: "Hello, World!" });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -622,7 +622,7 @@ test("custom routes handle concurrent requests", async () => {
       expect(counts).toEqual([1, 2, 3, 4, 5]);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -651,7 +651,7 @@ test("public routes bypass authentication", async () => {
   }
 
   const port = await getRandomPort();
-  const server = new FastMCP<TestAuth>({
+  const server = new ViteMCP<TestAuth>({
     authenticate: async (req) => {
       const authHeader = req.headers.authorization;
       if (authHeader === "Bearer valid-token") {
@@ -749,7 +749,7 @@ test("public routes bypass authentication", async () => {
 
 test("public routes work with OAuth discovery endpoints", async () => {
   const port = await getRandomPort();
-  const server = new FastMCP({
+  const server = new ViteMCP({
     authenticate: async () => {
       // Always reject auth to verify public routes bypass this
       throw new Error("Auth should be bypassed for public routes");
@@ -812,7 +812,7 @@ test("public routes work with OAuth discovery endpoints", async () => {
 
 test("public routes work with wildcards", async () => {
   const port = await getRandomPort();
-  const server = new FastMCP({
+  const server = new ViteMCP({
     authenticate: async () => {
       throw new Error("Auth should be bypassed");
     },
@@ -858,7 +858,7 @@ test("mixed public and private routes with same path pattern", async () => {
   }
 
   const port = await getRandomPort();
-  const server = new FastMCP<TestAuth>({
+  const server = new ViteMCP<TestAuth>({
     authenticate: async (req) => {
       const authHeader = req.headers.authorization;
       if (authHeader === "Bearer admin-token") {
@@ -948,7 +948,7 @@ test("mixed public and private routes with same path pattern", async () => {
 });
 
 test("route options validation", async () => {
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });

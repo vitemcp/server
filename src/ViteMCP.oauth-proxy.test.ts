@@ -1,15 +1,15 @@
 /**
  * OAuth Proxy Integration Tests
- * Tests the seamless integration of OAuth Proxy with FastMCP HTTP transport
+ * Tests the seamless integration of OAuth Proxy with ViteMCP HTTP transport
  */
 
 import { getRandomPort } from "get-port-please";
 import { describe, expect, it, vi } from "vitest";
 
 import { OAuthProxy } from "./auth/OAuthProxy.js";
-import { FastMCP } from "./FastMCP.js";
+import { ViteMCP } from "./ViteMCP.js";
 
-describe("FastMCP OAuth Proxy Integration", () => {
+describe("ViteMCP OAuth Proxy Integration", () => {
   it("should automatically register OAuth endpoints when proxy is provided", async () => {
     const port = await getRandomPort();
 
@@ -24,8 +24,8 @@ describe("FastMCP OAuth Proxy Integration", () => {
       upstreamTokenEndpoint: "https://example.com/oauth/token",
     });
 
-    // Create FastMCP server with proxy
-    const server = new FastMCP({
+    // Create ViteMCP server with proxy
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         authorizationServer: authProxy.getAuthorizationServerMetadata(),
@@ -90,7 +90,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
       upstreamTokenEndpoint: "https://example.com/oauth/token",
     });
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         authorizationServer: authProxy.getAuthorizationServerMetadata(),
@@ -158,7 +158,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
   it("should not register OAuth endpoints when proxy is not provided", async () => {
     const port = await getRandomPort();
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server Without Proxy",
       oauth: {
         authorizationServer: {
@@ -218,7 +218,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
       upstreamTokenEndpoint: "https://example.com/oauth/token",
     });
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         authorizationServer: authProxy.getAuthorizationServerMetadata(),
@@ -285,7 +285,7 @@ describe("OAuth Token Endpoint Basic Auth", () => {
     // Spy on exchangeAuthorizationCode to capture the parameters
     const spy = vi.spyOn(authProxy, "exchangeAuthorizationCode");
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         authorizationServer: authProxy.getAuthorizationServerMetadata(),
@@ -347,7 +347,7 @@ describe("OAuth Token Endpoint Basic Auth", () => {
     // Spy on exchangeAuthorizationCode to capture the parameters
     const spy = vi.spyOn(authProxy, "exchangeAuthorizationCode");
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         authorizationServer: authProxy.getAuthorizationServerMetadata(),
@@ -405,7 +405,7 @@ describe("OAuth Token Endpoint Basic Auth", () => {
     // Spy on exchangeAuthorizationCode to capture the parameters
     const spy = vi.spyOn(authProxy, "exchangeAuthorizationCode");
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         authorizationServer: authProxy.getAuthorizationServerMetadata(),

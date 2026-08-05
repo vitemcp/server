@@ -14,7 +14,7 @@ import {
 const pbkdf2Async = promisify(pbkdf2);
 
 /**
- * JWT Claims for FastMCP tokens
+ * JWT Claims for ViteMCP tokens
  */
 export interface JWTClaims {
   /** Additional custom claims from upstream tokens */
@@ -98,7 +98,7 @@ export class JWTIssuer {
     secret: string,
     iterations: number = 100000,
   ): Promise<string> {
-    const salt = Buffer.from("fastmcp-oauth-proxy");
+    const salt = Buffer.from("vitemcp-oauth-proxy");
     const key = await pbkdf2Async(secret, salt, iterations, 32, "sha256");
     return key.toString("base64");
   }

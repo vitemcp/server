@@ -1,6 +1,6 @@
 # OAuth Advanced Features
 
-This document covers the advanced features ported from the Python fastmcp implementation, including persistent token storage, JWT token issuance/validation, and the token swap pattern.
+This document covers advanced OAuth features: persistent token storage, JWT token issuance/validation, and the token swap pattern.
 
 ## Table of Contents
 
@@ -16,7 +16,7 @@ The `DiskStore` class provides persistent file-based storage for OAuth tokens an
 ### Basic Usage
 
 ```typescript
-import { OAuthProxy, DiskStore } from "fastmcp/auth";
+import { OAuthProxy, DiskStore } from "@vitemcp/server/auth";
 
 const proxy = new OAuthProxy({
   baseUrl: "https://your-server.com",
@@ -25,7 +25,7 @@ const proxy = new OAuthProxy({
   upstreamClientId: "your-client-id",
   upstreamClientSecret: "your-client-secret",
   tokenStorage: new DiskStore({
-    directory: "/var/lib/fastmcp/oauth",
+    directory: "/var/lib/vitemcp/oauth",
   }),
 });
 ```
@@ -65,9 +65,9 @@ interface DiskStoreOptions {
 For additional security, wrap `DiskStore` with `EncryptedTokenStorage`:
 
 ```typescript
-import { DiskStore, EncryptedTokenStorage } from "fastmcp/auth";
+import { DiskStore, EncryptedTokenStorage } from "@vitemcp/server/auth";
 
-const diskStore = new DiskStore({ directory: "/var/lib/fastmcp/oauth" });
+const diskStore = new DiskStore({ directory: "/var/lib/vitemcp/oauth" });
 const encryptedStorage = new EncryptedTokenStorage(
   diskStore,
   "your-encryption-key",
@@ -88,7 +88,7 @@ The `JWTIssuer` class provides JWT generation and validation using HMAC-SHA256 (
 ### Basic Usage
 
 ```typescript
-import { JWTIssuer } from "fastmcp/auth";
+import { JWTIssuer } from "@vitemcp/server/auth";
 
 const issuer = new JWTIssuer({
   issuer: "https://your-server.com",
@@ -114,7 +114,7 @@ if (result.valid) {
 For production use, derive signing keys from secrets:
 
 ```typescript
-import { JWTIssuer } from "fastmcp/auth";
+import { JWTIssuer } from "@vitemcp/server/auth";
 
 const signingKey = await JWTIssuer.deriveKey(
   process.env.CLIENT_SECRET,
@@ -146,7 +146,7 @@ interface JWTClaims {
 
 ## Token Swap Pattern
 
-The token swap pattern enhances security by issuing short-lived FastMCP JWTs to clients while securely storing the actual upstream provider tokens on the server.
+The token swap pattern enhances security by issuing short-lived ViteMCP JWTs to clients while securely storing the actual upstream provider tokens on the server.
 
 ### How It Works
 
@@ -168,7 +168,7 @@ The token swap pattern enhances security by issuing short-lived FastMCP JWTs to 
 ### Configuration
 
 ```typescript
-import { OAuthProxy, DiskStore } from "fastmcp/auth";
+import { OAuthProxy, DiskStore } from "@vitemcp/server/auth";
 
 const proxy = new OAuthProxy({
   baseUrl: "https://your-server.com",
@@ -183,7 +183,7 @@ const proxy = new OAuthProxy({
 
   // Use persistent storage for production
   tokenStorage: new DiskStore({
-    directory: "/var/lib/fastmcp/oauth",
+    directory: "/var/lib/vitemcp/oauth",
   }),
 });
 ```
@@ -193,13 +193,13 @@ const proxy = new OAuthProxy({
 When you need to use the upstream provider tokens (e.g., to make API calls):
 
 ```typescript
-// Client presents their FastMCP JWT
-const fastmcpToken = request.headers
+// Client presents their ViteMCP JWT
+const vitemcpToken = request.headers
   .get("Authorization")
   ?.replace("Bearer ", "");
 
 // Load the upstream tokens
-const upstreamTokens = await proxy.loadUpstreamTokens(fastmcpToken);
+const upstreamTokens = await proxy.loadUpstreamTokens(vitemcpToken);
 
 if (upstreamTokens) {
   // Use upstream tokens to make API calls
@@ -262,13 +262,13 @@ const proxy = new OAuthProxy({
 
   // Use persistent storage
   tokenStorage: new DiskStore({
-    directory: "/var/lib/fastmcp/oauth",
+    directory: "/var/lib/vitemcp/oauth",
   }),
 });
 
-// Client receives FastMCP JWT instead
+// Client receives ViteMCP JWT instead
 const response = await proxy.exchangeAuthorizationCode(request);
-// response.access_token === FastMCP JWT (not upstream token)
+// response.access_token === ViteMCP JWT (not upstream token)
 
 // When needed, load upstream tokens
 const upstreamTokens = await proxy.loadUpstreamTokens(response.access_token);
@@ -323,13 +323,13 @@ Adjust cleanup intervals based on your load:
 ```typescript
 // High-traffic server (cleanup more frequently)
 const storage = new DiskStore({
-  directory: "/var/lib/fastmcp/oauth",
+  directory: "/var/lib/vitemcp/oauth",
   cleanupIntervalMs: 30000, // 30 seconds
 });
 
 // Low-traffic server (cleanup less frequently)
 const storage = new DiskStore({
-  directory: "/var/lib/fastmcp/oauth",
+  directory: "/var/lib/vitemcp/oauth",
   cleanupIntervalMs: 300000, // 5 minutes
 });
 ```
@@ -357,6 +357,6 @@ const issuer = new JWTIssuer({
 See the [examples](../src/examples) directory for complete implementations:
 
 - [oauth-proxy-server.ts](../src/examples/oauth-proxy-server.ts) - Basic OAuth proxy
-- [oauth-integrated-server.ts](../src/examples/oauth-integrated-server.ts) - Token swap with FastMCP server
+- [oauth-integrated-server.ts](../src/examples/oauth-integrated-server.ts) - Token swap with ViteMCP server
 - [oauth-proxy-github.ts](../src/examples/oauth-proxy-github.ts) - GitHub provider example
 - [oauth-proxy-custom.ts](../src/examples/oauth-proxy-custom.ts) - Custom provider with advanced features

@@ -22,14 +22,14 @@ import { z as z4 } from "zod/v4";
 import {
   audioContent,
   type ContentResult,
-  FastMCP,
-  FastMCPError,
-  FastMCPSession,
   imageContent,
   SessionError,
   type TextContent,
   UserError,
-} from "./FastMCP.js";
+  ViteMCP,
+  ViteMCPError,
+  ViteMCPSession,
+} from "./ViteMCP.js";
 
 const runWithTestServer = async ({
   client: createClient,
@@ -42,16 +42,16 @@ const runWithTestServer = async ({
     server,
   }: {
     client: Client;
-    server: FastMCP;
-    session: FastMCPSession;
+    server: ViteMCP;
+    session: ViteMCPSession;
   }) => Promise<void>;
-  server?: () => Promise<FastMCP>;
+  server?: () => Promise<ViteMCP>;
 }) => {
   const port = await getRandomPort();
 
   const server = createServer
     ? await createServer()
-    : new FastMCP({
+    : new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -80,7 +80,7 @@ const runWithTestServer = async ({
       new URL(`http://localhost:${port}/sse`),
     );
 
-    const session = await new Promise<FastMCPSession>((resolve) => {
+    const session = await new Promise<ViteMCPSession>((resolve) => {
       server.on("connect", async (event) => {
         // Wait for session to be fully ready before resolving
         await event.session.waitForReady();
@@ -121,7 +121,7 @@ test("adds tools", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -166,7 +166,7 @@ test("adds tools with Zod v4 schema", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -193,7 +193,7 @@ test("adds tools with Zod v4 schema", async () => {
 test("health endpoint returns ok", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     health: { message: "healthy", path: "/healthz" },
     name: "Test",
     version: "1.0.0",
@@ -216,7 +216,7 @@ test("health endpoint returns ok", async () => {
 test("health and ready endpoints respect httpStream basePath", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     health: { message: "healthy", path: "/healthz" },
     name: "Test",
     version: "1.0.0",
@@ -247,7 +247,7 @@ test("health and ready endpoints respect httpStream basePath", async () => {
 test("health and ready endpoints respond to HEAD requests", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     health: { message: "healthy", path: "/healthz" },
     name: "Test",
     version: "1.0.0",
@@ -280,7 +280,7 @@ test("health and ready endpoints respond to HEAD requests", async () => {
 test("ready endpoint returns 503 for HEAD when not ready", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });
@@ -320,7 +320,7 @@ test("calls a tool", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -361,7 +361,7 @@ test("returns a list", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -410,7 +410,7 @@ test("returns an image", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -459,7 +459,7 @@ test("returns an audio", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -503,7 +503,7 @@ test("handles UserError errors", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -552,7 +552,7 @@ test("handles UserError errors with extras", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -599,7 +599,7 @@ test("calling an unknown tool throws McpError with MethodNotFound code", async (
       }
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -635,7 +635,7 @@ test("tracks tool progress", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -703,7 +703,7 @@ test(
         ]);
       },
       server: async () => {
-        const server = new FastMCP({
+        const server = new ViteMCP({
           name: "Test",
           version: "1.0.0",
         });
@@ -772,7 +772,7 @@ test("reportProgress forwards the optional message field", async () => {
       ]);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -818,7 +818,7 @@ test("reportProgress is a no-op when the client did not request progress", async
       expect(result.content).toEqual([{ text: "3", type: "text" }]);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -881,7 +881,7 @@ test("handles tool timeout", async () => {
       expect(firstItem.text).toContain("timed out");
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -935,7 +935,7 @@ test("handles UserError with timeoutMs", async () => {
         });
       },
       server: async () => {
-        const server = new FastMCP({
+        const server = new ViteMCP({
           name: "Test",
           version: "1.0.0",
         });
@@ -1000,7 +1000,7 @@ test("sends logging messages to the client", async () => {
       ]);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -1048,7 +1048,7 @@ test("onToolCall callback is invoked with tool name and arguments", async () => 
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         onToolCall,
         version: "1.0.0",
@@ -1085,7 +1085,7 @@ test("adds resources", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -1124,7 +1124,7 @@ test("clients reads a resource", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -1168,7 +1168,7 @@ test("clients reads a resource that returns multiple resources", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -1219,7 +1219,7 @@ test("embedded resources work in tools", async () => {
     },
 
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -1289,7 +1289,7 @@ test("embedded resources work with direct resources", async () => {
     },
 
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -1394,7 +1394,7 @@ test("embedded resources work with URI templates and query parameters", async ()
     },
 
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -1495,7 +1495,7 @@ test("embedded resources work with complex URI template patterns", async () => {
     },
 
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -1598,7 +1598,7 @@ test("adds prompts", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -1626,7 +1626,7 @@ test("adds prompts", async () => {
 test("uses events to notify server of client connect/disconnect", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });
@@ -1665,7 +1665,7 @@ test("uses events to notify server of client connect/disconnect", async () => {
   expect(onConnect).toHaveBeenCalledTimes(1);
   expect(onDisconnect).toHaveBeenCalledTimes(0);
 
-  expect(server.sessions).toEqual([expect.any(FastMCPSession)]);
+  expect(server.sessions).toEqual([expect.any(ViteMCPSession)]);
 
   await client.close();
 
@@ -1680,7 +1680,7 @@ test("uses events to notify server of client connect/disconnect", async () => {
 test("handles multiple clients", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });
@@ -1727,8 +1727,8 @@ test("handles multiple clients", async () => {
   await delay(100);
 
   expect(server.sessions).toEqual([
-    expect.any(FastMCPSession),
-    expect.any(FastMCPSession),
+    expect.any(ViteMCPSession),
+    expect.any(ViteMCPSession),
   ]);
 
   await server.stop();
@@ -1909,7 +1909,7 @@ test("session sends pings to the client", async () => {
       expect(onPing.mock.calls.length).toBeLessThanOrEqual(3);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         ping: {
           enabled: true,
@@ -1943,7 +1943,7 @@ test("completes prompt arguments", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -2001,7 +2001,7 @@ test("adds automatic prompt argument completion when enum is provided", async ()
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -2048,7 +2048,7 @@ test("completes template resource arguments", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -2115,7 +2115,7 @@ test("advertises completions capability to prevent Cursor startup error", async 
       }
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -2139,7 +2139,7 @@ test("lists resource templates", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -2174,7 +2174,7 @@ test(
     const port = await getRandomPort();
 
     // Create server with custom endpoint
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test",
       version: "1.0.0",
     });
@@ -2216,7 +2216,7 @@ test(
       );
 
       // Connect client to server and wait for session to be ready
-      const sessionPromise = new Promise<FastMCPSession>((resolve) => {
+      const sessionPromise = new Promise<ViteMCPSession>((resolve) => {
         server.on("connect", async (event) => {
           await event.session.waitForReady();
           resolve(event.session);
@@ -2278,7 +2278,7 @@ test("clients reads a resource accessed via a resource template", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -2378,7 +2378,7 @@ const elicitationTestClient = async () => {
 };
 
 const elicitationTestServer = async () => {
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });
@@ -2549,7 +2549,7 @@ test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema"
       }
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -2607,7 +2607,7 @@ test("server remains usable after InvalidParams error", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -2632,7 +2632,7 @@ test("server remains usable after InvalidParams error", async () => {
 test("allows new clients to connect after a client disconnects", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });
@@ -2722,7 +2722,7 @@ test("allows new clients to connect after a client disconnects", async () => {
 test("able to close server immediately after starting it", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });
@@ -2742,7 +2742,7 @@ test("able to close server immediately after starting it", async () => {
 test("closing event source does not produce error", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });
@@ -2802,7 +2802,7 @@ test("provides auth to tools", async () => {
     };
   });
 
-  const server = new FastMCP<{ id: number }>({
+  const server = new ViteMCP<{ id: number }>({
     authenticate,
     name: "Test",
     version: "1.0.0",
@@ -2910,7 +2910,7 @@ test("provides auth to resources", async () => {
     };
   });
 
-  const server = new FastMCP<{ role: string; userId: number }>({
+  const server = new ViteMCP<{ role: string; userId: number }>({
     authenticate,
     name: "Test",
     version: "1.0.0",
@@ -2999,7 +2999,7 @@ test("provides auth to resource templates", async () => {
     };
   });
 
-  const server = new FastMCP<{ permissions: string[]; userId: number }>({
+  const server = new ViteMCP<{ permissions: string[]; userId: number }>({
     authenticate,
     name: "Test",
     version: "1.0.0",
@@ -3092,7 +3092,7 @@ test("provides auth to resource templates returning arrays", async () => {
     };
   });
 
-  const server = new FastMCP<{ accessLevel: number; teamId: string }>({
+  const server = new ViteMCP<{ accessLevel: number; teamId: string }>({
     authenticate,
     name: "Test",
     version: "1.0.0",
@@ -3195,7 +3195,7 @@ test("provides auth to prompt argument completion", async () => {
     };
   });
 
-  const server = new FastMCP<{ department: string; userId: number }>({
+  const server = new ViteMCP<{ department: string; userId: number }>({
     authenticate,
     name: "Test",
     version: "1.0.0",
@@ -3295,7 +3295,7 @@ test("provides auth to prompt load function", async () => {
     };
   });
 
-  const server = new FastMCP<{ level: string; username: string }>({
+  const server = new ViteMCP<{ level: string; username: string }>({
     authenticate,
     name: "Test",
     version: "1.0.0",
@@ -3388,7 +3388,7 @@ test("provides auth to resource template argument completion", async () => {
     };
   });
 
-  const server = new FastMCP<{ region: string; teamId: string }>({
+  const server = new ViteMCP<{ region: string; teamId: string }>({
     authenticate,
     name: "Test",
     version: "1.0.0",
@@ -3503,7 +3503,7 @@ test("supports streaming output from tools", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -3560,7 +3560,7 @@ test("supports streaming output from tools", async () => {
 
 test("streamed content is observable by a client that registers a handler", async () => {
   // Mirrors the client-side snippet documented in README "Consuming streamed
-  // content". `notifications/tool/streamContent` is a FastMCP extension, so a
+  // content". `notifications/tool/streamContent` is a ViteMCP extension, so a
   // client only sees it by registering a handler for the method.
   const StreamContentNotificationSchema = z.object({
     method: z.literal("notifications/tool/streamContent"),
@@ -3600,7 +3600,7 @@ test("streamed content is observable by a client that registers a handler", asyn
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -3626,7 +3626,7 @@ test("streamed content is observable by a client that registers a handler", asyn
 test("blocks unauthorized requests", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{ id: number }>({
+  const server = new ViteMCP<{ id: number }>({
     authenticate: async () => {
       throw new Response(null, {
         status: 401,
@@ -3666,7 +3666,7 @@ test("blocks unauthorized requests", async () => {
 test("filters tools based on canAccess property", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{ role: string }>({
+  const server = new ViteMCP<{ role: string }>({
     authenticate: async (request) => {
       const role = request.headers["x-role"] as string;
       return { role: role || "user" };
@@ -3761,7 +3761,7 @@ test("tools without canAccess are accessible to all", async () => {
       ).toEqual({ text: "success", type: "text" });
     },
     server: async () => {
-      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      const server = new ViteMCP({ name: "Test", version: "1.0.0" });
       server.addTool({
         description: "Test tool",
         execute: async () => "success",
@@ -3775,7 +3775,7 @@ test("tools without canAccess are accessible to all", async () => {
 test("canAccess works without authentication", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{ role: string }>({
+  const server = new ViteMCP<{ role: string }>({
     name: "Test",
     version: "1.0.0",
   });
@@ -3825,7 +3825,7 @@ test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
   const port = await getRandomPort();
 
   // Create server directly (don't use helper function)
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });
@@ -3868,7 +3868,7 @@ test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
     );
 
     // Connect client to server and wait for session to be ready
-    const sessionPromise = new Promise<FastMCPSession>((resolve) => {
+    const sessionPromise = new Promise<ViteMCPSession>((resolve) => {
       server.on("connect", async (event) => {
         await event.session.waitForReady();
         resolve(event.session);
@@ -3925,7 +3925,7 @@ test("uses `formatInvalidParamsErrorMessage` callback to build ErrorCode.Invalid
       }
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         utils: {
           formatInvalidParamsErrorMessage: (issues) => {
@@ -3961,7 +3961,7 @@ test("uses `formatInvalidParamsErrorMessage` callback to build ErrorCode.Invalid
 test("stateless mode works correctly", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test server",
     version: "1.0.0",
   });
@@ -4048,7 +4048,7 @@ test("stateless mode does not warn when client capabilities are unavailable", as
     warn: vi.fn(),
   };
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     logger,
     name: "Test server",
     version: "1.0.0",
@@ -4114,7 +4114,7 @@ test("stateless mode does not warn when client capabilities are unavailable", as
 test("stateless mode health check includes mode indicator", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test server",
     version: "1.0.0",
   });
@@ -4146,7 +4146,7 @@ test("stateless mode health check includes mode indicator", async () => {
 test("stateless mode with valid authentication allows access", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{ userId: string }>({
+  const server = new ViteMCP<{ userId: string }>({
     authenticate: async () => {
       // Always authenticate successfully for this test
       return { userId: "123" };
@@ -4213,7 +4213,7 @@ test("stateless mode with valid authentication allows access", async () => {
 test("stateless mode rejects missing Authorization header", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{ userId: string }>({
+  const server = new ViteMCP<{ userId: string }>({
     authenticate: async (req) => {
       const authHeader = req.headers.authorization;
 
@@ -4276,7 +4276,7 @@ test("stateless mode rejects invalid authentication token", async () => {
   const VALID_TOKEN = "valid_jwt_token";
   const INVALID_TOKEN = "invalid_jwt_token";
 
-  const server = new FastMCP<{ userId: string }>({
+  const server = new ViteMCP<{ userId: string }>({
     authenticate: async (req) => {
       const authHeader = req.headers.authorization;
 
@@ -4347,7 +4347,7 @@ test("stateless mode rejects invalid authentication token", async () => {
 test("stateless mode handles authentication function throwing errors", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{ userId: string }>({
+  const server = new ViteMCP<{ userId: string }>({
     authenticate: async () => {
       // Simulate an internal error during token validation
       throw new Error("JWT validation service is down");
@@ -4406,7 +4406,7 @@ test("stateless mode handles concurrent requests with authentication", async () 
   const port = await getRandomPort();
   let requestCount = 0;
 
-  const server = new FastMCP<{ requestId: number }>({
+  const server = new ViteMCP<{ requestId: number }>({
     authenticate: async () => {
       // Track each authentication request
       requestCount++;
@@ -4491,13 +4491,13 @@ test("stateless mode handles concurrent requests with authentication", async () 
   }
 });
 
-// Tests for GitHub Issue: FastMCP authentication fix
+// Tests for GitHub Issue: ViteMCP authentication fix
 // Testing the fix for session creation despite authentication failure
 
 test("authentication failure handling: should throw error when auth.authenticated is false", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{ authenticated: boolean; error?: string }>({
+  const server = new ViteMCP<{ authenticated: boolean; error?: string }>({
     authenticate: async () => {
       // Simulate authentication failure with { authenticated: false }
       return { authenticated: false, error: "Invalid JWT token" };
@@ -4559,7 +4559,7 @@ test("authentication failure handling: should throw error when auth.authenticate
 test("authentication failure handling: should create session when auth.authenticated is true", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{
+  const server = new ViteMCP<{
     authenticated: boolean;
     session?: { userId: string };
   }>({
@@ -4626,7 +4626,7 @@ test("authentication failure handling: should create session when auth.authentic
 test("authentication failure handling: should create session when auth is null/undefined (anonymous)", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     // No authenticate function - anonymous access
     name: "Test server",
     version: "1.0.0",
@@ -4687,7 +4687,7 @@ test("authentication failure handling: should create session when auth is null/u
 test("authentication failure handling: should use default error message when auth.error is not provided", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{ authenticated: boolean }>({
+  const server = new ViteMCP<{ authenticated: boolean }>({
     authenticate: async () => {
       // Return authenticated: false without custom error message
       return { authenticated: false };
@@ -4746,7 +4746,7 @@ test("authentication failure handling: should use default error message when aut
 test("authentication failure handling: should preserve existing behavior for truthy auth results", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{ role: string; userId: string }>({
+  const server = new ViteMCP<{ role: string; userId: string }>({
     authenticate: async () => {
       // Return a truthy object without 'authenticated' field (legacy pattern)
       return { role: "admin", userId: "456" };
@@ -4811,7 +4811,7 @@ test("authentication failure handling: should handle authentication with custom 
   const port = await getRandomPort();
   const CUSTOM_ERROR_MSG = "Token expired at 2025-10-07T12:00:00Z";
 
-  const server = new FastMCP<{ authenticated: boolean; error?: string }>({
+  const server = new ViteMCP<{ authenticated: boolean; error?: string }>({
     authenticate: async () => {
       return { authenticated: false, error: CUSTOM_ERROR_MSG };
     },
@@ -4869,7 +4869,7 @@ test("authentication failure handling: should handle authentication with custom 
 test("authentication failure handling: should not create session for authenticated=false even with session data", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{
+  const server = new ViteMCP<{
     authenticated: boolean;
     error?: string;
     session?: { userId: string };
@@ -4936,18 +4936,18 @@ test("authentication failure handling: should not create session for authenticat
   }
 });
 
-// See https://github.com/punkpeye/fastmcp/issues/180
+// See https://github.com/punkpeye/vitemcp/issues/180
 test("authentication failure handling: returns 401 with WWW-Authenticate even when the error message has no auth-related keywords", async () => {
   const port = await getRandomPort();
   let callCount = 0;
 
   // Regression test for a session-mode (non-stateless) request where
   // `authenticate()` is invoked twice for the same request -- once by the
-  // transport layer and once internally by FastMCP when building the
+  // transport layer and once internally by ViteMCP when building the
   // session. If the second call reports a failure whose message doesn't
   // happen to contain a magic keyword (e.g. "Authentication", "Token",
   // "Unauthorized"), the response must still be 401, not a generic 500.
-  const server = new FastMCP<{ authenticated: boolean; error?: string }>({
+  const server = new ViteMCP<{ authenticated: boolean; error?: string }>({
     authenticate: async () => {
       callCount += 1;
 
@@ -5002,7 +5002,7 @@ test("authentication failure handling: returns 401 with WWW-Authenticate even wh
 test("host configuration works with 0.0.0.0", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test server",
     version: "1.0.0",
   });
@@ -5042,7 +5042,7 @@ test("tools can access client info", async () => {
       expect(text).toMatch(/Client version:\s+[\d.]+/);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -5077,7 +5077,7 @@ test("resources can access client info via load context", async () => {
       expect(text).toMatch(/Client version:\s+[\d.]+/);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -5123,7 +5123,7 @@ test("resource templates can access client info via load context", async () => {
       expect(text).toMatch(/Client version:\s+[\d.]+/);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -5175,7 +5175,7 @@ test("prompts can access client info via load context", async () => {
       expect(text).toMatch(/Client version:\s+[\d.]+/);
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -5209,7 +5209,7 @@ test("prompts can access client info via load context", async () => {
 test("OAuth config is passed to mcp-proxy and returns RFC 9728 compliant WWW-Authenticate header", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     authenticate: async (request) => {
       // Simulate authentication failure for testing
       const authHeader = request.headers.authorization;
@@ -5295,7 +5295,7 @@ test("OAuth config is passed to mcp-proxy and returns RFC 9728 compliant WWW-Aut
 test("OAuth config with only protectedResource returns Bearer WWW-Authenticate", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     authenticate: async () => {
       // Always fail authentication for this test
       return undefined;
@@ -5384,7 +5384,7 @@ test("adds tools with outputSchema", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -5433,7 +5433,7 @@ test("returns structuredContent for tool output that matches outputSchema", asyn
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -5477,7 +5477,7 @@ test("validates explicit structuredContent against outputSchema", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -5521,7 +5521,7 @@ test("passes through result _meta from tool execute", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -5568,7 +5568,7 @@ test("returns an error when structuredContent fails outputSchema validation", as
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -5603,7 +5603,7 @@ test("tools without outputSchema omit it from listing", async () => {
       ).toBeUndefined();
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -5627,7 +5627,7 @@ test("tools without outputSchema omit it from listing", async () => {
 test("httpStream forwards custom cors allowedHeaders to mcp-proxy", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });
@@ -5671,7 +5671,7 @@ test("httpStream forwards custom cors allowedHeaders to mcp-proxy", async () => 
 test("httpStream respects cors: false by not setting CORS headers", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test",
     version: "1.0.0",
   });
@@ -5699,20 +5699,20 @@ test("httpStream respects cors: false by not setting CORS headers", async () => 
   }
 });
 
-test("exports SessionError and FastMCPError from the package root", () => {
+test("exports SessionError and ViteMCPError from the package root", () => {
   // Both classes must be importable so consumers can narrow error types.
   expect(typeof SessionError).toBe("function");
-  expect(typeof FastMCPError).toBe("function");
+  expect(typeof ViteMCPError).toBe("function");
 
   const err = new SessionError("test");
 
   expect(err).toBeInstanceOf(SessionError);
-  expect(err).toBeInstanceOf(FastMCPError);
+  expect(err).toBeInstanceOf(ViteMCPError);
   expect(err).toBeInstanceOf(Error);
   expect(err.message).toBe("test");
   expect(err.name).toBe("SessionError");
 
-  // UserError and UnexpectedStateError also extend FastMCPError,
-  // so the base class can serve as a catch-all for all fastmcp errors.
-  expect(new UserError("u")).toBeInstanceOf(FastMCPError);
+  // UserError and UnexpectedStateError also extend ViteMCPError,
+  // so the base class can serve as a catch-all for all vitemcp errors.
+  expect(new UserError("u")).toBeInstanceOf(ViteMCPError);
 });

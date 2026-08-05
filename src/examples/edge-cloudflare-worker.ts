@@ -1,13 +1,13 @@
 /**
- * EdgeFastMCP - Cloudflare Workers Example
+ * EdgeViteMCP - Cloudflare Workers Example
  *
- * This example demonstrates how to use FastMCP on Cloudflare Workers
+ * This example demonstrates how to use ViteMCP on Cloudflare Workers
  * using the edge-compatible module.
  *
  * To deploy:
  * 1. Copy this file to your Cloudflare Workers project
- * 2. Install fastmcp: npm install fastmcp
- * 3. Change the import to: import { EdgeFastMCP } from "fastmcp/edge";
+ * 2. Install vitemcp: npm install @vitemcp/server
+ * 3. Change the import to: import { EdgeViteMCP } from "@vitemcp/server/edge";
  * 4. Create a wrangler.toml with:
  *    name = "my-mcp-server"
  *    main = "src/index.ts"
@@ -17,11 +17,11 @@
 
 import { z } from "zod";
 
-// NOTE: In your deployed project, use: import { EdgeFastMCP } from "fastmcp/edge";
-import { EdgeFastMCP } from "../edge/index.js";
+// NOTE: In your deployed project, use: import { EdgeViteMCP } from "@vitemcp/server/edge";
+import { EdgeViteMCP } from "../edge/index.js";
 
 // Create the edge-compatible MCP server
-const server = new EdgeFastMCP({
+const server = new EdgeViteMCP({
   description: "An MCP server running on Cloudflare Workers",
   name: "CloudflareWorkerMCP",
   version: "1.0.0",
@@ -63,7 +63,7 @@ server.addTool({
 server.addResource({
   description: "Information about this MCP server",
   load: async () => {
-    return "This is a FastMCP server running on Cloudflare Workers edge runtime.";
+    return "This is a ViteMCP server running on Cloudflare Workers edge runtime.";
   },
   mimeType: "text/plain",
   name: "Server Info",

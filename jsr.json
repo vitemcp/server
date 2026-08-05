@@ -1,7 +1,7 @@
 {
-  "exports": "./src/FastMCP.ts",
-  "include": ["src/FastMCP.ts", "src/bin/fastmcp.ts"],
+  "exports": "./src/ViteMCP.ts",
+  "include": ["src/ViteMCP.ts", "src/bin/vitemcp.ts"],
   "license": "MIT",
-  "name": "@punkpeye/fastmcp",
+  "name": "@vitemcp/server",
   "version": "1.0.0"
 }

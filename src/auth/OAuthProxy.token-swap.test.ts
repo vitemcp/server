@@ -191,7 +191,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
       // Verify storage has entries
       expect(tokenStorage.size()).toBeGreaterThan(0);
 
-      // Verify we can load upstream tokens from FastMCP JWT
+      // Verify we can load upstream tokens from ViteMCP JWT
       const loadedTokens = await proxy.loadUpstreamTokens(
         response.access_token,
       );
@@ -202,7 +202,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
       proxy.destroy();
     });
 
-    it("should validate FastMCP JWT and return upstream tokens", async () => {
+    it("should validate ViteMCP JWT and return upstream tokens", async () => {
       const jwtIssuer = new JWTIssuer({
         audience: "https://proxy.example.com",
         issuer: "https://proxy.example.com",
@@ -270,7 +270,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
       proxy.destroy();
     });
 
-    it("should return null for invalid FastMCP JWT", async () => {
+    it("should return null for invalid ViteMCP JWT", async () => {
       const proxy = new OAuthProxy({
         ...baseConfig,
         enableTokenSwap: true,
@@ -522,12 +522,10 @@ describe("OAuthProxy - Upstream Token Endpoint Authentication", () => {
 });
 
 /**
- * Tests for upstream token storage TTL calculation (issue #2670 in Python fastmcp).
+ * Tests for upstream token storage TTL calculation.
  *
  * The TTL should use max(accessTokenTtl, refreshTokenTtl, 1) to ensure upstream
- * tokens persist as long as the longest-lived FastMCP token that references them.
- *
- * @see https://github.com/jlowin/fastmcp/pull/2796
+ * tokens persist as long as the longest-lived ViteMCP token that references them.
  */
 describe("OAuthProxy - Upstream Token Storage TTL", () => {
   const baseConfig = {
@@ -866,7 +864,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     });
   }
 
-  it("should refresh FastMCP tokens using swap mode flow", async () => {
+  it("should refresh ViteMCP tokens using swap mode flow", async () => {
     const tokenStorage = new MemoryTokenStorage();
     const proxy = new OAuthProxy({
       ...baseConfig,
@@ -877,7 +875,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     const initialTokens = await getInitialTokens(proxy);
     expect(initialTokens.refresh_token).toBeDefined();
 
-    // Refresh using the FastMCP refresh token
+    // Refresh using the ViteMCP refresh token
     const refreshedTokens = await proxy.exchangeRefreshToken({
       client_id: "upstream-client-id",
       grant_type: "refresh_token",

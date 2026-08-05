@@ -510,17 +510,17 @@ export class OAuthProxy {
   }
 
   /**
-   * Load upstream tokens from a FastMCP JWT
+   * Load upstream tokens from a ViteMCP JWT
    */
   async loadUpstreamTokens(
-    fastmcpToken: string,
+    vitemcpToken: string,
   ): Promise<null | UpstreamTokenSet> {
     if (!this.jwtIssuer) {
       return null;
     }
 
-    // Verify FastMCP JWT
-    const result = await this.jwtIssuer.verify(fastmcpToken);
+    // Verify ViteMCP JWT
+    const result = await this.jwtIssuer.verify(vitemcpToken);
     if (!result.valid || !result.claims?.jti) {
       return null;
     }
@@ -653,7 +653,7 @@ export class OAuthProxy {
     // backend error would otherwise take the process down.
     void this.tokenStorage.cleanup().catch((error: unknown) => {
       console.error(
-        "[FastMCP] OAuth proxy token storage cleanup failed:",
+        "[ViteMCP] OAuth proxy token storage cleanup failed:",
         error instanceof Error ? error.message : String(error),
       );
     });
@@ -966,7 +966,7 @@ export class OAuthProxy {
   }
 
   /**
-   * Handle swap mode refresh - verify FastMCP JWT and issue new tokens
+   * Handle swap mode refresh - verify ViteMCP JWT and issue new tokens
    */
   private async handleSwapModeRefresh(
     request: RefreshRequest,
@@ -1075,7 +1075,7 @@ export class OAuthProxy {
 
   /**
    * Issue swapped tokens (JWT pattern)
-   * Issues short-lived FastMCP JWTs and stores upstream tokens securely
+   * Issues short-lived ViteMCP JWTs and stores upstream tokens securely
    */
   private async issueSwappedTokens(
     clientId: string,
@@ -1117,7 +1117,7 @@ export class OAuthProxy {
       upstreamStorageTtl,
     );
 
-    // Issue FastMCP access token with custom claims
+    // Issue ViteMCP access token with custom claims
     const accessToken = this.jwtIssuer.issueAccessToken(
       clientId,
       upstreamTokens.scope,

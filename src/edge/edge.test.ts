@@ -2,14 +2,14 @@ import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { EdgeFastMCP } from "./index.js";
+import { EdgeViteMCP } from "./index.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type JsonResponse = any;
 
-describe("EdgeFastMCP", () => {
+describe("EdgeViteMCP", () => {
   it("should handle initialize request", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -43,7 +43,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should list tools", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -78,7 +78,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should call a tool", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -117,7 +117,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should list resources", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -152,7 +152,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should read a resource", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -185,7 +185,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should list prompts", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -221,7 +221,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should get a prompt", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -254,7 +254,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should handle health check", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -267,7 +267,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should handle ping", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -293,7 +293,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should return error for invalid JSON", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -315,7 +315,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should return 406 for wrong Accept header", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       name: "TestServer",
       version: "1.0.0",
     });
@@ -335,7 +335,7 @@ describe("EdgeFastMCP", () => {
   });
 
   it("should allow custom MCP path", async () => {
-    const server = new EdgeFastMCP({
+    const server = new EdgeViteMCP({
       mcpPath: "/api/mcp",
       name: "TestServer",
       version: "1.0.0",

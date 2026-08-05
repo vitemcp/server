@@ -6,7 +6,7 @@ import { getRandomPort } from "get-port-please";
 import { afterAll, beforeAll, describe, expect, it, test } from "vitest";
 import { z } from "zod";
 
-import { FastMCP, FastMCPSession, ServerState } from "./FastMCP.js";
+import { ServerState, ViteMCP, ViteMCPSession } from "./ViteMCP.js";
 
 // Suppress AbortError from MCP SDK during test cleanup
 const originalUnhandledRejection: Array<
@@ -56,16 +56,16 @@ const runWithTestServer = async ({
     server,
   }: {
     client: Client;
-    server: FastMCP;
-    session: FastMCPSession;
+    server: ViteMCP;
+    session: ViteMCPSession;
   }) => Promise<void>;
-  server?: () => Promise<FastMCP>;
+  server?: () => Promise<ViteMCP>;
 }) => {
   const port = await getRandomPort();
 
   const server = createServer
     ? await createServer()
-    : new FastMCP({
+    : new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -94,7 +94,7 @@ const runWithTestServer = async ({
       new URL(`http://localhost:${port}/sse`),
     );
 
-    const session = await new Promise<FastMCPSession>((resolve) => {
+    const session = await new Promise<ViteMCPSession>((resolve) => {
       server.on("connect", async (event) => {
         // Wait for session to be fully ready before resolving
         await event.session.waitForReady();
@@ -117,9 +117,9 @@ const runWithTestServer = async ({
   return port;
 };
 
-describe("FastMCP Batch Methods", () => {
+describe("ViteMCP Batch Methods", () => {
   const createTestServer = () => {
-    return new FastMCP({
+    return new ViteMCP({
       name: "test-server",
       version: "1.0.0",
     });
@@ -521,7 +521,7 @@ describe("FastMCP Batch Methods", () => {
           );
         },
         server: async () => {
-          const server = new FastMCP({
+          const server = new ViteMCP({
             name: "test-server",
             version: "1.0.0",
           });
@@ -582,7 +582,7 @@ describe("FastMCP Batch Methods", () => {
           });
         },
         server: async () => {
-          const server = new FastMCP({
+          const server = new ViteMCP({
             name: "test-server",
             version: "1.0.0",
           });
@@ -641,7 +641,7 @@ describe("FastMCP Batch Methods", () => {
           expect(runtimeResource).toBeDefined();
         },
         server: async () => {
-          const server = new FastMCP({
+          const server = new ViteMCP({
             name: "test-server",
             version: "1.0.0",
           });
@@ -767,7 +767,7 @@ describe("FastMCP Batch Methods", () => {
           expect(batchResource).toBeDefined();
         },
         server: async () => {
-          const server = new FastMCP({
+          const server = new ViteMCP({
             name: "batch-test-server",
             version: "1.0.0",
           });

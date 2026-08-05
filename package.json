@@ -1,7 +1,7 @@
 {
-  "name": "fastmcp",
+  "name": "@vitemcp/server",
   "version": "1.0.0",
-  "main": "dist/FastMCP.js",
+  "main": "dist/ViteMCP.js",
   "scripts": {
     "build": "tsup",
     "lint": "prettier --check . && eslint . && tsc --noEmit && jsr publish --dry-run",
@@ -9,7 +9,7 @@
     "format": "prettier --write . && eslint --fix ."
   },
   "bin": {
-    "fastmcp": "dist/bin/fastmcp.js"
+    "vitemcp": "dist/bin/vitemcp.js"
   },
   "keywords": [
     "MCP",
@@ -19,13 +19,13 @@
   "author": "Frank Fiegel <frank@glama.ai>",
   "license": "MIT",
   "description": "A TypeScript framework for building MCP servers.",
-  "module": "dist/FastMCP.js",
-  "types": "dist/FastMCP.d.ts",
+  "module": "dist/ViteMCP.js",
+  "types": "dist/ViteMCP.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/FastMCP.js",
-      "types": "./dist/FastMCP.d.ts",
-      "require": "./dist/FastMCP.cjs"
+      "import": "./dist/ViteMCP.js",
+      "types": "./dist/ViteMCP.d.ts",
+      "require": "./dist/ViteMCP.cjs"
     },
     "./auth": {
       "import": "./dist/auth/index.js",
@@ -71,7 +71,7 @@
     }
   },
   "repository": {
-    "url": "https://github.com/punkpeye/fastmcp"
+    "url": "https://github.com/vitemcp/vitemcp"
   },
   "homepage": "https://glama.ai/mcp",
   "release": {
@@ -120,8 +120,8 @@
   },
   "tsup": {
     "entry": [
-      "src/FastMCP.ts",
-      "src/bin/fastmcp.ts",
+      "src/ViteMCP.ts",
+      "src/bin/vitemcp.ts",
       "src/auth/index.ts",
       "src/edge/index.ts",
       "src/examples/custom-routes.ts"

@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 
-import { FastMCPSession } from "./FastMCP.js";
+import { ViteMCPSession } from "./ViteMCP.js";
 
 const mockLogger = {
   debug: vi.fn(),
@@ -10,8 +10,8 @@ const mockLogger = {
   warn: vi.fn(),
 };
 
-test("FastMCPSession internal storage prevents duplicates for prompts", async () => {
-  const session = new FastMCPSession({
+test("ViteMCPSession internal storage prevents duplicates for prompts", async () => {
+  const session = new ViteMCPSession({
     logger: mockLogger,
     name: "Test",
     prompts: [
@@ -50,8 +50,8 @@ test("FastMCPSession internal storage prevents duplicates for prompts", async ()
   expect(promptResult.messages[0].content.text).toBe("v2");
 });
 
-test("FastMCPSession internal storage prevents duplicates for resources", async () => {
-  const session = new FastMCPSession({
+test("ViteMCPSession internal storage prevents duplicates for resources", async () => {
+  const session = new ViteMCPSession({
     logger: mockLogger,
     name: "Test",
     prompts: [],
@@ -92,8 +92,8 @@ test("FastMCPSession internal storage prevents duplicates for resources", async 
   expect(resourceResult.contents[0].text).toBe("v2");
 });
 
-test("FastMCPSession handles list changes correctly by clearing old state", async () => {
-  const session = new FastMCPSession({
+test("ViteMCPSession handles list changes correctly by clearing old state", async () => {
+  const session = new ViteMCPSession({
     logger: mockLogger,
     name: "Test",
     prompts: [{ load: async () => "", name: "old-prompt" }],

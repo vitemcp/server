@@ -1,7 +1,7 @@
 /**
- * Example FastMCP server demonstrating OAuth well-known endpoint support.
+ * Example ViteMCP server demonstrating OAuth well-known endpoint support.
  *
- * This example shows how to configure FastMCP to serve OAuth discovery endpoints
+ * This example shows how to configure ViteMCP to serve OAuth discovery endpoints
  * for both authorization server metadata and protected resource metadata.
  *
  * Run with: node dist/examples/oauth-server.js --transport http-stream --port 4111
@@ -10,9 +10,9 @@
  * - http://localhost:4111/.well-known/oauth-protected-resource
  */
 
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "OAuth Example Server",
   oauth: {
     authorizationServer: {
@@ -76,7 +76,7 @@ server.addTool({
     return {
       content: [
         {
-          text: `This is an OAuth-enabled FastMCP server!
+          text: `This is an OAuth-enabled ViteMCP server!
 
 OAuth Discovery Endpoints (MCP 2025-11-25):
 - Authorization Server: /.well-known/oauth-authorization-server

@@ -65,12 +65,12 @@ export type SSEServer = {
   close: () => Promise<void>;
 };
 
-type FastMCPEvents<T extends FastMCPSessionAuth> = {
-  connect: (event: { session: FastMCPSession<T> }) => void;
-  disconnect: (event: { session: FastMCPSession<T> }) => void;
+type ViteMCPEvents<T extends ViteMCPSessionAuth> = {
+  connect: (event: { session: ViteMCPSession<T> }) => void;
+  disconnect: (event: { session: ViteMCPSession<T> }) => void;
 };
 
-type FastMCPSessionEvents = {
+type ViteMCPSessionEvents = {
   error: (event: { error: Error }) => void;
   ready: () => void;
   rootsChanged: (event: { roots: Root[] }) => void;
@@ -255,7 +255,7 @@ export const audioContent = async (
   }
 };
 
-type Context<T extends FastMCPSessionAuth> = {
+type Context<T extends ViteMCPSessionAuth> = {
   client: {
     version: ReturnType<Server["getClientVersion"]>;
   };
@@ -294,7 +294,7 @@ type Context<T extends FastMCPSessionAuth> = {
    * Streams incremental content while the tool is still executing, by emitting
    * a `notifications/tool/streamContent` notification.
    *
-   * NOTE: this is a FastMCP extension, not part of the MCP specification. As of
+   * NOTE: this is a ViteMCP extension, not part of the MCP specification. As of
    * revision 2025-11-25 the spec has no streaming tool output primitive (see
    * SEP-2998 for the in-progress proposal). A client only receives these
    * notifications if it registers a handler for the method or sets a
@@ -322,7 +322,7 @@ type Literal = boolean | null | number | string | undefined;
  * and `streamContent` are tied to a tool call's progress token / streaming
  * notification and are not available outside of `tool.execute`.
  */
-type LoadContext<T extends FastMCPSessionAuth> = Omit<
+type LoadContext<T extends ViteMCPSessionAuth> = Omit<
   Context<T>,
   "reportProgress" | "streamContent"
 >;
@@ -357,7 +357,7 @@ type TextContent = {
 
 type ToolParameters = StandardSchemaV1;
 
-export abstract class FastMCPError extends Error {
+export abstract class ViteMCPError extends Error {
   public constructor(message?: string) {
     super(message);
     this.name = new.target.name;
@@ -367,7 +367,7 @@ export abstract class FastMCPError extends Error {
 /**
  * An error raised when a session encounters a problem (e.g. connection
  * failures, protocol violations).  Consumers can use this class to
- * distinguish fastmcp session errors from unrelated runtime errors:
+ * distinguish vitemcp session errors from unrelated runtime errors:
  *
  * ```ts
  * server.on("error", ({ error }) => {
@@ -375,9 +375,9 @@ export abstract class FastMCPError extends Error {
  * });
  * ```
  */
-export class SessionError extends FastMCPError {}
+export class SessionError extends ViteMCPError {}
 
-export class UnexpectedStateError extends FastMCPError {
+export class UnexpectedStateError extends ViteMCPError {
   public extras?: Extras;
 
   public constructor(message: string, extras?: Extras) {
@@ -557,11 +557,11 @@ const CompletionZodSchema = z.object({
   values: z.array(z.string()).max(100),
 }) satisfies z.ZodType<Completion>;
 
-type ArgumentValueCompleter<T extends FastMCPSessionAuth = FastMCPSessionAuth> =
+type ArgumentValueCompleter<T extends ViteMCPSessionAuth = ViteMCPSessionAuth> =
   (value: string, auth?: T) => Promise<Completion>;
 
 type InputPrompt<
-  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
   Arguments extends InputPromptArgument<T>[] = InputPromptArgument<T>[],
   Args = PromptArgumentsToObject<Arguments>,
 > = {
@@ -576,7 +576,7 @@ type InputPrompt<
   name: string;
 };
 
-type InputPromptArgument<T extends FastMCPSessionAuth = FastMCPSessionAuth> =
+type InputPromptArgument<T extends ViteMCPSessionAuth = ViteMCPSessionAuth> =
   Readonly<{
     complete?: ArgumentValueCompleter<T>;
     description?: string;
@@ -586,7 +586,7 @@ type InputPromptArgument<T extends FastMCPSessionAuth = FastMCPSessionAuth> =
   }>;
 
 type InputResourceTemplate<
-  T extends FastMCPSessionAuth,
+  T extends ViteMCPSessionAuth,
   Arguments extends InputResourceTemplateArgument<T>[] =
     InputResourceTemplateArgument<T>[],
 > = {
@@ -604,7 +604,7 @@ type InputResourceTemplate<
 };
 
 type InputResourceTemplateArgument<
-  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
 > = Readonly<{
   complete?: ArgumentValueCompleter<T>;
   description?: string;
@@ -623,7 +623,7 @@ type LoggingLevel =
   | "warning";
 
 type Prompt<
-  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
   Arguments extends PromptArgument<T>[] = PromptArgument<T>[],
   Args = PromptArgumentsToObject<Arguments>,
 > = {
@@ -638,7 +638,7 @@ type Prompt<
   name: string;
 };
 
-type PromptArgument<T extends FastMCPSessionAuth = FastMCPSessionAuth> =
+type PromptArgument<T extends ViteMCPSessionAuth = ViteMCPSessionAuth> =
   Readonly<{
     complete?: ArgumentValueCompleter<T>;
     description?: string;
@@ -659,7 +659,7 @@ type PromptArgumentsToObject<T extends { name: string; required?: boolean }[]> =
 
 type PromptResult = Pick<GetPromptResult, "messages"> | string;
 
-type Resource<T extends FastMCPSessionAuth> = {
+type Resource<T extends ViteMCPSessionAuth> = {
   complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
   load: (
@@ -684,7 +684,7 @@ type ResourceResult =
     };
 
 type ResourceTemplate<
-  T extends FastMCPSessionAuth,
+  T extends ViteMCPSessionAuth,
   Arguments extends ResourceTemplateArgument<T>[] =
     ResourceTemplateArgument<T>[],
 > = {
@@ -702,7 +702,7 @@ type ResourceTemplate<
 };
 
 type ResourceTemplateArgument<
-  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
 > = Readonly<{
   complete?: ArgumentValueCompleter<T>;
   description?: string;
@@ -721,7 +721,7 @@ type SamplingResponse = {
   stopReason?: "endTurn" | "maxTokens" | "stopSequence" | string;
 };
 
-type ServerOptions<T extends FastMCPSessionAuth> = {
+type ServerOptions<T extends ViteMCPSessionAuth> = {
   /**
    * Authentication provider for OAuth flows.
    * When provided, automatically configures the `authenticate` function
@@ -732,9 +732,9 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
    *
    * @example
    * ```typescript
-   * import { FastMCP, GitHubProvider } from "fastmcp";
+   * import { ViteMCP, GitHubProvider } from "@vitemcp/server";
    *
-   * const server = new FastMCP({
+   * const server = new ViteMCP({
    *   auth: new GitHubProvider({
    *     baseUrl: "http://localhost:8000",
    *     clientId: process.env.GITHUB_CLIENT_ID!,
@@ -848,7 +848,7 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
      * and provides metadata describing how an OAuth 2.0 protected resource (in this case,
      * an MCP server) expects to be accessed.
      *
-     * When configured, FastMCP will automatically serve this metadata at the
+     * When configured, ViteMCP will automatically serve this metadata at the
      * `/.well-known/oauth-protected-resource` endpoint. The `authorizationServers` and `resource`
      * fields are required. All others are optional and will be omitted from the published
      * metadata if not specified.
@@ -1002,7 +1002,7 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
 
     /**
      * OAuth Proxy instance for automatic OAuth flow handling.
-     * When provided, FastMCP will automatically register OAuth endpoints:
+     * When provided, ViteMCP will automatically register OAuth endpoints:
      * - /oauth/register (DCR)
      * - /oauth/authorize
      * - /oauth/token
@@ -1061,7 +1061,7 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
 };
 
 type Tool<
-  T extends FastMCPSessionAuth,
+  T extends ViteMCPSessionAuth,
   Params extends ToolParameters = ToolParameters,
   OutputParams extends ToolParameters = ToolParameters,
 > = {
@@ -1084,7 +1084,7 @@ type Tool<
      * Advisory metadata signalling that the tool streams incremental content
      * via {@link Context.streamContent}. Forwarded verbatim in `tools/list`.
      *
-     * This has no effect on FastMCP's behavior: it neither enables nor is
+     * This has no effect on ViteMCP's behavior: it neither enables nor is
      * required by `streamContent`. No known client interprets it today.
      */
     streamingHint?: boolean;
@@ -1149,42 +1149,14 @@ type ToolAnnotations = {
   title?: string;
 };
 
-const FastMCPSessionEventEmitterBase: {
-  new (): StrictEventEmitter<EventEmitter, FastMCPSessionEvents>;
+const ViteMCPSessionEventEmitterBase: {
+  new (): StrictEventEmitter<EventEmitter, ViteMCPSessionEvents>;
 } = EventEmitter;
 
 export enum ServerState {
   Error = "error",
   Running = "running",
   Stopped = "stopped",
-}
-
-/**
- * Enhanced request object for custom routes
- */
-export interface FastMCPRequest<
-  T extends FastMCPSessionAuth = FastMCPSessionAuth,
-> {
-  auth?: T;
-  body?: unknown;
-  headers: http.IncomingHttpHeaders;
-  json(): Promise<unknown>;
-  method: string;
-  params: Record<string, string>;
-  query: Record<string, string | string[]>;
-  text(): Promise<string>;
-  url: string;
-}
-
-/**
- * Enhanced response object for custom routes
- */
-export interface FastMCPResponse {
-  end(data?: Buffer | string): void;
-  json(data: unknown): void;
-  send(data: Buffer | string): void;
-  setHeader(name: string, value: number | string | string[]): FastMCPResponse;
-  status(code: number): FastMCPResponse;
 }
 
 /**
@@ -1201,9 +1173,9 @@ export type HTTPMethod =
 /**
  * Route handler function type
  */
-export type RouteHandler<T extends FastMCPSessionAuth = FastMCPSessionAuth> = (
-  req: FastMCPRequest<T>,
-  res: FastMCPResponse,
+export type RouteHandler<T extends ViteMCPSessionAuth = ViteMCPSessionAuth> = (
+  req: ViteMCPRequest<T>,
+  res: ViteMCPResponse,
 ) => Promise<void> | void;
 
 /**
@@ -1219,14 +1191,42 @@ export interface RouteOptions {
   public?: boolean;
 }
 
+/**
+ * Enhanced request object for custom routes
+ */
+export interface ViteMCPRequest<
+  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
+> {
+  auth?: T;
+  body?: unknown;
+  headers: http.IncomingHttpHeaders;
+  json(): Promise<unknown>;
+  method: string;
+  params: Record<string, string>;
+  query: Record<string, string | string[]>;
+  text(): Promise<string>;
+  url: string;
+}
+
+/**
+ * Enhanced response object for custom routes
+ */
+export interface ViteMCPResponse {
+  end(data?: Buffer | string): void;
+  json(data: unknown): void;
+  send(data: Buffer | string): void;
+  setHeader(name: string, value: number | string | string[]): ViteMCPResponse;
+  status(code: number): ViteMCPResponse;
+}
+
 type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
 
-type FastMCPSessionAuth = Record<string, unknown> | undefined;
+type ViteMCPSessionAuth = Record<string, unknown> | undefined;
 
-class FastMCPSessionEventEmitter extends FastMCPSessionEventEmitterBase {}
-export class FastMCPSession<
-  T extends FastMCPSessionAuth = FastMCPSessionAuth,
-> extends FastMCPSessionEventEmitter {
+class ViteMCPSessionEventEmitter extends ViteMCPSessionEventEmitterBase {}
+export class ViteMCPSession<
+  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
+> extends ViteMCPSessionEventEmitter {
   public get clientCapabilities(): ClientCapabilities | null {
     return this.#clientCapabilities ?? null;
   }
@@ -1408,7 +1408,7 @@ export class FastMCPSession<
     try {
       await this.#server.close();
     } catch (error) {
-      this.#logger.error("[FastMCP error]", "could not close server", error);
+      this.#logger.error("[ViteMCP error]", "could not close server", error);
     }
   }
 
@@ -1454,7 +1454,7 @@ export class FastMCPSession<
 
         if (!this.#clientCapabilities) {
           this.#logger.warn(
-            `[FastMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`,
+            `[ViteMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`,
           );
         }
       }
@@ -1470,11 +1470,11 @@ export class FastMCPSession<
         } catch (e) {
           if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
             this.#logger.debug(
-              "[FastMCP debug] listRoots method not supported by client",
+              "[ViteMCP debug] listRoots method not supported by client",
             );
           } else {
             this.#logger.error(
-              `[FastMCP error] received error listing roots.\n\n${
+              `[ViteMCP error] received error listing roots.\n\n${
                 e instanceof Error ? e.stack : JSON.stringify(e)
               }`,
             );
@@ -1492,21 +1492,21 @@ export class FastMCPSession<
             } catch {
               // The reason we are not emitting an error here is because some clients
               // seem to not respond to the ping request, and we don't want to crash the server,
-              // e.g., https://github.com/punkpeye/fastmcp/issues/38.
+              // e.g., https://github.com/punkpeye/vitemcp/issues/38.
               const logLevel = pingConfig.logLevel;
 
               if (logLevel === "debug") {
-                this.#logger.debug("[FastMCP debug] server ping failed");
+                this.#logger.debug("[ViteMCP debug] server ping failed");
               } else if (logLevel === "warning") {
                 this.#logger.warn(
-                  "[FastMCP warning] server is not responding to ping",
+                  "[ViteMCP warning] server is not responding to ping",
                 );
               } else if (logLevel === "error") {
                 this.#logger.error(
-                  "[FastMCP error] server is not responding to ping",
+                  "[ViteMCP error] server is not responding to ping",
                 );
               } else {
-                this.#logger.info("[FastMCP info] server ping failed");
+                this.#logger.info("[ViteMCP info] server ping failed");
               }
             }
           }, pingConfig.intervalMs);
@@ -1583,7 +1583,7 @@ export class FastMCPSession<
       await this.#server.sendResourceUpdated({ uri });
     } catch (error) {
       this.#logger.error(
-        `[FastMCP error] failed to send resources/updated notification for '${uri}'.\n\n${
+        `[ViteMCP error] failed to send resources/updated notification for '${uri}'.\n\n${
           error instanceof Error ? error.stack : JSON.stringify(error)
         }`,
       );
@@ -1605,7 +1605,7 @@ export class FastMCPSession<
       });
     } catch (error) {
       this.#logger.error(
-        `[FastMCP error] failed to send ${method} notification.\n\n${
+        `[ViteMCP error] failed to send ${method} notification.\n\n${
           error instanceof Error ? error.stack : JSON.stringify(error)
         }`,
       );
@@ -1939,7 +1939,7 @@ export class FastMCPSession<
   }
   private setupErrorHandling() {
     this.#server.onerror = (error) => {
-      this.#logger.error("[FastMCP error]", error);
+      this.#logger.error("[ViteMCP error]", error);
     };
   }
   private setupLoggingHandlers() {
@@ -2195,7 +2195,7 @@ export class FastMCPSession<
   private setupRootsHandlers() {
     if (this.#rootsConfig?.enabled === false) {
       this.#logger.debug(
-        "[FastMCP debug] roots capability explicitly disabled via config",
+        "[ViteMCP debug] roots capability explicitly disabled via config",
       );
       return;
     }
@@ -2220,11 +2220,11 @@ export class FastMCPSession<
                 error.code === ErrorCode.MethodNotFound
               ) {
                 this.#logger.debug(
-                  "[FastMCP debug] listRoots method not supported by client",
+                  "[ViteMCP debug] listRoots method not supported by client",
                 );
               } else {
                 this.#logger.error(
-                  `[FastMCP error] received error listing roots.\n\n${
+                  `[ViteMCP error] received error listing roots.\n\n${
                     error instanceof Error ? error.stack : JSON.stringify(error)
                   }`,
                 );
@@ -2234,7 +2234,7 @@ export class FastMCPSession<
       );
     } else {
       this.#logger.debug(
-        "[FastMCP debug] roots capability not available, not setting up notification handler",
+        "[ViteMCP debug] roots capability not available, not setting up notification handler",
       );
     }
   }
@@ -2335,7 +2335,7 @@ export class FastMCPSession<
             }
           } catch (progressError) {
             this.#logger.warn(
-              `[FastMCP warning] Failed to report progress for tool '${request.params.name}':`,
+              `[ViteMCP warning] Failed to report progress for tool '${request.params.name}':`,
               progressError instanceof Error
                 ? progressError.message
                 : String(progressError),
@@ -2365,7 +2365,7 @@ export class FastMCPSession<
             }
           } catch (streamError) {
             this.#logger.warn(
-              `[FastMCP warning] Failed to stream content for tool '${request.params.name}':`,
+              `[ViteMCP warning] Failed to stream content for tool '${request.params.name}':`,
               streamError instanceof Error
                 ? streamError.message
                 : String(streamError),
@@ -2432,7 +2432,7 @@ export class FastMCPSession<
           | undefined;
 
         // Without this test, we are running into situations where the last progress update is not reported.
-        // See the 'reports multiple progress updates without buffering' test in FastMCP.test.ts before refactoring.
+        // See the 'reports multiple progress updates without buffering' test in ViteMCP.test.ts before refactoring.
         await delay(1);
 
         if (maybeStringResult === undefined || maybeStringResult === null) {
@@ -2590,20 +2590,20 @@ function stripBasePath(
   return null;
 }
 
-const FastMCPEventEmitterBase: {
-  new (): StrictEventEmitter<EventEmitter, FastMCPEvents<FastMCPSessionAuth>>;
+const ViteMCPEventEmitterBase: {
+  new (): StrictEventEmitter<EventEmitter, ViteMCPEvents<ViteMCPSessionAuth>>;
 } = EventEmitter;
 
-class FastMCPEventEmitter extends FastMCPEventEmitterBase {}
+class ViteMCPEventEmitter extends ViteMCPEventEmitterBase {}
 
-export class FastMCP<
-  T extends FastMCPSessionAuth = FastMCPSessionAuth,
-> extends FastMCPEventEmitter {
+export class ViteMCP<
+  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
+> extends ViteMCPEventEmitter {
   public get serverState(): ServerState {
     return this.#serverState;
   }
 
-  public get sessions(): FastMCPSession<T>[] {
+  public get sessions(): ViteMCPSession<T>[] {
     return this.#sessions;
   }
   #authenticate: Authenticate<T> | undefined;
@@ -2615,7 +2615,7 @@ export class FastMCP<
   #resources: Resource<T>[] = [];
   #resourcesTemplates: InputResourceTemplate<T>[] = [];
   #serverState: ServerState = ServerState.Stopped;
-  #sessions: FastMCPSession<T>[] = [];
+  #sessions: ViteMCPSession<T>[] = [];
 
   #tools: Tool<T>[] = [];
 
@@ -2763,7 +2763,7 @@ export class FastMCP<
 
   /**
    * Connects the server to a transport you constructed yourself, instead of
-   * letting {@link FastMCP.start} create one.
+   * letting {@link ViteMCP.start} create one.
    *
    * The session is built from the tools, resources and prompts registered on
    * this instance — exactly as `start()` does — so tests exercise the same
@@ -2791,7 +2791,7 @@ export class FastMCP<
   public async connect(
     transport: Transport,
     auth?: T,
-  ): Promise<FastMCPSession<T>> {
+  ): Promise<ViteMCPSession<T>> {
     const session = this.#createSession(auth);
 
     await session.connect(transport);
@@ -2813,7 +2813,7 @@ export class FastMCP<
     };
 
     this.emit("connect", {
-      session: session as FastMCPSession<FastMCPSessionAuth>,
+      session: session as ViteMCPSession<ViteMCPSessionAuth>,
     });
 
     this.#serverState = ServerState.Running;
@@ -3050,14 +3050,14 @@ export class FastMCP<
           );
         } catch (error) {
           this.#logger.error(
-            "[FastMCP error] Authentication failed for stdio transport:",
+            "[ViteMCP error] Authentication failed for stdio transport:",
             error instanceof Error ? error.message : String(error),
           );
           // Continue without auth if authentication fails
         }
       }
 
-      const session = new FastMCPSession<T>({
+      const session = new ViteMCPSession<T>({
         auth,
         instructions: this.#options.instructions,
         logger: this.#logger,
@@ -3120,7 +3120,7 @@ export class FastMCP<
       }
 
       this.emit("connect", {
-        session: session as FastMCPSession<FastMCPSessionAuth>,
+        session: session as ViteMCPSession<ViteMCPSessionAuth>,
       });
       this.#serverState = ServerState.Running;
     } else if (config.transportType === "httpStream") {
@@ -3135,10 +3135,10 @@ export class FastMCP<
       if (httpConfig.stateless) {
         // Stateless mode - create new server instance for each request
         this.#logger.info(
-          `[FastMCP info] Starting server in stateless mode on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
+          `[ViteMCP info] Starting server in stateless mode on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
         );
 
-        this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
+        this.#httpStreamServer = await startHTTPServer<ViteMCPSession<T>>({
           ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
           cors: httpConfig.cors,
           createServer: async (request) => {
@@ -3184,7 +3184,7 @@ export class FastMCP<
           onConnect: async () => {
             // No persistent session tracking in stateless mode
             this.#logger.debug(
-              `[FastMCP debug] Stateless HTTP Stream request handled`,
+              `[ViteMCP debug] Stateless HTTP Stream request handled`,
             );
           },
           onUnhandledRequest: async (req, res) => {
@@ -3206,7 +3206,7 @@ export class FastMCP<
         });
       } else {
         // Regular mode with session management
-        this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
+        this.#httpStreamServer = await startHTTPServer<ViteMCPSession<T>>({
           ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
           cors: httpConfig.cors,
           createServer: async (request) => {
@@ -3242,16 +3242,16 @@ export class FastMCP<
             if (sessionIndex !== -1) this.#sessions.splice(sessionIndex, 1);
 
             this.emit("disconnect", {
-              session: session as FastMCPSession<FastMCPSessionAuth>,
+              session: session as ViteMCPSession<ViteMCPSessionAuth>,
             });
           },
           onConnect: async (session) => {
             this.#sessions.push(session);
 
-            this.#logger.info(`[FastMCP info] HTTP Stream session established`);
+            this.#logger.info(`[ViteMCP info] HTTP Stream session established`);
 
             this.emit("connect", {
-              session: session as FastMCPSession<FastMCPSessionAuth>,
+              session: session as ViteMCPSession<ViteMCPSessionAuth>,
             });
           },
 
@@ -3274,7 +3274,7 @@ export class FastMCP<
         });
 
         this.#logger.info(
-          `[FastMCP info] server is running on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
+          `[ViteMCP info] server is running on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
         );
       }
       this.#serverState = ServerState.Running;
@@ -3294,14 +3294,14 @@ export class FastMCP<
   }
 
   /**
-   * Creates a new FastMCPSession instance with the current configuration.
+   * Creates a new ViteMCPSession instance with the current configuration.
    * Used both for regular sessions and stateless requests.
    */
   #createSession(
     auth?: T,
     sessionId?: string,
     stateless = false,
-  ): FastMCPSession<T> {
+  ): ViteMCPSession<T> {
     // Check if authentication failed
     if (
       auth &&
@@ -3322,7 +3322,7 @@ export class FastMCP<
           tool.canAccess ? tool.canAccess(auth) : true,
         )
       : this.#tools;
-    return new FastMCPSession<T>({
+    return new ViteMCPSession<T>({
       auth,
       instructions: this.#options.instructions,
       logger: this.#logger,
@@ -3348,9 +3348,9 @@ export class FastMCP<
    * Throwing a `Response` (rather than a plain `Error`) guarantees that the
    * transport (e.g. mcp-proxy) surfaces the correct status code directly,
    * instead of relying on heuristics that infer the status code from the
-   * error message's text (see https://github.com/punkpeye/fastmcp/issues/180).
+   * error message's text (see https://github.com/punkpeye/vitemcp/issues/180).
    *
-   * The response body matches the JSON-RPC error envelope FastMCP otherwise
+   * The response body matches the JSON-RPC error envelope ViteMCP otherwise
    * produces, and a `WWW-Authenticate` header is included per RFC 7235 (and
    * RFC 9728 when protected-resource metadata is configured), so HTTP-aware
    * clients can distinguish "unauthenticated" from a malformed request.
@@ -3444,7 +3444,7 @@ export class FastMCP<
       }
     } catch (error) {
       // If Hono throws, log and continue to other endpoints
-      this.#logger.debug("[FastMCP debug] Hono route not matched", error);
+      this.#logger.debug("[ViteMCP debug] Hono route not matched", error);
     }
 
     const healthConfig = this.#options.health ?? {};
@@ -3524,7 +3524,7 @@ export class FastMCP<
           return;
         }
       } catch (error) {
-        this.#logger.error("[FastMCP error] health endpoint error", error);
+        this.#logger.error("[ViteMCP error] health endpoint error", error);
       }
     }
 
@@ -3915,7 +3915,7 @@ export class FastMCP<
           return;
         }
       } catch (error) {
-        this.#logger.error("[FastMCP error] OAuth Proxy endpoint error", error);
+        this.#logger.error("[ViteMCP error] OAuth Proxy endpoint error", error);
         res.writeHead(500).end();
         return;
       }
@@ -4013,12 +4013,12 @@ export class FastMCP<
     const statelessArg = getArg("stateless");
     const hostArg = getArg("host");
 
-    const envTransport = process.env.FASTMCP_TRANSPORT;
-    const envPort = process.env.FASTMCP_PORT;
-    const envEndpoint = process.env.FASTMCP_ENDPOINT;
-    const envBasePath = process.env.FASTMCP_BASE_PATH;
-    const envStateless = process.env.FASTMCP_STATELESS;
-    const envHost = process.env.FASTMCP_HOST;
+    const envTransport = process.env.VITEMCP_TRANSPORT;
+    const envPort = process.env.VITEMCP_PORT;
+    const envEndpoint = process.env.VITEMCP_ENDPOINT;
+    const envBasePath = process.env.VITEMCP_BASE_PATH;
+    const envStateless = process.env.VITEMCP_STATELESS;
+    const envHost = process.env.VITEMCP_HOST;
     // Overrides > CLI > env > defaults
     const transportType =
       overrides?.transportType ||
@@ -4079,13 +4079,13 @@ export class FastMCP<
       session.promptsListChanged(prompts);
     }
   }
-  #removeSession(session: FastMCPSession<T>): void {
+  #removeSession(session: ViteMCPSession<T>): void {
     const sessionIndex = this.#sessions.indexOf(session);
 
     if (sessionIndex !== -1) {
       this.#sessions.splice(sessionIndex, 1);
       this.emit("disconnect", {
-        session: session as FastMCPSession<FastMCPSessionAuth>,
+        session: session as ViteMCPSession<ViteMCPSessionAuth>,
       });
     }
   }
@@ -4116,7 +4116,7 @@ export class FastMCP<
 }
 
 // Re-export commonly used auth utilities for convenience
-// Users can also import from "fastmcp/auth" for the full auth module
+// Users can also import from "@vitemcp/server/auth" for the full auth module
 export {
   // Auth providers
   AuthProvider,
@@ -4157,9 +4157,6 @@ export type {
   ContentResult,
   Context,
   CorsOptions,
-  FastMCPEvents,
-  FastMCPSessionAuth,
-  FastMCPSessionEvents,
   ImageContent,
   InputPrompt,
   InputPromptArgument,
@@ -4179,4 +4176,7 @@ export type {
   TextContent,
   Tool,
   ToolParameters,
+  ViteMCPEvents,
+  ViteMCPSessionAuth,
+  ViteMCPSessionEvents,
 };

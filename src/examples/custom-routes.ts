@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Example FastMCP server demonstrating custom HTTP routes using Hono's native API.
+ * Example ViteMCP server demonstrating custom HTTP routes using Hono's native API.
  *
  * This example shows how to:
  * - Use getApp() to access Hono's native API
@@ -14,8 +14,8 @@
  * - Integrate custom routes with MCP tools
  *
  * Run with:
- *   npx fastmcp dev src/examples/custom-routes.ts
- *   npx fastmcp inspect src/examples/custom-routes.ts
+ *   npx vitemcp dev src/examples/custom-routes.ts
+ *   npx vitemcp inspect src/examples/custom-routes.ts
  *
  * Or directly:
  *   node dist/examples/custom-routes.js --transport=http-stream --port=8080
@@ -25,7 +25,7 @@ import type { Context } from "hono";
 
 import { z } from "zod";
 
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
 // Example in-memory data store
 interface User {
@@ -48,8 +48,8 @@ interface UserAuth {
   userId: string;
 }
 
-// Create the FastMCP server with authentication
-const server = new FastMCP<UserAuth>({
+// Create the ViteMCP server with authentication
+const server = new ViteMCP<UserAuth>({
   // Simple authentication - in production, use proper tokens/JWTs
   authenticate: async (req) => {
     const authHeader = req.headers.authorization;
@@ -445,8 +445,8 @@ server.addResource({
 });
 
 // Start the server
-const PORT = process.env.FASTMCP_PORT
-  ? parseInt(process.env.FASTMCP_PORT)
+const PORT = process.env.VITEMCP_PORT
+  ? parseInt(process.env.VITEMCP_PORT)
   : 8080;
 
 server
@@ -500,7 +500,7 @@ MCP Tools available:
 - get_stats
 
 Test with MCP Inspector:
-npx fastmcp inspect src/examples/custom-routes.ts
+npx vitemcp inspect src/examples/custom-routes.ts
   `);
   })
   .catch((error) => {

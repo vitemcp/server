@@ -3,13 +3,13 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { type ContentResult, FastMCP } from "./FastMCP.js";
+import { type ContentResult, ViteMCP } from "./ViteMCP.js";
 
 /**
  * Connects a client to a server over a linked in-memory transport pair, the
  * pattern documented in the README's "Testing your server" section.
  */
-const connectInMemory = async (server: FastMCP) => {
+const connectInMemory = async (server: ViteMCP) => {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
 
@@ -23,9 +23,9 @@ const connectInMemory = async (server: FastMCP) => {
   return { client, session };
 };
 
-describe("FastMCP in-memory transport", () => {
-  it("serves tools registered on the FastMCP instance", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+describe("ViteMCP in-memory transport", () => {
+  it("serves tools registered on the ViteMCP instance", async () => {
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addTool({
       description: "Add two numbers",
@@ -51,7 +51,7 @@ describe("FastMCP in-memory transport", () => {
   });
 
   it("serves resources and prompts", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addResource({
       async load() {
@@ -96,7 +96,7 @@ describe("FastMCP in-memory transport", () => {
   });
 
   it("tracks the session and emits connect", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     const onConnect = vi.fn();
     server.on("connect", onConnect);
@@ -110,7 +110,7 @@ describe("FastMCP in-memory transport", () => {
   });
 
   it("removes the session and emits disconnect when the transport closes", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     const onDisconnect = vi.fn();
     server.on("disconnect", onDisconnect);
@@ -129,7 +129,7 @@ describe("FastMCP in-memory transport", () => {
   it("passes auth through to the tool context and applies canAccess", async () => {
     type Auth = { id: number; role: string };
 
-    const server = new FastMCP<Auth>({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP<Auth>({ name: "Test", version: "1.0.0" });
 
     server.addTool({
       description: "Return the caller id",
@@ -171,7 +171,7 @@ describe("FastMCP in-memory transport", () => {
   });
 
   it("supports two independent sessions on one server", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addTool({
       description: "Echo",

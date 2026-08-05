@@ -1,5 +1,5 @@
 /**
- * Example FastMCP server with OAuth
+ * Example ViteMCP server with OAuth
  *
  * This example demonstrates how to use the simplified auth configuration
  * to enable Dynamic Client Registration for providers that don't support it natively.
@@ -8,10 +8,10 @@
  */
 
 import { getAuthSession, GoogleProvider, requireAuth } from "../auth/index.js";
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
-// Create FastMCP server with Google OAuth
-const server = new FastMCP({
+// Create ViteMCP server with Google OAuth
+const server = new ViteMCP({
   auth: new GoogleProvider({
     baseUrl: "http://localhost:4200",
     clientId: process.env.GOOGLE_CLIENT_ID || "your-google-client-id",

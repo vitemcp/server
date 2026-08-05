@@ -1,17 +1,17 @@
 /**
- * Example demonstrating session context support in FastMCP stdio transport
+ * Example demonstrating session context support in ViteMCP stdio transport
  *
  * This example demonstrates the fix for issue #144:
  * Session context is now properly passed to tool execution handlers
  * when using stdio transport with an authenticate function.
  *
  * To run this example:
- * npx fastmcp dev src/examples/session-context.ts
+ * npx vitemcp dev src/examples/session-context.ts
  */
 
 import { z } from "zod";
 
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
 interface UserSession {
   [key: string]: unknown;
@@ -21,7 +21,7 @@ interface UserSession {
   username: string;
 }
 
-const server = new FastMCP<UserSession>({
+const server = new ViteMCP<UserSession>({
   authenticate: async (request) => {
     if (!request) {
       console.log(
@@ -253,7 +253,7 @@ Environment variables for authentication:
 - USER_ROLE=${process.env.USER_ROLE || "(not set - will use 'guest')"}
 
 To test with different user roles:
-USER_ID=admin001 USERNAME="John Admin" USER_ROLE=admin npx fastmcp dev src/examples/session-context.ts
+USER_ID=admin001 USERNAME="John Admin" USER_ROLE=admin npx vitemcp dev src/examples/session-context.ts
 
 Available tools:
 - whoami: Get current user info

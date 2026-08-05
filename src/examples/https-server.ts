@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
 /**
- * Example demonstrating HTTPS support in FastMCP
+ * Example demonstrating HTTPS support in ViteMCP
  *
  * This example uses pre-generated self-signed certificates from src/fixtures/certs/
  *
@@ -44,7 +44,7 @@ import { FastMCP } from "../FastMCP.js";
  * ```
  */
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "HTTPS Example Server",
   version: "1.0.0",
 });

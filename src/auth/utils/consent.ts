@@ -338,7 +338,7 @@ export class ConsentManager {
    * Generate default signing key if none provided
    */
   private generateDefaultKey(): string {
-    return `fastmcp-consent-${Date.now()}-${Math.random()}`;
+    return `vitemcp-consent-${Date.now()}-${Math.random()}`;
   }
 
   /**

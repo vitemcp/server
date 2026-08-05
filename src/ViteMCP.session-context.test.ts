@@ -1,19 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { FastMCP } from "./FastMCP.js";
+import { ViteMCP } from "./ViteMCP.js";
 
 interface TestAuth {
-  [key: string]: unknown; // Required for FastMCPSessionAuth compatibility
+  [key: string]: unknown; // Required for ViteMCPSessionAuth compatibility
   role: "admin" | "user";
   userId: string;
 }
 
-describe("FastMCP Session Context", () => {
+describe("ViteMCP Session Context", () => {
   describe("stdio transport", () => {
     it("should pass session context to tool execution when authenticate is provided", async () => {
       const mockAuth: TestAuth = { role: "admin", userId: "test-user" };
-      const server = new FastMCP<TestAuth>({
+      const server = new ViteMCP<TestAuth>({
         authenticate: async (request) => {
           if (!request) return mockAuth;
 
@@ -47,7 +47,7 @@ describe("FastMCP Session Context", () => {
         log: vi.fn(),
         warn: vi.fn(),
       };
-      const server = new FastMCP<TestAuth>({
+      const server = new ViteMCP<TestAuth>({
         authenticate: async () => {
           throw new Error("Auth failed");
         },
@@ -67,13 +67,13 @@ describe("FastMCP Session Context", () => {
       await server.start({ transportType: "stdio" });
 
       expect(mockLogger.error).toHaveBeenCalledWith(
-        "[FastMCP error] Authentication failed for stdio transport:",
+        "[ViteMCP error] Authentication failed for stdio transport:",
         "Auth failed",
       );
     });
 
     it("should work without authenticate function", async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "test-server",
         version: "1.0.0",
       });
@@ -99,7 +99,7 @@ describe("FastMCP Session Context", () => {
       process.env.TEST_USER_ID = "env-user-123";
 
       try {
-        const server = new FastMCP<TestAuth>({
+        const server = new ViteMCP<TestAuth>({
           authenticate: async (request) => {
             if (!request) {
               return {

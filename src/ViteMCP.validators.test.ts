@@ -6,7 +6,7 @@ import { setTimeout as delay } from "timers/promises";
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
 
-import { FastMCP, FastMCPSession } from "./FastMCP.js";
+import { ViteMCP, ViteMCPSession } from "./ViteMCP.js";
 
 // The README documents Zod, ArkType and Valibot as supported parameter
 // validators (all wired through the Standard Schema spec), but only Zod is
@@ -17,7 +17,7 @@ import { FastMCP, FastMCPSession } from "./FastMCP.js";
 
 describe("tool schema registration", () => {
   it("rejects parameters without Standard Schema support before starting a server", () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     expect(() =>
       server.addTool({
@@ -31,7 +31,7 @@ describe("tool schema registration", () => {
   });
 
   it("rejects output schemas without Standard Schema support before starting a server", () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     expect(() =>
       server.addTool({
@@ -55,16 +55,16 @@ const runWithTestServer = async ({
     session,
   }: {
     client: Client;
-    server: FastMCP;
-    session: FastMCPSession;
+    server: ViteMCP;
+    session: ViteMCPSession;
   }) => Promise<void>;
-  server?: FastMCP;
+  server?: ViteMCP;
 }) => {
   const port = await getRandomPort();
 
   const server =
     providedServer ??
-    new FastMCP({
+    new ViteMCP({
       name: "Test",
       version: "1.0.0",
     });
@@ -95,7 +95,7 @@ const runWithTestServer = async ({
       new URL(`http://127.0.0.1:${port}/mcp`),
     );
 
-    const session = await new Promise<FastMCPSession>((resolve, reject) => {
+    const session = await new Promise<ViteMCPSession>((resolve, reject) => {
       const timeout = setTimeout(
         () => reject(new Error("Connection timeout")),
         10000,
@@ -118,7 +118,7 @@ const runWithTestServer = async ({
 
 describe("tool parameters via ArkType", () => {
   it("exposes the parameters as JSON Schema in tools/list", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addTool({
       description: "Add two numbers",
@@ -149,7 +149,7 @@ describe("tool parameters via ArkType", () => {
   });
 
   it("validates and forwards valid arguments to execute", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addTool({
       description: "Add two numbers",
@@ -175,7 +175,7 @@ describe("tool parameters via ArkType", () => {
 
   it("rejects invalid arguments before execute runs", async () => {
     let executed = false;
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addTool({
       description: "Add two numbers",
@@ -204,7 +204,7 @@ describe("tool parameters via ArkType", () => {
 
 describe("tool parameters via Valibot", () => {
   it("exposes the parameters as JSON Schema in tools/list", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addTool({
       description: "Add two numbers",
@@ -235,7 +235,7 @@ describe("tool parameters via Valibot", () => {
   });
 
   it("validates and forwards valid arguments to execute", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addTool({
       description: "Add two numbers",
@@ -261,7 +261,7 @@ describe("tool parameters via Valibot", () => {
 
   it("rejects invalid arguments before execute runs", async () => {
     let executed = false;
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addTool({
       description: "Add two numbers",
@@ -288,7 +288,7 @@ describe("tool parameters via Valibot", () => {
   });
 
   it("handles optional parameters", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addTool({
       description: "Greet someone",

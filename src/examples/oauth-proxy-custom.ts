@@ -1,5 +1,5 @@
 /**
- * Example FastMCP server with custom OAuth Proxy
+ * Example ViteMCP server with custom OAuth Proxy
  *
  * This example shows how to configure a custom OAuth provider
  *
@@ -7,7 +7,7 @@
  */
 
 import { OAuthProxy } from "../auth/index.js";
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
 // Create OAuth Proxy with custom provider configuration
 const authProxy = new OAuthProxy({
@@ -19,7 +19,7 @@ const authProxy = new OAuthProxy({
   upstreamTokenEndpoint: "https://your-provider.com/oauth/token",
 });
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "Custom OAuth Proxy Server",
   oauth: {
     authorizationServer: authProxy.getAuthorizationServerMetadata(),

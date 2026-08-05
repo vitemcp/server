@@ -1,6 +1,6 @@
 # OAuth Proxy Features
 
-The FastMCP OAuth Proxy enables MCP servers to authenticate with traditional OAuth providers that don't support Dynamic Client Registration (DCR). It acts as a transparent intermediary, presenting a DCR-compliant interface to MCP clients while managing pre-registered credentials with upstream providers.
+The ViteMCP OAuth Proxy enables MCP servers to authenticate with traditional OAuth providers that don't support Dynamic Client Registration (DCR). It acts as a transparent intermediary, presenting a DCR-compliant interface to MCP clients while managing pre-registered credentials with upstream providers.
 
 ## Core Features
 
@@ -54,7 +54,7 @@ Built-in consent screen prevents confused deputy attacks:
 
 Enabled by default for enhanced security:
 
-- Issues short-lived FastMCP JWTs to clients (1 hour default)
+- Issues short-lived ViteMCP JWTs to clients (1 hour default)
 - Stores upstream provider tokens securely on the server
 - Maps JWT IDs (JTI) to upstream tokens
 - Supports automatic token refresh
@@ -342,14 +342,14 @@ RFC 8414 Authorization Server Metadata:
 
 ## Integration Points
 
-### FastMCP Server Integration
+### ViteMCP Server Integration
 
 Use the `auth` option for seamless OAuth integration:
 
 ```typescript
-import { FastMCP, GoogleProvider, requireAuth } from "fastmcp";
+import { ViteMCP, GoogleProvider, requireAuth } from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new GoogleProvider({
     baseUrl: "https://your-server.com",
     clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -361,7 +361,7 @@ const server = new FastMCP({
 ```
 
 - No manual route setup required
-- Seamless Python-style API
+- Seamless declarative API
 - Automatic endpoint registration
 
 ### Session Integration
@@ -374,7 +374,7 @@ import {
   requireScopes,
   requireRole,
   getAuthSession,
-} from "fastmcp";
+} from "@vitemcp/server";
 
 server.addTool({
   canAccess: requireAuth, // Or: requireScopes("read"), requireRole("admin")
@@ -395,7 +395,7 @@ server.addTool({
 
 ### Transport Compatibility
 
-Works with FastMCP HTTP transport:
+Works with ViteMCP HTTP transport:
 
 - Requires `httpStream` transport type
 - Compatible with existing MCP infrastructure

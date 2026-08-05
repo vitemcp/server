@@ -1,19 +1,19 @@
 /**
- * Example demonstrating session ID support in FastMCP
+ * Example demonstrating session ID support in ViteMCP
  *
  * This example shows how to use the sessionId from the Mcp-Session-Id header
  * to implement per-session state management, such as maintaining counters
  * or tracking user-specific data across multiple requests.
  *
  * To run this example:
- * npx fastmcp dev src/examples/session-id-counter.ts --http-stream
+ * npx vitemcp dev src/examples/session-id-counter.ts --http-stream
  *
  * Then test with multiple clients to see how each session maintains its own state.
  */
 
 import { z } from "zod";
 
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
 interface UserSession {
   [key: string]: unknown;
@@ -21,7 +21,7 @@ interface UserSession {
   userId: string;
 }
 
-const server = new FastMCP<UserSession>({
+const server = new ViteMCP<UserSession>({
   authenticate: async (request) => {
     if (!request) {
       // stdio transport

@@ -1,5 +1,5 @@
 /**
- * FastMCP Authentication Module
+ * ViteMCP Authentication Module
  * OAuth 2.1 Proxy for Dynamic Client Registration
  */
 

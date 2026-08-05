@@ -10,7 +10,7 @@ import { hideBin } from "yargs/helpers";
 import { buildDevCommand, buildDevConfig } from "./devCommand.js";
 
 await yargs(hideBin(process.argv))
-  .scriptName("fastmcp")
+  .scriptName("vitemcp")
   .command(
     "dev <file>",
     "Start a development server",
@@ -55,21 +55,21 @@ await yargs(hideBin(process.argv))
 
       try {
         if (argv.args !== undefined && !argv.tool) {
-          console.error("[FastMCP Error] --args requires --tool");
+          console.error("[ViteMCP Error] --args requires --tool");
           process.exitCode = 1;
           return;
         }
 
         if (argv.tool && argv.watch) {
           console.warn(
-            "[FastMCP] --watch is ignored when calling a tool with --tool: the server runs for a single call.",
+            "[ViteMCP] --watch is ignored when calling a tool with --tool: the server runs for a single call.",
           );
         }
 
         let configPath: string | undefined;
 
         if (argv.tool) {
-          configDir = await mkdtemp(join(tmpdir(), "fastmcp-dev-"));
+          configDir = await mkdtemp(join(tmpdir(), "vitemcp-dev-"));
           configPath = join(configDir, "mcp-cli.json");
           await writeFile(configPath, buildDevConfig(argv.file), "utf8");
         }
@@ -84,15 +84,15 @@ await yargs(hideBin(process.argv))
 
         if (argv.verbose) {
           console.log(
-            `[FastMCP] Starting server: ${[command, ...commandArgs].join(" ")}`,
+            `[ViteMCP] Starting server: ${[command, ...commandArgs].join(" ")}`,
           );
-          console.log(`[FastMCP] File: ${argv.file}`);
+          console.log(`[ViteMCP] File: ${argv.file}`);
           console.log(
-            `[FastMCP] Watch mode: ${argv.watch ? "enabled" : "disabled"}`,
+            `[ViteMCP] Watch mode: ${argv.watch ? "enabled" : "disabled"}`,
           );
 
           if (argv.tool) {
-            console.log(`[FastMCP] Tool: ${argv.tool}`);
+            console.log(`[ViteMCP] Tool: ${argv.tool}`);
           }
         }
 
@@ -103,12 +103,12 @@ await yargs(hideBin(process.argv))
         });
       } catch (error) {
         console.error(
-          "[FastMCP Error] Failed to start development server:",
+          "[ViteMCP Error] Failed to start development server:",
           error instanceof Error ? error.message : String(error),
         );
 
         if (argv.verbose && error instanceof Error && error.stack) {
-          console.error("[FastMCP Debug] Stack trace:", error.stack);
+          console.error("[ViteMCP Debug] Stack trace:", error.stack);
         }
 
         // Not process.exit(): that would skip the `finally` block below and
@@ -141,7 +141,7 @@ await yargs(hideBin(process.argv))
         })`npx @modelcontextprotocol/inspector npx tsx ${argv.file}`;
       } catch (error) {
         console.error(
-          "[FastMCP Error] Failed to inspect server:",
+          "[ViteMCP Error] Failed to inspect server:",
           error instanceof Error ? error.message : String(error),
         );
 
@@ -152,7 +152,7 @@ await yargs(hideBin(process.argv))
 
   .command(
     "validate <file>",
-    "Validate a FastMCP server file for syntax and basic structure",
+    "Validate a ViteMCP server file for syntax and basic structure",
     (yargs) => {
       return yargs
         .positional("file", {
@@ -176,11 +176,11 @@ await yargs(hideBin(process.argv))
         const filePath = resolve(argv.file);
 
         if (!existsSync(filePath)) {
-          console.error(`[FastMCP Error] File not found: ${filePath}`);
+          console.error(`[ViteMCP Error] File not found: ${filePath}`);
           process.exit(1);
         }
 
-        console.log(`[FastMCP] Validating server file: ${filePath}`);
+        console.log(`[ViteMCP] Validating server file: ${filePath}`);
 
         const command = argv.strict
           ? `npx tsc --noEmit --strict ${filePath}`
@@ -193,9 +193,9 @@ await yargs(hideBin(process.argv))
             stdout: "pipe",
           })`${command}`;
 
-          console.log("[FastMCP] ✓ TypeScript compilation successful");
+          console.log("[ViteMCP] ✓ TypeScript compilation successful");
         } catch (tsError) {
-          console.error("[FastMCP] ✗ TypeScript compilation failed");
+          console.error("[ViteMCP] ✗ TypeScript compilation failed");
 
           if (tsError instanceof Error && "stderr" in tsError) {
             console.error(tsError.stderr);
@@ -212,28 +212,28 @@ await yargs(hideBin(process.argv))
           })`node -e "
             (async () => {
               try {
-                const { FastMCP } = await import('fastmcp');
+                const { ViteMCP } = await import('@vitemcp/server');
                 await import('file://${filePath}');
-                console.log('[FastMCP] ✓ Server structure validation passed');
+                console.log('[ViteMCP] ✓ Server structure validation passed');
               } catch (error) {
-                console.error('[FastMCP] ✗ Server structure validation failed:', error.message);
+                console.error('[ViteMCP] ✗ Server structure validation failed:', error.message);
                 process.exit(1);
               }
             })();
           "`;
         } catch {
-          console.error("[FastMCP] ✗ Server structure validation failed");
-          console.error("Make sure the file properly imports and uses FastMCP");
+          console.error("[ViteMCP] ✗ Server structure validation failed");
+          console.error("Make sure the file properly imports and uses ViteMCP");
 
           process.exit(1);
         }
 
         console.log(
-          "[FastMCP] ✓ All validations passed! Server file looks good.",
+          "[ViteMCP] ✓ All validations passed! Server file looks good.",
         );
       } catch (error) {
         console.error(
-          "[FastMCP Error] Validation failed:",
+          "[ViteMCP Error] Validation failed:",
           error instanceof Error ? error.message : String(error),
         );
 

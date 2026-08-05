@@ -29,7 +29,7 @@ export class EncryptedTokenStorage implements TokenStorage {
   constructor(backend: TokenStorage, encryptionKey: string) {
     this.backend = backend;
     // Synchronously derive key using scrypt
-    const salt = Buffer.from("fastmcp-oauth-proxy-salt");
+    const salt = Buffer.from("vitemcp-oauth-proxy-salt");
     this.encryptionKey = scryptSync(encryptionKey, salt, 32);
   }
 

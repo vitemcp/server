@@ -3,17 +3,17 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { FastMCP } from "./FastMCP.js";
+import { ViteMCP } from "./ViteMCP.js";
 
 interface TestAuth {
   [key: string]: unknown;
   userId: string;
 }
 
-describe("FastMCP Session ID Support", () => {
+describe("ViteMCP Session ID Support", () => {
   describe("HTTP Stream transport", () => {
     it("should expose sessionId to tool handlers from Mcp-Session-Id header", async () => {
-      const server = new FastMCP<TestAuth>({
+      const server = new ViteMCP<TestAuth>({
         authenticate: async () => ({
           userId: "test-user",
         }),
@@ -84,7 +84,7 @@ describe("FastMCP Session ID Support", () => {
     });
 
     it("should maintain the same sessionId across multiple requests", async () => {
-      const server = new FastMCP<TestAuth>({
+      const server = new ViteMCP<TestAuth>({
         authenticate: async () => ({
           userId: "test-user",
         }),
@@ -159,7 +159,7 @@ describe("FastMCP Session ID Support", () => {
     });
 
     it("should support per-session state management using sessionId", async () => {
-      const server = new FastMCP<TestAuth>({
+      const server = new ViteMCP<TestAuth>({
         authenticate: async () => ({
           userId: "test-user",
         }),
@@ -266,7 +266,7 @@ describe("FastMCP Session ID Support", () => {
     });
 
     it("should work in stateless mode without persistent sessionId", async () => {
-      const server = new FastMCP<TestAuth>({
+      const server = new ViteMCP<TestAuth>({
         authenticate: async () => ({
           userId: "test-user",
         }),
@@ -330,7 +330,7 @@ describe("FastMCP Session ID Support", () => {
 
   describe("stdio transport", () => {
     it("should not have sessionId in stdio transport", async () => {
-      const server = new FastMCP<TestAuth>({
+      const server = new ViteMCP<TestAuth>({
         authenticate: async () => ({
           userId: "test-user",
         }),

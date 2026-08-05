@@ -370,7 +370,7 @@ export interface TokenMapping {
   createdAt: Date;
   /** Expiration timestamp */
   expiresAt: Date;
-  /** JTI from FastMCP JWT */
+  /** JTI from ViteMCP JWT */
   jti: string;
   /** Scopes */
   scope: string[];

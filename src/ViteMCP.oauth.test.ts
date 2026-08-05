@@ -1,13 +1,13 @@
 import { getRandomPort } from "get-port-please";
 import { describe, expect, it } from "vitest";
 
-import { FastMCP } from "./FastMCP.js";
+import { ViteMCP } from "./ViteMCP.js";
 
-describe("FastMCP OAuth Support", () => {
+describe("ViteMCP OAuth Support", () => {
   it("should serve OAuth authorization server metadata", async () => {
     const port = await getRandomPort();
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         authorizationServer: {
@@ -69,7 +69,7 @@ describe("FastMCP OAuth Support", () => {
   it("should serve OAuth metadata under an issuer path base", async () => {
     const port = await getRandomPort();
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         authorizationServer: {
@@ -130,7 +130,7 @@ describe("FastMCP OAuth Support", () => {
   it("should serve OAuth protected resource metadata", async () => {
     const port = await getRandomPort();
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         enabled: true,
@@ -227,7 +227,7 @@ describe("FastMCP OAuth Support", () => {
   it("should return 404 for OAuth endpoints when disabled", async () => {
     const port = await getRandomPort();
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         enabled: false,
@@ -258,7 +258,7 @@ describe("FastMCP OAuth Support", () => {
   it("should return 404 for OAuth endpoints when not configured", async () => {
     const port = await getRandomPort();
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       version: "1.0.0",
       // No oauth configuration
@@ -287,7 +287,7 @@ describe("FastMCP OAuth Support", () => {
   it("should serve OAuth protected resource metadata at sub-path (MCP 2025-11-25 compliance)", async () => {
     const port = await getRandomPort();
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         enabled: true,
@@ -349,7 +349,7 @@ describe("FastMCP OAuth Support", () => {
   it("should serve OAuth protected resource metadata at custom sub-path", async () => {
     const port = await getRandomPort();
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         enabled: true,
@@ -392,7 +392,7 @@ describe("FastMCP OAuth Support", () => {
   it("should return 404 for non-matching sub-paths", async () => {
     const port = await getRandomPort();
 
-    const server = new FastMCP({
+    const server = new ViteMCP({
       name: "Test Server",
       oauth: {
         enabled: true,

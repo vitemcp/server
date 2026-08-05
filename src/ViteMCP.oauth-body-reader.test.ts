@@ -10,7 +10,7 @@ import { connect, type Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 
 import { OAuthProxy } from "./auth/OAuthProxy.js";
-import { FastMCP } from "./FastMCP.js";
+import { ViteMCP } from "./ViteMCP.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -51,7 +51,7 @@ async function startOAuthProxyServer(port: number) {
     upstreamTokenEndpoint: "https://example.com/oauth/token",
   });
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Test Server",
     oauth: {
       authorizationServer: authProxy.getAuthorizationServerMetadata(),

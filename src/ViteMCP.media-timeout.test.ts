@@ -11,13 +11,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { audioContent, imageContent } from "./FastMCP.js";
+import { audioContent, imageContent } from "./ViteMCP.js";
 
 const { mediaFetchMock } = vi.hoisted(() => ({
   mediaFetchMock: vi.fn(),
 }));
 
-// FastMCP.ts binds `fetch` from the undici module at import time, so spying
+// ViteMCP.ts binds `fetch` from the undici module at import time, so spying
 // on global.fetch cannot intercept it; mock the undici module instead and
 // keep every other export intact.
 vi.mock("undici", async (importOriginal) => {
@@ -28,7 +28,7 @@ vi.mock("undici", async (importOriginal) => {
 
 const realAbortTimeout = AbortSignal.timeout;
 
-// Same 1x1 PNG used by the imageContent tests in FastMCP.test.ts
+// Same 1x1 PNG used by the imageContent tests in ViteMCP.test.ts
 const PNG_BUFFER = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
   "base64",

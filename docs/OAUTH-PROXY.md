@@ -1,6 +1,6 @@
-# OAuth Proxy for FastMCP
+# OAuth Proxy for ViteMCP
 
-The OAuth Proxy enables FastMCP servers to authenticate with traditional OAuth providers that don't support Dynamic Client Registration (DCR) by presenting a DCR-compliant interface to MCP clients while using pre-registered credentials with upstream providers.
+The OAuth Proxy enables ViteMCP servers to authenticate with traditional OAuth providers that don't support Dynamic Client Registration (DCR) by presenting a DCR-compliant interface to MCP clients while using pre-registered credentials with upstream providers.
 
 ## Documentation
 
@@ -23,13 +23,6 @@ This is the main entry point for OAuth Proxy documentation. For detailed informa
    - Security best practices
    - Troubleshooting
 
-3. **[Python vs TypeScript Comparison](oauth-python-typescript.md)**
-   - Feature parity matrix
-   - API differences
-   - Migration guide
-   - Default behavior differences
-   - When to choose each implementation
-
 ### 🔗 Additional Resources
 
 - **[Advanced Features](oauth-advanced-features.md)** - Detailed coverage of:
@@ -39,7 +32,7 @@ This is the main entry point for OAuth Proxy documentation. For detailed informa
   - Encrypted storage
 
 - **[Example Implementations](../src/examples/)**
-  - [`oauth-integrated-server.ts`](../src/examples/oauth-integrated-server.ts) - Complete FastMCP integration
+  - [`oauth-integrated-server.ts`](../src/examples/oauth-integrated-server.ts) - Complete ViteMCP integration
   - [`oauth-proxy-server.ts`](../src/examples/oauth-proxy-server.ts) - Standalone proxy
   - [`oauth-proxy-github.ts`](../src/examples/oauth-proxy-github.ts) - GitHub provider
   - [`oauth-proxy-custom.ts`](../src/examples/oauth-proxy-custom.ts) - Custom provider
@@ -49,10 +42,15 @@ This is the main entry point for OAuth Proxy documentation. For detailed informa
 ### Seamless Integration (Just 2 Steps!)
 
 ```typescript
-import { FastMCP, getAuthSession, GoogleProvider, requireAuth } from "fastmcp";
+import {
+  ViteMCP,
+  getAuthSession,
+  GoogleProvider,
+  requireAuth,
+} from "@vitemcp/server";
 
-// 1. Create FastMCP with OAuth provider
-const server = new FastMCP({
+// 1. Create ViteMCP with OAuth provider
+const server = new ViteMCP({
   auth: new GoogleProvider({
     baseUrl: "https://your-server.com",
     clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -93,7 +91,7 @@ await server.start({
 - `/oauth/callback` - OAuth callback handler
 - `/oauth/consent` - User consent screen
 
-No manual route setup required - exactly like Python FastMCP! 🎉
+No manual route setup required. 🎉
 
 ## Available Providers
 
@@ -102,9 +100,9 @@ No manual route setup required - exactly like Python FastMCP! 🎉
 #### Google
 
 ```typescript
-import { FastMCP, GoogleProvider } from "fastmcp";
+import { ViteMCP, GoogleProvider } from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new GoogleProvider({
     baseUrl: "https://your-server.com",
     clientId: "xxx.apps.googleusercontent.com",
@@ -120,9 +118,9 @@ const server = new FastMCP({
 #### GitHub
 
 ```typescript
-import { FastMCP, GitHubProvider } from "fastmcp";
+import { ViteMCP, GitHubProvider } from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new GitHubProvider({
     baseUrl: "https://your-server.com",
     clientId: "your-github-app-id",
@@ -138,9 +136,9 @@ const server = new FastMCP({
 #### Azure/Entra ID
 
 ```typescript
-import { FastMCP, AzureProvider } from "fastmcp";
+import { ViteMCP, AzureProvider } from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new AzureProvider({
     baseUrl: "https://your-server.com",
     clientId: "your-azure-app-id",
@@ -159,9 +157,9 @@ const server = new FastMCP({
 For any OAuth 2.0 provider (SAP, Auth0, Okta, etc.):
 
 ```typescript
-import { FastMCP, OAuthProvider } from "fastmcp";
+import { ViteMCP, OAuthProvider } from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new OAuthProvider({
     authorizationEndpoint: "https://provider.com/oauth/authorize",
     baseUrl: "https://your-server.com",
@@ -212,7 +210,7 @@ const server = new FastMCP({
 - ✅ **Automatic Cleanup** - TTL-based expiration
 - ✅ **Pre-configured Providers** - Google, GitHub, Azure
 - ✅ **Refresh Token Support** - Full token lifecycle
-- ✅ **FastMCP Integration** - Seamless automatic setup
+- ✅ **ViteMCP Integration** - Seamless automatic setup
 
 ## Protecting Tools with OAuth
 
@@ -226,7 +224,7 @@ import {
   requireAll,
   requireAny,
   getAuthSession,
-} from "fastmcp";
+} from "@vitemcp/server";
 
 // Require any authenticated user
 server.addTool({
@@ -329,52 +327,6 @@ npm test -- auth/
 npm run build
 ```
 
-## Migration from Python FastMCP
-
-The TypeScript implementation now matches Python FastMCP's simplicity:
-
-**Python:**
-
-```python
-from fastmcp import FastMCP
-from fastmcp.server.auth import OAuthProxy
-
-auth = OAuthProxy(
-    upstream_authorization_endpoint="...",
-    upstream_token_endpoint="...",
-    upstream_client_id="...",
-    upstream_client_secret="...",
-    base_url="..."
-)
-mcp = FastMCP(name="My Server", auth=auth)
-```
-
-**TypeScript:**
-
-```typescript
-import { FastMCP, OAuthProvider } from "fastmcp";
-
-const server = new FastMCP({
-  auth: new OAuthProvider({
-    authorizationEndpoint: "...",
-    baseUrl: "...",
-    clientId: "...",
-    clientSecret: "...",
-    tokenEndpoint: "...",
-  }),
-  name: "My Server",
-  version: "1.0.0",
-});
-```
-
-Both approaches now:
-
-- Use a simple `auth` option
-- Auto-configure OAuth endpoints
-- Provide session with upstream access token
-
-See [Python vs TypeScript Comparison](oauth-python-typescript.md) for detailed migration guidance.
-
 ## Troubleshooting
 
 ### "Invalid redirect URI" error
@@ -409,6 +361,6 @@ See [Implementation Guide](oauth-proxy-guide.md#troubleshooting) for more soluti
 
 For issues, questions, or contributions:
 
-- Report bugs in the [issue tracker](https://github.com/your-org/fastmcp/issues)
+- Report bugs in the [issue tracker](https://github.com/your-org/vitemcp/issues)
 - Check [examples](../src/examples/) for working code
 - Review [documentation](oauth-proxy-guide.md) for detailed guidance

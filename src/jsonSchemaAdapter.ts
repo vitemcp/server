@@ -16,7 +16,7 @@ export type JsonSchemaObject = {
  * A Standard Schema that also carries the JSON Schema it was built from.
  *
  * `~standard.jsonSchema` is the Standard JSON Schema extension. Anything that
- * knows about it — including the `xsschema` conversion FastMCP uses to build
+ * knows about it — including the `xsschema` conversion ViteMCP uses to build
  * `tools/list` — reads the schema straight off the object instead of trying to
  * derive one from a validation library it does not recognise.
  */
@@ -50,15 +50,15 @@ type AjvValidateFunction = {
  * (and `ajv-formats` if you use `format` keywords) to use this. It is imported
  * on first validation, so servers that never call this pay nothing for it.
  *
- * Note that FastMCP applies the same strictness to every tool schema: objects
+ * Note that ViteMCP applies the same strictness to every tool schema: objects
  * are advertised with `additionalProperties: false`, whatever the input schema
  * said.
  *
  * @example
  * ```ts
- * import { FastMCP, jsonSchemaAdapter } from "fastmcp";
+ * import { ViteMCP, jsonSchemaAdapter } from "@vitemcp/server";
  *
- * const server = new FastMCP({ name: "Example", version: "1.0.0" });
+ * const server = new ViteMCP({ name: "Example", version: "1.0.0" });
  *
  * server.addTool({
  *   name: "greet",

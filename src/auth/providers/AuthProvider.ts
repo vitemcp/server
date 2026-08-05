@@ -102,7 +102,7 @@ export abstract class AuthProvider<
   }
 
   /**
-   * Authenticate function to be used by FastMCP.
+   * Authenticate function to be used by ViteMCP.
    * Extracts Bearer token, validates it, and returns session with upstream access token.
    */
   async authenticate(
@@ -129,7 +129,7 @@ export abstract class AuthProvider<
   }
 
   /**
-   * Get the OAuth configuration object for FastMCP ServerOptions.
+   * Get the OAuth configuration object for ViteMCP ServerOptions.
    */
   getOAuthConfig(): {
     authorizationServer: ReturnType<

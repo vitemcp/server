@@ -4,7 +4,7 @@
  * These tests verify that the _meta field is properly passed through
  * in tool listings, enabling MCP ext-apps interactive UI components.
  *
- * @see https://github.com/punkpeye/fastmcp/issues/229
+ * @see https://github.com/punkpeye/vitemcp/issues/229
  * @see https://modelcontextprotocol.github.io/ext-apps/
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -13,7 +13,7 @@ import { getRandomPort } from "get-port-please";
 import { expect, test } from "vitest";
 import { z } from "zod";
 
-import { FastMCP, FastMCPSession } from "./FastMCP.js";
+import { ViteMCP, ViteMCPSession } from "./ViteMCP.js";
 
 const runWithTestServer = async ({
   client: createClient,
@@ -26,16 +26,16 @@ const runWithTestServer = async ({
     server,
   }: {
     client: Client;
-    server: FastMCP;
-    session: FastMCPSession;
+    server: ViteMCP;
+    session: ViteMCPSession;
   }) => Promise<void>;
-  server?: () => Promise<FastMCP>;
+  server?: () => Promise<ViteMCP>;
 }) => {
   const port = await getRandomPort();
 
   const server = createServer
     ? await createServer()
-    : new FastMCP({
+    : new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -64,7 +64,7 @@ const runWithTestServer = async ({
       new URL(`http://localhost:${port}/sse`),
     );
 
-    const session = await new Promise<FastMCPSession>((resolve) => {
+    const session = await new Promise<ViteMCPSession>((resolve) => {
       server.on("connect", async (event) => {
         await event.session.waitForReady();
         resolve(event.session);
@@ -97,7 +97,7 @@ test("includes _meta.ui.resourceUri in tool listing", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -136,7 +136,7 @@ test("tool without _meta works correctly", async () => {
       expect(result.tools[0]).not.toHaveProperty("_meta");
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -175,7 +175,7 @@ test("preserves arbitrary _meta fields", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });
@@ -231,7 +231,7 @@ test("multiple tools with and without _meta", async () => {
       });
     },
     server: async () => {
-      const server = new FastMCP({
+      const server = new ViteMCP({
         name: "Test",
         version: "1.0.0",
       });

@@ -4,8 +4,8 @@ import { getRandomPort } from "get-port-please";
 import { expect, test, vi } from "vitest";
 import { toJsonSchema } from "xsschema";
 
-import { FastMCP } from "./FastMCP.js";
 import { jsonSchemaAdapter } from "./jsonSchemaAdapter.js";
+import { ViteMCP } from "./ViteMCP.js";
 
 const personSchema = {
   properties: {
@@ -155,7 +155,7 @@ test("converts to JSON Schema without a vendor-specific converter", async () => 
 
   // xsschema has no "json-schema" vendor; it has to take the schema straight
   // off `~standard.jsonSchema` instead. This is what lets the adapter work for
-  // both parameters and outputSchema with no special-casing in FastMCP.
+  // both parameters and outputSchema with no special-casing in ViteMCP.
   await expect(toJsonSchema(schema)).resolves.toEqual(personSchema);
 });
 
@@ -164,7 +164,7 @@ const withGreetServer = async (
   run: (client: Client) => Promise<void>,
 ): Promise<void> => {
   const port = await getRandomPort();
-  const server = new FastMCP({ name: "Test server", version: "1.0.0" });
+  const server = new ViteMCP({ name: "Test server", version: "1.0.0" });
 
   server.addTool({
     description: "Greet a user",

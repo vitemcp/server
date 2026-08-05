@@ -12,7 +12,7 @@
  */
 
 import { JWKSVerifier, OAuthProxy } from "../auth/index.js";
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
 /**
  * Example 1: Basic JWKS Verification
@@ -70,7 +70,7 @@ async function example2_withOAuthProxy() {
       "https://login.microsoftonline.com/common/oauth2/v2.0/token",
   });
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Azure OAuth with JWKS",
     oauth: {
       authorizationServer: authProxy.getAuthorizationServerMetadata(),
@@ -136,7 +136,7 @@ async function example3_multiProvider() {
 }
 
 /**
- * Example 4: FastMCP Tool with JWKS Verification
+ * Example 4: ViteMCP Tool with JWKS Verification
  * Protect tools using JWKS-verified tokens
  */
 async function example4_protectedTools() {
@@ -146,7 +146,7 @@ async function example4_protectedTools() {
     jwksUri: "https://your-identity-provider.com/.well-known/jwks.json",
   });
 
-  const server = new FastMCP({
+  const server = new ViteMCP({
     name: "Protected API",
     version: "1.0.0",
   });

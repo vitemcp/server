@@ -1,5 +1,5 @@
 /**
- * Example FastMCP server with GitHub OAuth
+ * Example ViteMCP server with GitHub OAuth
  *
  * This example shows how to use GitHub as the OAuth provider
  * with the simplified auth configuration.
@@ -8,10 +8,10 @@
  */
 
 import { getAuthSession, GitHubProvider, requireAuth } from "../auth/index.js";
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
-// Create FastMCP server with GitHub OAuth
-const server = new FastMCP({
+// Create ViteMCP server with GitHub OAuth
+const server = new ViteMCP({
   auth: new GitHubProvider({
     baseUrl: "http://localhost:4201",
     clientId: process.env.GITHUB_CLIENT_ID || "your-github-client-id",

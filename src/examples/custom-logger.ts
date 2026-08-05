@@ -1,5 +1,5 @@
 /**
- * Example FastMCP server demonstrating custom logger implementations.
+ * Example ViteMCP server demonstrating custom logger implementations.
  *
  * Features demonstrated:
  * - Simple custom logger implementation
@@ -11,7 +11,7 @@
 
 import { z } from "zod";
 
-import { FastMCP, Logger } from "../FastMCP.js";
+import { Logger, ViteMCP } from "../ViteMCP.js";
 
 // Example 1: Simple Custom Logger Implementation
 class SimpleCustomLogger implements Logger {
@@ -91,7 +91,7 @@ class SimpleCustomLogger implements Logger {
 //             winston.format.simple()
 //           )
 //         }),
-//         new winston.transports.File({ filename: 'fastmcp.log' })
+//         new winston.transports.File({ filename: 'vitemcp.log' })
 //       ]
 //     });
 //   }
@@ -177,7 +177,7 @@ const logger = new SimpleCustomLogger();
 // const logger = new WinstonLoggerAdapter();
 // const logger = new PinoLoggerAdapter();
 
-const server = new FastMCP({
+const server = new ViteMCP({
   logger: logger,
   name: "custom-logger-example",
   version: "1.0.0",

@@ -1,18 +1,18 @@
 /**
- * Example FastMCP server with INTEGRATED OAuth Proxy
+ * Example ViteMCP server with INTEGRATED OAuth Proxy
  *
- * This example shows the seamless Python-style integration where
- * OAuth routes are automatically registered - no manual setup needed!
+ * This example shows the seamless integration where OAuth routes are
+ * automatically registered - no manual setup needed!
  *
  * Run with: node dist/examples/oauth-integrated-server.js
  */
 
 import { getAuthSession, GoogleProvider, requireAuth } from "../auth/index.js";
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
-// Create FastMCP server with OAuth Provider
+// Create ViteMCP server with OAuth Provider
 // Just pass the provider via `auth` - routes are automatically registered!
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new GoogleProvider({
     baseUrl: "http://localhost:4300",
     clientId: process.env.GOOGLE_CLIENT_ID || "your-google-client-id",
@@ -102,7 +102,6 @@ Google OAuth App Setup:
 3. Add authorized redirect URI: http://localhost:4300/oauth/callback
 4. Copy client ID and secret to environment variables
 
-Python-Style Integration:
-This TypeScript server works exactly like Python FastMCP!
+Integrated Setup:
 Just use auth: new GoogleProvider({...}) and go! 🎉
 `);

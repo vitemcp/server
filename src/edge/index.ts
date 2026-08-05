@@ -1,16 +1,16 @@
 /**
- * FastMCP Edge Runtime Support
+ * ViteMCP Edge Runtime Support
  *
- * This module provides edge runtime compatibility for FastMCP, enabling
+ * This module provides edge runtime compatibility for ViteMCP, enabling
  * deployment to Cloudflare Workers, Deno Deploy, and other edge platforms.
  *
  * @example
  * ```typescript
  * // Cloudflare Workers
- * import { EdgeFastMCP } from "fastmcp/edge";
+ * import { EdgeViteMCP } from "@vitemcp/server/edge";
  * import { z } from "zod";
  *
- * const server = new EdgeFastMCP({ name: "MyMCP", version: "1.0.0" });
+ * const server = new EdgeViteMCP({ name: "MyMCP", version: "1.0.0" });
  *
  * server.addTool({
  *   name: "hello",
@@ -41,20 +41,6 @@ export type {
 } from "./WebStreamableHTTPServerTransport.js";
 
 /**
- * Options for EdgeFastMCP
- */
-export interface EdgeFastMCPOptions {
-  description?: string;
-  logger?: EdgeLogger;
-  /**
-   * Base path for MCP endpoints (default: "/mcp")
-   */
-  mcpPath?: string;
-  name: string;
-  version: string;
-}
-
-/**
  * Type for edge runtime fetch handler
  */
 export type EdgeFetchHandler = (request: Request) => Promise<Response>;
@@ -71,7 +57,7 @@ export interface EdgeLogger {
 }
 
 /**
- * Prompt definition for EdgeFastMCP
+ * Prompt definition for EdgeViteMCP
  */
 export interface EdgePrompt {
   arguments?: Array<{ description?: string; name: string; required?: boolean }>;
@@ -89,7 +75,7 @@ export interface EdgePrompt {
 }
 
 /**
- * Resource definition for EdgeFastMCP
+ * Resource definition for EdgeViteMCP
  */
 export interface EdgeResource {
   description?: string;
@@ -102,7 +88,7 @@ export interface EdgeResource {
 }
 
 /**
- * Tool definition for EdgeFastMCP
+ * Tool definition for EdgeViteMCP
  */
 export interface EdgeTool<TParams = unknown> {
   description: string;
@@ -122,12 +108,26 @@ export interface EdgeTool<TParams = unknown> {
 }
 
 /**
- * Edge-compatible FastMCP server for Cloudflare Workers, Deno, and Bun
+ * Options for EdgeViteMCP
+ */
+export interface EdgeViteMCPOptions {
+  description?: string;
+  logger?: EdgeLogger;
+  /**
+   * Base path for MCP endpoints (default: "/mcp")
+   */
+  mcpPath?: string;
+  name: string;
+  version: string;
+}
+
+/**
+ * Edge-compatible ViteMCP server for Cloudflare Workers, Deno, and Bun
  *
  * This is a simplified implementation optimized for stateless edge environments.
  * It uses web-standard APIs only (no Node.js dependencies).
  */
-export class EdgeFastMCP {
+export class EdgeViteMCP {
   #honoApp = new Hono();
   #logger: EdgeLogger;
   #mcpPath: string;
@@ -137,7 +137,7 @@ export class EdgeFastMCP {
   #tools: EdgeTool[] = [];
   #version: string;
 
-  constructor(options: EdgeFastMCPOptions) {
+  constructor(options: EdgeViteMCPOptions) {
     this.#name = options.name;
     this.#version = options.version;
     this.#logger = options.logger ?? console;

@@ -1,20 +1,20 @@
 /**
- * Example FastMCP server demonstrating core functionality plus streaming output.
+ * Example ViteMCP server demonstrating core functionality plus streaming output.
  *
  * Features demonstrated:
  * - Basic tool with type-safe parameters
  * - Streaming-enabled tool for incremental output
  * - Advanced tool annotations
  *
- * For a complete project template, see https://github.com/punkpeye/fastmcp-boilerplate
+ * For a complete project template, see https://github.com/punkpeye/vitemcp-boilerplate
  */
 import { type } from "arktype";
 import * as v from "valibot";
 import { z } from "zod";
 
-import { FastMCP } from "../FastMCP.js";
+import { ViteMCP } from "../ViteMCP.js";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "Addition",
   ping: {
     // enabled: undefined,
@@ -308,7 +308,7 @@ if (transportType === "httpStream") {
   );
 } else if (process.argv.includes("--disable-roots")) {
   // Example of disabling roots at runtime
-  const serverWithDisabledRoots = new FastMCP({
+  const serverWithDisabledRoots = new ViteMCP({
     name: "Addition (No Roots)",
     ping: {
       intervalMs: 10000,

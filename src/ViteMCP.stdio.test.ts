@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FastMCP } from "./FastMCP.js";
+import { ViteMCP } from "./ViteMCP.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -65,7 +65,7 @@ describe("stdio stdin listener lifecycle", () => {
   });
 
   it("registers 'close' and 'end' listeners after start({ transportType: 'stdio' })", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
     server.start({ transportType: "stdio" }).catch(() => {});
 
     await vi.waitFor(
@@ -78,7 +78,7 @@ describe("stdio stdin listener lifecycle", () => {
   });
 
   it("calls transport.close() exactly once when 'close' fires", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
     server.start({ transportType: "stdio" }).catch(() => {});
 
     await vi.waitFor(
@@ -93,7 +93,7 @@ describe("stdio stdin listener lifecycle", () => {
   });
 
   it("does NOT call transport.close() a second time when 'end' fires after 'close' (idempotency)", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
     server.start({ transportType: "stdio" }).catch(() => {});
 
     await vi.waitFor(
@@ -111,7 +111,7 @@ describe("stdio stdin listener lifecycle", () => {
   });
 
   it("removes both listeners after the handler fires", async () => {
-    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
     server.start({ transportType: "stdio" }).catch(() => {});
 
     await vi.waitFor(

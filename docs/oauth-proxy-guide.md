@@ -1,6 +1,6 @@
 # OAuth Proxy Implementation Guide
 
-This guide shows you how to implement OAuth authentication in your FastMCP server using the OAuth Proxy.
+This guide shows you how to implement OAuth authentication in your ViteMCP server using the OAuth Proxy.
 
 ## Table of Contents
 
@@ -18,9 +18,14 @@ This guide shows you how to implement OAuth authentication in your FastMCP serve
 The simplest way to add OAuth is using the `auth` option with a pre-configured provider:
 
 ```typescript
-import { FastMCP, getAuthSession, GoogleProvider, requireAuth } from "fastmcp";
+import {
+  ViteMCP,
+  getAuthSession,
+  GoogleProvider,
+  requireAuth,
+} from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new GoogleProvider({
     baseUrl: "https://your-server.com",
     clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -67,9 +72,14 @@ await server.start({
 For providers without pre-built support (SAP, Auth0, Okta, etc.), use `OAuthProvider`:
 
 ```typescript
-import { FastMCP, getAuthSession, OAuthProvider, requireAuth } from "fastmcp";
+import {
+  ViteMCP,
+  getAuthSession,
+  OAuthProvider,
+  requireAuth,
+} from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new OAuthProvider({
     authorizationEndpoint: "https://provider.com/oauth/authorize",
     baseUrl: "https://your-server.com",
@@ -106,8 +116,8 @@ await server.start({
 For more control over OAuth behavior, you can use the `oauth` option directly with an `OAuthProxy`:
 
 ```typescript
-import { FastMCP } from "fastmcp";
-import { OAuthProxy } from "fastmcp/auth";
+import { ViteMCP } from "@vitemcp/server";
+import { OAuthProxy } from "@vitemcp/server/auth";
 
 const authProxy = new OAuthProxy({
   upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
@@ -118,7 +128,7 @@ const authProxy = new OAuthProxy({
   scopes: ["openid", "profile"],
 });
 
-const server = new FastMCP({
+const server = new ViteMCP({
   name: "My Server",
   oauth: {
     enabled: true,
@@ -148,9 +158,9 @@ await server.start({
 **2. Implementation**
 
 ```typescript
-import { FastMCP, GoogleProvider, requireAuth } from "fastmcp";
+import { ViteMCP, GoogleProvider, requireAuth } from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new GoogleProvider({
     baseUrl: "https://your-server.com",
     clientId: "xxx.apps.googleusercontent.com",
@@ -181,9 +191,9 @@ const server = new FastMCP({
 **2. Implementation**
 
 ```typescript
-import { FastMCP, GitHubProvider, requireAuth } from "fastmcp";
+import { ViteMCP, GitHubProvider, requireAuth } from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new GitHubProvider({
     baseUrl: "https://your-server.com",
     clientId: "your-github-app-id",
@@ -214,9 +224,9 @@ const server = new FastMCP({
 **2. Implementation**
 
 ```typescript
-import { FastMCP, AzureProvider, requireAuth } from "fastmcp";
+import { ViteMCP, AzureProvider, requireAuth } from "@vitemcp/server";
 
-const server = new FastMCP({
+const server = new ViteMCP({
   auth: new AzureProvider({
     baseUrl: "https://your-server.com",
     clientId: "your-azure-app-id",
@@ -340,7 +350,7 @@ const authProxy = new OAuthProxy({
 Token swap prevents upstream tokens from reaching the client. This is **enabled by default** for enhanced security.
 
 ```typescript
-import { OAuthProxy, DiskStore, JWTIssuer } from "fastmcp/auth";
+import { OAuthProxy, DiskStore, JWTIssuer } from "@vitemcp/server/auth";
 
 const authProxy = new OAuthProxy({
   baseUrl: "https://your-server.com",
@@ -355,7 +365,7 @@ const authProxy = new OAuthProxy({
 
   // Use persistent storage
   tokenStorage: new DiskStore({
-    directory: "/var/lib/fastmcp/oauth",
+    directory: "/var/lib/vitemcp/oauth",
   }),
 });
 ```
@@ -400,10 +410,10 @@ server.addTool({
 Use `DiskStore` for production deployments:
 
 ```typescript
-import { DiskStore } from "fastmcp/auth";
+import { DiskStore } from "@vitemcp/server/auth";
 
 const storage = new DiskStore({
-  directory: "/var/lib/fastmcp/oauth",
+  directory: "/var/lib/vitemcp/oauth",
   cleanupIntervalMs: 60000, // Cleanup every minute
   fileExtension: ".json",
 });
@@ -427,7 +437,7 @@ Pass custom claims from upstream tokens (roles, permissions, etc.) to your proxy
 **Enabled by default** - Claims are automatically passed through with secure defaults:
 
 ```typescript
-import { OAuthProxy } from "fastmcp/auth";
+import { OAuthProxy } from "@vitemcp/server/auth";
 
 // Default behavior - claims passthrough enabled
 const authProxy = new OAuthProxy({
@@ -540,11 +550,11 @@ server.addTool({
 **Storage is automatically encrypted** with AES-256-GCM. You don't need to manually wrap with `EncryptedTokenStorage`:
 
 ```typescript
-import { DiskStore, JWTIssuer } from "fastmcp/auth";
+import { DiskStore, JWTIssuer } from "@vitemcp/server/auth";
 
 const authProxy = new OAuthProxy({
   // ... other config
-  tokenStorage: new DiskStore({ directory: "/var/lib/fastmcp/oauth" }),
+  tokenStorage: new DiskStore({ directory: "/var/lib/vitemcp/oauth" }),
   // ← Automatically encrypted!
 
   // Optional: Provide custom encryption key (recommended for production)
@@ -577,7 +587,7 @@ const authProxy = new OAuthProxy({
 Implement your own storage backend:
 
 ```typescript
-import { TokenStorage } from "fastmcp/auth";
+import { TokenStorage } from "@vitemcp/server/auth";
 
 class RedisTokenStorage implements TokenStorage {
   private redis: RedisClient;
@@ -699,7 +709,7 @@ npm install jose
 #### Basic JWKS Verification
 
 ```typescript
-import { JWKSVerifier } from "fastmcp/auth";
+import { JWKSVerifier } from "@vitemcp/server/auth";
 
 const verifier = new JWKSVerifier({
   jwksUri: "https://provider.com/.well-known/jwks.json",
@@ -721,7 +731,7 @@ if (result.valid) {
 Replace the default HS256 JWT issuer with JWKS verification:
 
 ```typescript
-import { OAuthProxy, JWKSVerifier } from "fastmcp/auth";
+import { OAuthProxy, JWKSVerifier } from "@vitemcp/server/auth";
 
 const authProxy = new OAuthProxy({
   baseUrl: "https://your-server.com",
@@ -777,7 +787,7 @@ interface JWKSVerifierConfig {
 Verify tokens from multiple OAuth providers:
 
 ```typescript
-import { JWKSVerifier } from "fastmcp/auth";
+import { JWKSVerifier } from "@vitemcp/server/auth";
 
 // Create verifiers for each provider
 const googleVerifier = new JWKSVerifier({
@@ -834,7 +844,7 @@ import {
   requireAll,
   requireAny,
   getAuthSession,
-} from "fastmcp";
+} from "@vitemcp/server";
 
 // Require any authenticated user
 server.addTool({
@@ -902,7 +912,7 @@ server.addTool({
 Use `getAuthSession` for type-safe access to the OAuth session:
 
 ```typescript
-import { getAuthSession, GoogleSession } from "fastmcp";
+import { getAuthSession, GoogleSession } from "@vitemcp/server";
 
 server.addTool({
   canAccess: requireAuth,
@@ -953,7 +963,7 @@ const authProxy = new OAuthProxy({
 2. **Derive Keys from Secrets**
 
 ```typescript
-import { JWTIssuer } from "fastmcp/auth";
+import { JWTIssuer } from "@vitemcp/server/auth";
 
 const jwtSigningKey = await JWTIssuer.deriveKey(
   process.env.JWT_SECRET,
@@ -995,7 +1005,7 @@ const authProxy = new OAuthProxy({
 
 ```typescript
 const storage = new EncryptedTokenStorage(
-  new DiskStore({ directory: "/var/lib/fastmcp/oauth" }),
+  new DiskStore({ directory: "/var/lib/vitemcp/oauth" }),
   encryptionKey,
 );
 ```
@@ -1134,7 +1144,7 @@ Examples:
 ```typescript
 const authProxy = new OAuthProxy({
   tokenStorage: new DiskStore({
-    directory: "/var/lib/fastmcp/oauth",
+    directory: "/var/lib/vitemcp/oauth",
   }),
   // ...
 });
@@ -1154,7 +1164,7 @@ const authProxy = new OAuthProxy({
 });
 ```
 
-### Cannot find module 'fastmcp/auth'
+### Cannot find module '@vitemcp/server/auth'
 
 **Problem:** Import path issue.
 
@@ -1162,23 +1172,23 @@ const authProxy = new OAuthProxy({
 
 ```typescript
 // Correct
-import { OAuthProxy } from "fastmcp/auth";
+import { OAuthProxy } from "@vitemcp/server/auth";
 
 // Also correct
-import { OAuthProxy } from "fastmcp";
+import { OAuthProxy } from "@vitemcp/server";
 ```
 
-Make sure `fastmcp` is properly installed:
+Make sure `vitemcp` is properly installed:
 
 ```bash
-npm install fastmcp
+npm install @vitemcp/server
 ```
 
 ## Examples
 
 Complete working examples are available in the repository:
 
-- **[oauth-integrated-server.ts](../src/examples/oauth-integrated-server.ts)** - Google OAuth with FastMCP integration
+- **[oauth-integrated-server.ts](../src/examples/oauth-integrated-server.ts)** - Google OAuth with ViteMCP integration
 - **[oauth-proxy-server.ts](../src/examples/oauth-proxy-server.ts)** - Standalone OAuth proxy
 - **[oauth-proxy-github.ts](../src/examples/oauth-proxy-github.ts)** - GitHub provider example
 - **[oauth-proxy-custom.ts](../src/examples/oauth-proxy-custom.ts)** - Custom provider with advanced features
@@ -1236,5 +1246,4 @@ curl -X POST http://localhost:3000/oauth/token \
 ## Next Steps
 
 - Review [OAuth Proxy Features](oauth-proxy-features.md) for detailed capabilities
-- See [Python vs TypeScript Comparison](oauth-python-typescript.md) for migration guidance
 - Check out the example implementations in [`src/examples/`](../src/examples/)
