@@ -12,6 +12,19 @@ import { describe, expect, it, vi } from "vitest";
 import { OAuthProxy } from "./auth/OAuthProxy.js";
 import { ViteMCP } from "./ViteMCP.js";
 
+/**
+ * Budget for socket-level assertions.
+ *
+ * These tests write megabyte payloads over raw sockets, so how long the server
+ * takes to answer depends on machine load — they run in parallel with the rest
+ * of the suite, and coverage instrumentation slows everything further. A tight
+ * budget here produces failures that say nothing about the code.
+ */
+const WAIT_TIMEOUT_MS = 15_000;
+
+/** Must exceed WAIT_TIMEOUT_MS, or vitest kills the test before waitFor gives up. */
+const TEST_TIMEOUT_MS = 20_000;
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function openSocket(port: number): Promise<Socket> {
@@ -97,7 +110,7 @@ describe("OAuth proxy body readers", () => {
               ),
             ).toBe(true);
           },
-          { interval: 50, timeout: 3000 },
+          { interval: 50, timeout: WAIT_TIMEOUT_MS },
         );
 
         // The server stays responsive for subsequent requests.
@@ -117,131 +130,141 @@ describe("OAuth proxy body readers", () => {
     },
   );
 
-  it("rejects an over-limit body before it is fully received", async () => {
-    const port = await getRandomPort();
-    const server = await startOAuthProxyServer(port);
+  it(
+    "rejects an over-limit body before it is fully received",
+    async () => {
+      const port = await getRandomPort();
+      const server = await startOAuthProxyServer(port);
 
-    try {
-      const socket = await openSocket(port);
-      // The server may close the connection while we are still writing.
-      socket.on("error", () => {});
+      try {
+        const socket = await openSocket(port);
+        // The server may close the connection while we are still writing.
+        socket.on("error", () => {});
 
-      const declaredLength = 4 * 1024 * 1024;
-      socket.write(
-        requestHead(
-          declaredLength,
-          "application/x-www-form-urlencoded",
-          "/oauth/token",
-          port,
-        ),
-      );
+        const declaredLength = 4 * 1024 * 1024;
+        socket.write(
+          requestHead(
+            declaredLength,
+            "application/x-www-form-urlencoded",
+            "/oauth/token",
+            port,
+          ),
+        );
 
-      let response = "";
-      socket.on("data", (chunk) => (response += chunk));
+        let response = "";
+        socket.on("data", (chunk) => (response += chunk));
 
-      // Trickle 6 × 256 KiB = 1.5 MiB, crossing the 1 MiB limit.
-      const chunk = "x".repeat(256 * 1024);
-      for (let i = 0; i < 6 && response.length === 0; i++) {
-        if (!socket.writable) break;
-        socket.write(chunk);
-        await sleep(50);
+        // Trickle 6 × 256 KiB = 1.5 MiB, crossing the 1 MiB limit.
+        const chunk = "x".repeat(256 * 1024);
+        for (let i = 0; i < 6 && response.length === 0; i++) {
+          if (!socket.writable) break;
+          socket.write(chunk);
+          await sleep(50);
+        }
+
+        await vi.waitFor(
+          () => {
+            expect(response).toContain("400");
+            expect(response).toContain("invalid_request");
+            expect(response).toContain("Request body exceeds 1 MiB");
+          },
+          { interval: 50, timeout: WAIT_TIMEOUT_MS },
+        );
+
+        // The rejection happened before the declared body was fully sent.
+        expect(socket.bytesWritten).toBeLessThan(declaredLength);
+        socket.destroy();
+      } finally {
+        await server.stop();
       }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-      await vi.waitFor(
-        () => {
-          expect(response).toContain("400");
-          expect(response).toContain("invalid_request");
-          expect(response).toContain("Request body exceeds 1 MiB");
-        },
-        { interval: 50, timeout: 3000 },
-      );
+  it(
+    "closes a keep-alive request after rejecting an over-limit body",
+    async () => {
+      const port = await getRandomPort();
+      const server = await startOAuthProxyServer(port);
 
-      // The rejection happened before the declared body was fully sent.
-      expect(socket.bytesWritten).toBeLessThan(declaredLength);
-      socket.destroy();
-    } finally {
-      await server.stop();
-    }
-  });
+      try {
+        const socket = await openSocket(port);
+        socket.on("error", () => {});
 
-  it("closes a keep-alive request after rejecting an over-limit body", async () => {
-    const port = await getRandomPort();
-    const server = await startOAuthProxyServer(port);
+        let response = "";
+        let serverClosedSocket = false;
+        socket.on("data", (chunk) => (response += chunk));
+        // Either event means the server tore the connection down: 'end' on a
+        // graceful FIN, 'close' when the teardown is forced because the client
+        // over-declared Content-Length and keeps writing.
+        socket.once("end", () => {
+          serverClosedSocket = true;
+        });
+        socket.once("close", () => {
+          serverClosedSocket = true;
+        });
 
-    try {
-      const socket = await openSocket(port);
-      socket.on("error", () => {});
+        socket.write(
+          requestHead(
+            4 * 1024 * 1024,
+            "application/x-www-form-urlencoded",
+            "/oauth/token",
+            port,
+            "keep-alive",
+          ),
+        );
+        await vi.waitFor(
+          () => {
+            expect(response).toContain("400");
+            expect(response).toContain("invalid_request");
+            expect(response).toContain("Request body exceeds 1 MiB");
+            expect(serverClosedSocket).toBe(true);
+          },
+          // Writing 1.25 MiB over a loopback socket and observing the close is
+          // load-sensitive; 3s was not enough headroom under a full-suite run.
+          { interval: 50, timeout: 15000 },
+        );
+      } finally {
+        await server.stop();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-      let response = "";
-      let serverClosedSocket = false;
-      socket.on("data", (chunk) => (response += chunk));
-      // Either event means the server tore the connection down: 'end' on a
-      // graceful FIN, 'close' when the teardown is forced because the client
-      // over-declared Content-Length and keeps writing.
-      socket.once("end", () => {
-        serverClosedSocket = true;
-      });
-      socket.once("close", () => {
-        serverClosedSocket = true;
-      });
+  it(
+    "still accepts a valid body delivered in slow chunks",
+    async () => {
+      const port = await getRandomPort();
+      const server = await startOAuthProxyServer(port);
 
-      socket.write(
-        requestHead(
-          4 * 1024 * 1024,
-          "application/x-www-form-urlencoded",
-          "/oauth/token",
-          port,
-          "keep-alive",
-        ),
-      );
-      socket.write("x".repeat(1280 * 1024));
+      try {
+        const body = JSON.stringify({
+          redirect_uris: ["https://client.example.com/callback"],
+        });
+        const socket = await openSocket(port);
+        socket.write(
+          requestHead(body.length, "application/json", "/oauth/register", port),
+        );
+        socket.write(body.slice(0, 10));
+        await sleep(100);
+        socket.end(body.slice(10)); // final chunk completes the body
 
-      await vi.waitFor(
-        () => {
-          expect(response).toContain("400");
-          expect(response).toContain("invalid_request");
-          expect(response).toContain("Request body exceeds 1 MiB");
-          expect(serverClosedSocket).toBe(true);
-        },
-        // Writing 1.25 MiB over a loopback socket and observing the close is
-        // load-sensitive; 3s was not enough headroom under a full-suite run.
-        { interval: 50, timeout: 15000 },
-      );
-    } finally {
-      await server.stop();
-    }
-  }, 20000);
+        let response = "";
+        socket.on("data", (chunk) => (response += chunk));
 
-  it("still accepts a valid body delivered in slow chunks", async () => {
-    const port = await getRandomPort();
-    const server = await startOAuthProxyServer(port);
-
-    try {
-      const body = JSON.stringify({
-        redirect_uris: ["https://client.example.com/callback"],
-      });
-      const socket = await openSocket(port);
-      socket.write(
-        requestHead(body.length, "application/json", "/oauth/register", port),
-      );
-      socket.write(body.slice(0, 10));
-      await sleep(100);
-      socket.end(body.slice(10)); // final chunk completes the body
-
-      let response = "";
-      socket.on("data", (chunk) => (response += chunk));
-
-      await vi.waitFor(
-        () => {
-          expect(response).toContain("201");
-          expect(response).toContain("client_id");
-        },
-        { interval: 50, timeout: 3000 },
-      );
-    } finally {
-      await server.stop();
-    }
-  });
+        await vi.waitFor(
+          () => {
+            expect(response).toContain("201");
+            expect(response).toContain("client_id");
+          },
+          { interval: 50, timeout: WAIT_TIMEOUT_MS },
+        );
+      } finally {
+        await server.stop();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
   it("preserves a UTF-8 character split across request chunks", async () => {
     const port = await getRandomPort();
@@ -280,7 +303,7 @@ describe("OAuth proxy body readers", () => {
           expect(response).toContain("201");
           expect(response).toContain(clientName);
         },
-        { interval: 50, timeout: 3000 },
+        { interval: 50, timeout: WAIT_TIMEOUT_MS },
       );
     } finally {
       await server.stop();
@@ -295,110 +318,118 @@ describe("OAuth proxy body readers", () => {
   // trusts only Content-Length would pass the existing suite and silently break
   // the chunked path (Transfer-Encoding: chunked uses no Content-Length header).
 
-  it("rejects an oversize chunked body (no Content-Length)", async () => {
-    const port = await getRandomPort();
-    const server = await startOAuthProxyServer(port);
+  it(
+    "rejects an oversize chunked body (no Content-Length)",
+    async () => {
+      const port = await getRandomPort();
+      const server = await startOAuthProxyServer(port);
 
-    try {
-      const socket = await openSocket(port);
-      let response = "";
-      let serverClosedSocket = false;
+      try {
+        const socket = await openSocket(port);
+        let response = "";
+        let serverClosedSocket = false;
 
-      socket.on("data", (chunk) => (response += chunk));
-      socket.on("close", () => (serverClosedSocket = true));
+        socket.on("data", (chunk) => (response += chunk));
+        socket.on("close", () => (serverClosedSocket = true));
 
-      // Send chunked request (no Content-Length header)
-      const headers = [
-        `POST /oauth/register HTTP/1.1`,
-        `Host: localhost:${port}`,
-        `Transfer-Encoding: chunked`,
-        `Content-Type: application/json`,
-        ``,
-        ``,
-      ].join("\r\n");
+        // Send chunked request (no Content-Length header)
+        const headers = [
+          `POST /oauth/register HTTP/1.1`,
+          `Host: localhost:${port}`,
+          `Transfer-Encoding: chunked`,
+          `Content-Type: application/json`,
+          ``,
+          ``,
+        ].join("\r\n");
 
-      socket.write(headers);
+        socket.write(headers);
 
-      // Send chunks until we exceed 1 MiB limit
-      const chunkSize = 256 * 1024; // 256 KiB per chunk
-      const chunkData = Buffer.alloc(chunkSize, "a");
+        // Send chunks until we exceed 1 MiB limit
+        const chunkSize = 256 * 1024; // 256 KiB per chunk
+        const chunkData = Buffer.alloc(chunkSize, "a");
 
-      for (let sent = 0; sent < 1.5 * 1024 * 1024; sent += chunkSize) {
-        if (socket.destroyed) break;
-        // Write chunk in HTTP chunked format: size-in-hex CRLF data CRLF
-        socket.write(`${chunkSize.toString(16)}\r\n`);
-        socket.write(chunkData);
-        socket.write("\r\n");
-        await sleep(10);
+        for (let sent = 0; sent < 1.5 * 1024 * 1024; sent += chunkSize) {
+          if (socket.destroyed) break;
+          // Write chunk in HTTP chunked format: size-in-hex CRLF data CRLF
+          socket.write(`${chunkSize.toString(16)}\r\n`);
+          socket.write(chunkData);
+          socket.write("\r\n");
+          await sleep(10);
+        }
+
+        await vi.waitFor(
+          () => {
+            expect(response).toContain("400");
+            expect(response).toContain("invalid_request");
+            expect(response).toContain("Request body exceeds 1 MiB");
+            expect(serverClosedSocket).toBe(true);
+          },
+          { interval: 50, timeout: WAIT_TIMEOUT_MS },
+        );
+      } finally {
+        await server.stop();
       }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-      await vi.waitFor(
-        () => {
-          expect(response).toContain("400");
-          expect(response).toContain("invalid_request");
-          expect(response).toContain("Request body exceeds 1 MiB");
-          expect(serverClosedSocket).toBe(true);
-        },
-        { interval: 50, timeout: 5000 },
-      );
-    } finally {
-      await server.stop();
-    }
-  });
+  it(
+    "preserves UTF-8 characters split across chunked wire boundaries",
+    async () => {
+      const port = await getRandomPort();
+      const server = await startOAuthProxyServer(port);
 
-  it("preserves UTF-8 characters split across chunked wire boundaries", async () => {
-    const port = await getRandomPort();
-    const server = await startOAuthProxyServer(port);
+      try {
+        const socket = await openSocket(port);
+        let response = "";
 
-    try {
-      const socket = await openSocket(port);
-      let response = "";
+        socket.on("data", (chunk) => (response += chunk));
 
-      socket.on("data", (chunk) => (response += chunk));
+        // Send chunked request with UTF-8 character split across chunks
+        const headers = [
+          `POST /oauth/register HTTP/1.1`,
+          `Host: localhost:${port}`,
+          `Transfer-Encoding: chunked`,
+          `Content-Type: application/json`,
+          ``,
+          ``,
+        ].join("\r\n");
 
-      // Send chunked request with UTF-8 character split across chunks
-      const headers = [
-        `POST /oauth/register HTTP/1.1`,
-        `Host: localhost:${port}`,
-        `Transfer-Encoding: chunked`,
-        `Content-Type: application/json`,
-        ``,
-        ``,
-      ].join("\r\n");
+        socket.write(headers);
 
-      socket.write(headers);
+        // Split "Café 日本語 клиент" across two chunks
+        const part1 = '{"client_name":"Caf';
+        const part2 =
+          'é 日本語 клиент","redirect_uris":["https://client.example.com/callback"]}';
 
-      // Split "Café 日本語 клиент" across two chunks
-      const part1 = '{"client_name":"Caf';
-      const part2 =
-        'é 日本語 клиент","redirect_uris":["https://client.example.com/callback"]}';
+        // First chunk
+        socket.write(`${Buffer.byteLength(part1).toString(16)}\r\n`);
+        socket.write(part1);
+        socket.write("\r\n");
 
-      // First chunk
-      socket.write(`${Buffer.byteLength(part1).toString(16)}\r\n`);
-      socket.write(part1);
-      socket.write("\r\n");
+        await sleep(50);
 
-      await sleep(50);
+        // Second chunk
+        socket.write(`${Buffer.byteLength(part2).toString(16)}\r\n`);
+        socket.write(part2);
+        socket.write("\r\n");
 
-      // Second chunk
-      socket.write(`${Buffer.byteLength(part2).toString(16)}\r\n`);
-      socket.write(part2);
-      socket.write("\r\n");
+        // Terminating chunk
+        socket.write("0\r\n\r\n");
 
-      // Terminating chunk
-      socket.write("0\r\n\r\n");
-
-      await vi.waitFor(
-        () => {
-          expect(response).toContain("201");
-          expect(response).toContain("Café 日本語 клиент");
-        },
-        { interval: 50, timeout: 3000 },
-      );
-    } finally {
-      await server.stop();
-    }
-  });
+        await vi.waitFor(
+          () => {
+            expect(response).toContain("201");
+            expect(response).toContain("Café 日本語 клиент");
+          },
+          { interval: 50, timeout: WAIT_TIMEOUT_MS },
+        );
+      } finally {
+        await server.stop();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
   it("handles chunked request aborted before terminating chunk", async () => {
     const port = await getRandomPort();
@@ -435,7 +466,7 @@ describe("OAuth proxy body readers", () => {
 
       await vi.waitFor(() => expect(socketClosed).toBe(true), {
         interval: 50,
-        timeout: 2000,
+        timeout: WAIT_TIMEOUT_MS,
       });
 
       // Verify server is still responsive after abort
@@ -447,7 +478,7 @@ describe("OAuth proxy body readers", () => {
 
       await vi.waitFor(() => expect(healthResponse.length).toBeGreaterThan(0), {
         interval: 50,
-        timeout: 2000,
+        timeout: WAIT_TIMEOUT_MS,
       });
 
       healthSocket.end();

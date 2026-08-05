@@ -1136,13 +1136,10 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
             // `Connection: close` alone is not enough: Node waits for the
             // declared Content-Length before closing, and an over-declared
             // body never finishes arriving. Close once the 400 has flushed.
-            res.once("finish", () => {
-              const socket = res.socket;
-              socket?.end();
-              // A client that over-declared Content-Length keeps writing, so a
-              // half-close can hang. Force the teardown shortly after the FIN.
-              setTimeout(() => socket?.destroy(), 50).unref();
-            });
+            // Half-close only. A forced destroy here would send an RST while
+            // the client may still be writing, and the pending RST discards
+            // whatever it had buffered — including this 400.
+            res.once("finish", () => res.socket?.end());
             res.end(
               JSON.stringify({
                 error: "invalid_request",
