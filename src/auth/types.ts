@@ -96,6 +96,8 @@ export interface CustomClaimsPassthroughConfig {
  * Client metadata for storage
  */
 export interface DCRClientMetadata {
+  /** OpenID Connect application type (`"native"` or `"web"`). */
+  application_type?: "native" | "web";
   client_name?: string;
   client_uri?: string;
   contacts?: string[];
@@ -113,6 +115,12 @@ export interface DCRClientMetadata {
  * RFC 7591 Dynamic Client Registration Request
  */
 export interface DCRRequest {
+  /**
+   * OpenID Connect application type: `"native"` for local/loopback clients,
+   * `"web"` for hosted ones. Required of MCP clients by SEP-837 so that
+   * OpenID-aware authorization servers do not mis-apply redirect-URI rules.
+   */
+  application_type?: "native" | "web";
   /** Client name */
   client_name?: string;
   /** Client homepage URL */
@@ -149,6 +157,8 @@ export interface DCRRequest {
  * RFC 7591 Dynamic Client Registration Response
  */
 export interface DCRResponse {
+  /** Echoed application type, so the client can confirm what was registered. */
+  application_type?: "native" | "web";
   /** REQUIRED: Client identifier */
   client_id: string;
   /** Client ID issued timestamp */
@@ -280,6 +290,14 @@ export interface OAuthProxyConfig {
   upstreamClientId: string;
   /** Pre-registered client secret with upstream provider */
   upstreamClientSecret: string;
+  /**
+   * Issuer identifier of the upstream authorization server, used to validate
+   * the `iss` parameter on authorization responses (RFC 9207).
+   *
+   * Defaults to the origin of `upstreamAuthorizationEndpoint`. Set this when
+   * the provider's issuer differs from that origin.
+   */
+  upstreamIssuer?: string;
   /** Timeout in milliseconds for upstream token/refresh HTTP requests (default: 10000) */
   upstreamRequestTimeoutMs?: number;
   /** Upstream provider's token endpoint URL */
@@ -320,6 +338,12 @@ export interface OAuthTransaction {
   scope: string[];
   /** OAuth state parameter */
   state: string;
+  /**
+   * Issuer identifier of the upstream authorization server this transaction
+   * was started against, recorded so the `iss` returned on the callback can be
+   * validated against it (RFC 9207).
+   */
+  upstreamIssuer: string;
 }
 
 /**

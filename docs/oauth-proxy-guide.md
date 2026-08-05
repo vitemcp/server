@@ -40,8 +40,8 @@ const server = new ViteMCP({
 server.addTool({
   canAccess: requireAuth,
   description: "Get user profile from Google",
-  execute: async (_args, { session }) => {
-    const { accessToken } = getAuthSession(session);
+  execute: async (_args, { auth }) => {
+    const { accessToken } = getAuthSession(auth);
     const response = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {
@@ -95,8 +95,8 @@ const server = new ViteMCP({
 server.addTool({
   canAccess: requireAuth,
   description: "Call protected API",
-  execute: async (_args, { session }) => {
-    const { accessToken } = getAuthSession(session);
+  execute: async (_args, { auth }) => {
+    const { accessToken } = getAuthSession(auth);
     const response = await fetch("https://api.provider.com/data", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -378,14 +378,10 @@ const authProxy = new OAuthProxy({
 server.addTool({
   name: "call-api",
   description: "Call upstream API with user's token",
-  execute: async (args, { session }) => {
-    const clientToken = session?.headers?.["authorization"]?.replace(
-      "Bearer ",
-      "",
-    );
-
-    // Load the upstream tokens
-    const upstreamTokens = await authProxy.loadUpstreamTokens(clientToken);
+  execute: async (args, { auth }) => {
+    // `auth` is whatever your `authenticate` hook returned for this request;
+    // an AuthProvider puts the proxy-issued token on it.
+    const upstreamTokens = await authProxy.loadUpstreamTokens(auth.token);
 
     if (upstreamTokens) {
       const response = await fetch("https://api.provider.com/user", {
@@ -493,14 +489,9 @@ const authProxyNoClaims = new OAuthProxy({
 server.addTool({
   name: "admin-dashboard",
   description: "Access admin dashboard",
-  canAccess: async ({ session }) => {
-    const token = session?.headers?.["authorization"]?.replace("Bearer ", "");
-    if (!token) return false;
-
-    // Decode the proxy JWT
-    const payload = JSON.parse(
-      Buffer.from(token.split(".")[1], "base64url").toString(),
-    );
+  // `canAccess` receives the value your `authenticate` hook returned.
+  canAccess: (auth) => {
+    const payload = auth?.claims ?? {};
 
     // Check role claim from upstream IDP
     return payload.role === "admin" || payload.roles?.includes("admin");
@@ -516,13 +507,8 @@ server.addTool({
 server.addTool({
   name: "delete-resource",
   description: "Delete a resource",
-  canAccess: async ({ session }) => {
-    const token = session?.headers?.["authorization"]?.replace("Bearer ", "");
-    if (!token) return false;
-
-    const payload = JSON.parse(
-      Buffer.from(token.split(".")[1], "base64url").toString(),
-    );
+  canAccess: (auth) => {
+    const payload = auth?.claims ?? {};
 
     // Check fine-grained permissions
     return payload.permissions?.includes("resource:delete");
@@ -850,8 +836,8 @@ import {
 server.addTool({
   canAccess: requireAuth,
   description: "Requires authentication",
-  execute: async (_args, { session }) => {
-    const { accessToken } = getAuthSession(session);
+  execute: async (_args, { auth }) => {
+    const { accessToken } = getAuthSession(auth);
     // Use accessToken to call upstream APIs
     return "Authenticated!";
   },
@@ -917,9 +903,9 @@ import { getAuthSession, GoogleSession } from "@vitemcp/server";
 server.addTool({
   canAccess: requireAuth,
   name: "get-profile",
-  execute: async (_args, { session }) => {
+  execute: async (_args, { auth }) => {
     // Type-safe destructuring (throws if not authenticated)
-    const { accessToken } = getAuthSession(session);
+    const { accessToken } = getAuthSession(auth);
 
     // Or with provider-specific typing:
     // const { accessToken } = getAuthSession<GoogleSession>(session);

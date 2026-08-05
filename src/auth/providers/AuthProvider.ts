@@ -3,8 +3,6 @@
  * High-level abstraction for OAuth authentication that simplifies configuration
  */
 
-import type { IncomingMessage } from "node:http";
-
 import type { TokenStorage, UpstreamTokenSet } from "../types.js";
 
 import { OAuthProxy } from "../OAuthProxy.js";
@@ -106,14 +104,14 @@ export abstract class AuthProvider<
    * Extracts Bearer token, validates it, and returns session with upstream access token.
    */
   async authenticate(
-    request: IncomingMessage | undefined,
+    request: Request | undefined,
   ): Promise<TSession | undefined> {
     if (!request) {
       // stdio transport - no HTTP authentication
       return undefined;
     }
 
-    const authHeader = request.headers?.authorization;
+    const authHeader = request.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return undefined;
     }

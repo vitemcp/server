@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthorizationParams } from "./types.js";
 
 import { OAuthProxy } from "./OAuthProxy.js";
+import { issuerNamespace } from "./OAuthProxyStateStore.js";
+
+/** Records are namespaced by the upstream issuer (SEP-2352). */
+const UPSTREAM_ISSUER = "https://provider.com";
 import { MemoryTokenStorage } from "./utils/tokenStore.js";
 
 const CALLBACK_URL = "https://client.example.com/callback";
@@ -362,7 +366,9 @@ describe("OAuthProxy TokenStorage persistence", () => {
       );
 
       // While the code is redeemable the record holds the upstream tokens.
-      await expect(tokenStorage.get(`code:${code}`)).resolves.toMatchObject({
+      await expect(
+        tokenStorage.get(`code:${issuerNamespace(UPSTREAM_ISSUER)}:${code}`),
+      ).resolves.toMatchObject({
         upstreamTokens: { refreshToken: "upstream-refresh-token" },
       });
 
@@ -375,7 +381,9 @@ describe("OAuthProxy TokenStorage persistence", () => {
 
       // Afterwards only the tombstone is left, so a long-lived upstream
       // refresh token does not sit in storage for the rest of the code's TTL.
-      await expect(tokenStorage.get(`code:${code}`)).resolves.toEqual({
+      await expect(
+        tokenStorage.get(`code:${issuerNamespace(UPSTREAM_ISSUER)}:${code}`),
+      ).resolves.toEqual({
         expiresAt: expect.any(Date),
         used: true,
       });

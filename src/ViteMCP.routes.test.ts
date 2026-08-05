@@ -1,76 +1,12 @@
 import type { Context } from "hono";
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getRandomPort } from "get-port-please";
 import { fetch } from "undici";
 import { expect, test } from "vitest";
 import { z } from "zod";
 
-import { ViteMCP, ViteMCPSession } from "./ViteMCP.js";
-
-const runWithTestServer = async ({
-  run,
-  server: createServer,
-}: {
-  run: ({
-    client,
-    port,
-    server,
-    session,
-  }: {
-    client: Client;
-    port: number;
-    server: ViteMCP;
-    session: ViteMCPSession;
-  }) => Promise<void>;
-  server?: () => Promise<ViteMCP>;
-}) => {
-  const port = await getRandomPort();
-
-  const server = createServer
-    ? await createServer()
-    : new ViteMCP({
-        name: "Test",
-        version: "1.0.0",
-      });
-
-  await server.start({
-    httpStream: {
-      port,
-    },
-    transportType: "httpStream",
-  });
-
-  try {
-    const client = new Client(
-      {
-        name: "test-client",
-        version: "1.0.0",
-      },
-      {
-        capabilities: {},
-      },
-    );
-
-    const transport = new SSEClientTransport(
-      new URL(`http://localhost:${port}/sse`),
-    );
-
-    const session = await new Promise<ViteMCPSession>((resolve) => {
-      server.on("connect", async (event) => {
-        await event.session.waitForReady();
-        resolve(event.session);
-      });
-
-      client.connect(transport);
-    });
-
-    await run({ client, port, server, session });
-  } finally {
-    await server.stop();
-  }
-};
+import { runWithTestServer } from "./testHarness.js";
+import { ViteMCP } from "./ViteMCP.js";
 
 test("custom routes handle GET requests", async () => {
   await runWithTestServer({
@@ -219,7 +155,7 @@ test("custom routes handle query parameters", async () => {
 test("custom routes handle different HTTP methods", async () => {
   await runWithTestServer({
     run: async ({ port }) => {
-      // Note: OPTIONS is intercepted by mcp-proxy for CORS handling and returns 204
+      // Note: a CORS preflight is answered by the cors middleware with 204
       const methods = ["GET", "POST", "PUT", "DELETE", "PATCH"];
 
       for (const method of methods) {
@@ -232,8 +168,13 @@ test("custom routes handle different HTTP methods", async () => {
         expect(data.method).toBe(method);
       }
 
-      // Test that OPTIONS returns 204 (handled by mcp-proxy for CORS)
+      // A real CORS preflight is answered by the cors middleware with 204.
+      // (A bare OPTIONS with no preflight headers falls through to the route.)
       const optionsResponse = await fetch(`http://localhost:${port}/resource`, {
+        headers: {
+          "Access-Control-Request-Method": "POST",
+          Origin: "http://example.com",
+        },
         method: "OPTIONS",
       });
       expect(optionsResponse.status).toBe(204);
@@ -266,7 +207,7 @@ test("custom routes handle different HTTP methods", async () => {
         return c.json({ method: "PATCH" });
       });
 
-      // Note: OPTIONS handler won't be called due to mcp-proxy CORS handling
+      // Note: the cors middleware answers preflights before user routes
       app.options("/resource", async (c) => {
         return c.json({ method: "OPTIONS" });
       });
@@ -488,7 +429,7 @@ test("custom routes with authentication", { timeout: 10000 }, async () => {
   const port = await getRandomPort();
   const server = new ViteMCP<TestAuth>({
     authenticate: async (req) => {
-      const authHeader = req.headers.authorization;
+      const authHeader = req.headers.get("authorization");
       if (authHeader === "Bearer valid-token") {
         return { userId: "123" };
       }
@@ -500,8 +441,8 @@ test("custom routes with authentication", { timeout: 10000 }, async () => {
 
   // Helper to get auth from context
   const getAuth = async (c: Context): Promise<null | TestAuth> => {
-    const req = c.env.incoming;
-    const authHeader = req.headers.authorization;
+    const req = c.req.raw;
+    const authHeader = req.headers.get("authorization");
     if (authHeader === "Bearer valid-token") {
       return { userId: "123" };
     }
@@ -653,7 +594,7 @@ test("public routes bypass authentication", async () => {
   const port = await getRandomPort();
   const server = new ViteMCP<TestAuth>({
     authenticate: async (req) => {
-      const authHeader = req.headers.authorization;
+      const authHeader = req.headers.get("authorization");
       if (authHeader === "Bearer valid-token") {
         return { userId: "123" };
       }
@@ -665,8 +606,8 @@ test("public routes bypass authentication", async () => {
 
   // Helper to get auth from context (returns null if not authenticated)
   const getAuth = async (c: Context): Promise<null | TestAuth> => {
-    const req = c.env.incoming;
-    const authHeader = req.headers.authorization;
+    const req = c.req.raw;
+    const authHeader = req.headers.get("authorization");
     if (authHeader === "Bearer valid-token") {
       return { userId: "123" };
     }
@@ -860,7 +801,7 @@ test("mixed public and private routes with same path pattern", async () => {
   const port = await getRandomPort();
   const server = new ViteMCP<TestAuth>({
     authenticate: async (req) => {
-      const authHeader = req.headers.authorization;
+      const authHeader = req.headers.get("authorization");
       if (authHeader === "Bearer admin-token") {
         return { role: "admin" };
       }
@@ -872,8 +813,8 @@ test("mixed public and private routes with same path pattern", async () => {
 
   // Helper to get auth from context
   const getAuth = async (c: Context): Promise<null | TestAuth> => {
-    const req = c.env.incoming;
-    const authHeader = req.headers.authorization;
+    const req = c.req.raw;
+    const authHeader = req.headers.get("authorization");
     if (authHeader === "Bearer admin-token") {
       return { role: "admin" };
     }

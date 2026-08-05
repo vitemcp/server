@@ -58,7 +58,7 @@ describe("HTTPS support", () => {
           .get(
             {
               hostname: "localhost",
-              path: "/ping",
+              path: "/health",
               port,
               rejectUnauthorized: false, // Accept self-signed cert
             },
@@ -78,7 +78,7 @@ describe("HTTPS support", () => {
     );
 
     expect(response.statusCode).toBe(200);
-    expect(response.text).toBe("pong");
+    expect(response.text).toBe("ok");
   });
 
   test("starts server with HTTP when no SSL options provided", async () => {
@@ -90,8 +90,8 @@ describe("HTTPS support", () => {
     });
 
     // Test that the server responds to HTTP requests
-    const response = await fetch(`http://localhost:${port}/ping`);
+    const response = await fetch(`http://localhost:${port}/health`);
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe("pong");
+    expect(await response.text()).toBe("ok");
   });
 });

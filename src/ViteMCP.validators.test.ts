@@ -1,12 +1,9 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { type } from "arktype";
-import { getRandomPort } from "get-port-please";
-import { setTimeout as delay } from "timers/promises";
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
 
-import { ViteMCP, ViteMCPSession } from "./ViteMCP.js";
+import { runWithTestServer, withoutEnvelope } from "./testHarness.js";
+import { ViteMCP } from "./ViteMCP.js";
 
 // The README documents Zod, ArkType and Valibot as supported parameter
 // validators (all wired through the Standard Schema spec), but only Zod is
@@ -44,77 +41,6 @@ describe("tool schema registration", () => {
     );
   });
 });
-
-const runWithTestServer = async ({
-  run,
-  server: providedServer,
-}: {
-  run: ({
-    client,
-    server,
-    session,
-  }: {
-    client: Client;
-    server: ViteMCP;
-    session: ViteMCPSession;
-  }) => Promise<void>;
-  server?: ViteMCP;
-}) => {
-  const port = await getRandomPort();
-
-  const server =
-    providedServer ??
-    new ViteMCP({
-      name: "Test",
-      version: "1.0.0",
-    });
-
-  await server.start({
-    httpStream: {
-      host: "127.0.0.1",
-      port,
-    },
-    transportType: "httpStream",
-  });
-
-  try {
-    const client = new Client(
-      {
-        name: "example-client",
-        version: "1.0.0",
-      },
-      {
-        capabilities: {
-          roots: { listChanged: true },
-          sampling: {},
-        },
-      },
-    );
-
-    const transport = new StreamableHTTPClientTransport(
-      new URL(`http://127.0.0.1:${port}/mcp`),
-    );
-
-    const session = await new Promise<ViteMCPSession>((resolve, reject) => {
-      const timeout = setTimeout(
-        () => reject(new Error("Connection timeout")),
-        10000,
-      );
-      server.on("connect", async (event) => {
-        clearTimeout(timeout);
-        await event.session.waitForReady();
-        resolve(event.session);
-      });
-
-      client.connect(transport).catch(reject);
-    });
-
-    await delay(100); // Small grace period
-    await run({ client, server, session });
-  } finally {
-    await server.stop();
-  }
-};
 
 describe("tool parameters via ArkType", () => {
   it("exposes the parameters as JSON Schema in tools/list", async () => {
@@ -161,10 +87,12 @@ describe("tool parameters via ArkType", () => {
     await runWithTestServer({
       run: async ({ client }) => {
         expect(
-          await client.callTool({
-            arguments: { a: 1, b: 2 },
-            name: "add",
-          }),
+          withoutEnvelope(
+            await client.callTool({
+              arguments: { a: 1, b: 2 },
+              name: "add",
+            }),
+          ),
         ).toEqual({
           content: [{ text: "3", type: "text" }],
         });
@@ -189,12 +117,13 @@ describe("tool parameters via ArkType", () => {
 
     await runWithTestServer({
       run: async ({ client }) => {
-        await expect(
-          client.callTool({
-            arguments: { a: "not-a-number", b: 2 },
-            name: "add",
-          }),
-        ).rejects.toThrow();
+        // v2 surfaces schema violations as an error *result* rather than a
+        // JSON-RPC rejection; either way `execute` must not run.
+        const result = await client.callTool({
+          arguments: { a: "not-a-number", b: 2 },
+          name: "add",
+        });
+        expect(result.isError).toBe(true);
         expect(executed).toBe(false);
       },
       server,
@@ -247,10 +176,12 @@ describe("tool parameters via Valibot", () => {
     await runWithTestServer({
       run: async ({ client }) => {
         expect(
-          await client.callTool({
-            arguments: { a: 1, b: 2 },
-            name: "add",
-          }),
+          withoutEnvelope(
+            await client.callTool({
+              arguments: { a: 1, b: 2 },
+              name: "add",
+            }),
+          ),
         ).toEqual({
           content: [{ text: "3", type: "text" }],
         });
@@ -275,12 +206,13 @@ describe("tool parameters via Valibot", () => {
 
     await runWithTestServer({
       run: async ({ client }) => {
-        await expect(
-          client.callTool({
-            arguments: { a: "not-a-number", b: 2 },
-            name: "add",
-          }),
-        ).rejects.toThrow();
+        // v2 surfaces schema violations as an error *result* rather than a
+        // JSON-RPC rejection; either way `execute` must not run.
+        const result = await client.callTool({
+          arguments: { a: "not-a-number", b: 2 },
+          name: "add",
+        });
+        expect(result.isError).toBe(true);
         expect(executed).toBe(false);
       },
       server,
@@ -299,16 +231,20 @@ describe("tool parameters via Valibot", () => {
 
     await runWithTestServer({
       run: async ({ client }) => {
-        expect(await client.callTool({ arguments: {}, name: "greet" })).toEqual(
-          {
-            content: [{ text: "Hello, world", type: "text" }],
-          },
-        );
         expect(
-          await client.callTool({
-            arguments: { name: "Ada" },
-            name: "greet",
-          }),
+          withoutEnvelope(
+            await client.callTool({ arguments: {}, name: "greet" }),
+          ),
+        ).toEqual({
+          content: [{ text: "Hello, world", type: "text" }],
+        });
+        expect(
+          withoutEnvelope(
+            await client.callTool({
+              arguments: { name: "Ada" },
+              name: "greet",
+            }),
+          ),
         ).toEqual({
           content: [{ text: "Hello, Ada", type: "text" }],
         });

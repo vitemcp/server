@@ -44,8 +44,8 @@ server.addTool({
 server.addTool({
   canAccess: requireAuth, // Only show this tool to authenticated users
   description: "Get user information (requires OAuth)",
-  execute: async (_, { session }) => {
-    const { accessToken } = getAuthSession(session);
+  execute: async (_, { auth }) => {
+    const { accessToken } = getAuthSession(auth);
     return {
       content: [
         {

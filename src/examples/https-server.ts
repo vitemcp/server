@@ -65,7 +65,6 @@ server.start({
     port: 8443,
     sslCert: "./src/fixtures/certs/server-cert.pem",
     sslKey: "./src/fixtures/certs/server-key.pem",
-    stateless: true,
     // sslCa: "./ca.pem",   // Optional: CA certificate for client cert auth
   },
   transportType: "httpStream",

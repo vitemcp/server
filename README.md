@@ -1,34 +1,37 @@
 # ViteMCP
 
-A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable of handling client sessions.
+A TypeScript framework for building [MCP](https://glama.ai/mcp) servers.
+
+> [!IMPORTANT]
+>
+> ViteMCP targets MCP revision **2026-07-28**, which made the protocol
+> stateless. There is no `initialize` handshake and no `Mcp-Session-Id`: every
+> request is self-contained and carries its own protocol version and client
+> capabilities.
+>
+> If you are coming from a session-based version, see
+> [Migrating from the session-based API](#migrating-from-the-session-based-api).
 
 ## Features
 
 - Simple Tool, Resource, Prompt definition
 - [Authentication](#authentication)
-- [Passing headers through context](#passing-headers-through-context)
-- [Session ID and Request ID tracking](#session-id-and-request-id-tracking)
-- [Sessions](#sessions)
+- [Per-request auth context](#authentication)
 - [Image content](#returning-an-image)
 - [Audio content](#returning-an-audio)
 - [Embedded](#embedded-resources)
-- [Logging](#logging)
 - [Error handling](#errors)
-- [HTTP Streaming](#http-streaming) (with SSE compatibility)
+- [HTTP Streaming](#http-streaming)
 - [HTTPS Support](#https-support) for secure connections
 - [Custom HTTP routes](#custom-http-routes) for REST APIs, webhooks, and admin interfaces
 - [Edge Runtime Support](#edge-runtime-support) for Cloudflare Workers, Deno Deploy, and more
-- [Stateless mode](#stateless-mode) for serverless deployments
+- Stateless by construction — every request stands alone, so serverless just works
 - CORS (enabled by default)
 - [Progress notifications](#progress)
-- [Streaming output](#streaming-output)
-- [Typed server events](#typed-server-events)
+- [Multi round-trip requests](#multi-round-trip-requests) for asking the client for more input
 - [Prompt argument auto-completion](#prompt-argument-auto-completion)
-- [Sampling](#requestsampling)
-- [Elicitation](#elicitation)
-- [Configurable ping behavior](#configurable-ping-behavior)
+- [Cacheable list results](#cacheable-results) (`ttlMs` / `cacheScope`)
 - [Health-check endpoint](#health-check-endpoint)
-- [Roots](#roots-management)
 - [In-memory transport](#unit-testing-with-an-in-memory-transport) for unit testing without binding a port
 - CLI for [testing](#test-with-mcp-cli) and [debugging](#inspect-with-mcp-inspector)
 
@@ -393,13 +396,12 @@ ViteMCP supports edge runtimes like Cloudflare Workers, enabling deployment of M
 | -------------------- | ------------------------------ | -------------------------------------- |
 | Runtime              | Node.js                        | Edge (V8 isolates)                     |
 | Start method         | `server.start({ port })`       | `export default server`                |
-| Transport            | stdio, httpStream, SSE         | HTTP Streamable only                   |
-| Sessions             | Stateful or stateless          | Stateless only                         |
+| Transport            | stdio, httpStream              | HTTP Streamable only                   |
 | File system          | Yes                            | No                                     |
 | OAuth/Authentication | Built-in `authenticate` option | Use Hono middleware (built-in planned) |
 | Custom routes        | `server.getApp()`              | `server.getApp()`                      |
 
-> **Note:** Built-in authentication for EdgeViteMCP is planned for a future release. Both ViteMCP and EdgeViteMCP use Hono internally, so there's no technical barrier—EdgeViteMCP was simply written before OAuth was added to ViteMCP. PRs are welcome to add an `authenticate` option that accepts web `Request` instead of Node.js `http.IncomingMessage`.
+> **Note:** Built-in authentication for EdgeViteMCP is planned for a future release. Both ViteMCP and EdgeViteMCP use Hono internally, so there's no technical barrier. `ViteMCP`'s `authenticate` already takes a web-standard `Request`, so the same hook shape works on both.
 >
 > In the meantime, use Hono middleware:
 >
@@ -447,7 +449,7 @@ export default server;
 
 When running on edge runtimes:
 
-- **Stateless by default**: Each request is handled independently
+- **No shared state**: Each request is handled independently — which is simply how the protocol works now
 - **No filesystem access**: Use fetch APIs for external data
 - **V8 Isolates**: Fast cold starts and efficient resource usage
 - **Global deployment**: Automatic distribution to edge locations
@@ -483,52 +485,6 @@ wrangler deploy
 ```
 
 See the [edge-cloudflare-worker example](src/examples/edge-cloudflare-worker.ts) for a complete demonstration.
-
-#### Stateless Mode
-
-ViteMCP supports stateless operation for HTTP streaming, where each request is handled independently without maintaining persistent sessions. This is ideal for serverless environments, load-balanced deployments, or when session state isn't required.
-
-In stateless mode:
-
-- No sessions are tracked on the server
-- Each request creates a temporary session that's discarded after the response
-- Reduced memory usage and better scalability
-- Perfect for stateless deployment environments
-
-You can enable stateless mode by adding the `stateless: true` option:
-
-```ts
-server.start({
-  transportType: "httpStream",
-  httpStream: {
-    port: 8080,
-    stateless: true,
-  },
-});
-```
-
-> **Note:** Stateless mode is only available with HTTP streaming transport. Features that depend on persistent sessions (like session-specific state) will not be available in stateless mode.
-
-You can also enable stateless mode using CLI arguments or environment variables:
-
-```bash
-# Via CLI argument
-npx @vitemcp/server dev src/server.ts --transport http-stream --port 8080 --stateless true
-
-# Via environment variable
-VITEMCP_STATELESS=true npx @vitemcp/server dev src/server.ts
-```
-
-The `/ready` health check endpoint will indicate when the server is running in stateless mode:
-
-```json
-{
-  "mode": "stateless",
-  "ready": 1,
-  "status": "ready",
-  "total": 1
-}
-```
 
 ## Core Concepts
 
@@ -873,32 +829,6 @@ server.addTool({
 });
 ```
 
-#### Configurable Ping Behavior
-
-ViteMCP includes a configurable ping mechanism to maintain connection health. The ping behavior can be customized through server options:
-
-```ts
-const server = new ViteMCP({
-  name: "My Server",
-  version: "1.0.0",
-  ping: {
-    // Explicitly enable or disable pings (defaults vary by transport)
-    enabled: true,
-    // Configure ping interval in milliseconds (default: 5000ms)
-    intervalMs: 10000,
-    // Set log level for ping-related messages (default: 'debug')
-    logLevel: "debug",
-  },
-});
-```
-
-By default, ping behavior is optimized for each transport type:
-
-- Enabled for SSE and HTTP streaming connections (which benefit from keep-alive)
-- Disabled for `stdio` connections (where pings are typically unnecessary)
-
-This configurable approach helps reduce log verbosity and optimize performance for different usage scenarios.
-
 ### Health-check Endpoint
 
 When you run ViteMCP with the `httpStream` transport you can optionally expose a
@@ -939,47 +869,6 @@ healthy
 ```
 
 The endpoint is ignored when the server is started with the `stdio` transport.
-
-#### Roots Management
-
-ViteMCP supports [Roots](https://modelcontextprotocol.io/docs/concepts/roots) - Feature that allows clients to provide a set of filesystem-like root locations that can be listed and dynamically updated. The Roots feature can be configured or disabled in server options:
-
-```ts
-const server = new ViteMCP({
-  name: "My Server",
-  version: "1.0.0",
-  roots: {
-    // Set to false to explicitly disable roots support
-    enabled: false,
-    // By default, roots support is enabled (true)
-  },
-});
-```
-
-This provides the following benefits:
-
-- Better compatibility with different clients that may not support Roots
-- Reduced error logs when connecting to clients that don't implement roots capability
-- More explicit control over MCP server capabilities
-- Graceful degradation when roots functionality isn't available
-
-You can listen for root changes in your server:
-
-```ts
-server.on("connect", (event) => {
-  const session = event.session;
-
-  // Access the current roots
-  console.log("Initial roots:", session.roots);
-
-  // Listen for changes to the roots
-  session.on("rootsChanged", (event) => {
-    console.log("Roots changed:", event.roots);
-  });
-});
-```
-
-When a client doesn't support roots or when roots functionality is explicitly disabled, these operations will gracefully handle the situation without throwing errors.
 
 ### Returning an audio
 
@@ -1237,160 +1126,7 @@ await reportProgress({
 });
 ```
 
-Progress notifications are only emitted when the client opts in by supplying a `progressToken` on the tool call; otherwise `reportProgress` is a no-op. Because `notifications/progress` is part of the MCP specification (the `message` field since revision 2025-03-26), this is the portable way to send incremental updates during a long-running tool call — see [Streaming Output](#streaming-output) below for the difference.
-
-#### Streaming Output
-
-ViteMCP can stream partial results from tools while they're still executing, enabling responsive UIs and real-time feedback. This is particularly useful for:
-
-- Long-running operations that generate content incrementally
-- Progressive generation of text, images, or other media
-- Operations where users benefit from seeing immediate partial results
-
-> [!IMPORTANT]
-> `streamContent` is a **ViteMCP extension, not part of the MCP specification**. It emits a `notifications/tool/streamContent` notification, which the MCP specification does not define — as of revision `2025-11-25` there is no standard mechanism for streaming tool output ([SEP-2998](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2998) is the in-progress proposal to add one).
->
-> Clients discard notifications they have no handler registered for, silently and without error. A client only sees streamed content if it registers a handler for the method (or sets a `fallbackNotificationHandler`), and **no client is known to render it as tool output** — MCP Inspector, for example, logs it in its notifications pane via a fallback handler, but the tool result itself still shows only what `execute` returned. Streaming is therefore mainly useful when you also control the client — see [Consuming streamed content](#consuming-streamed-content) below. If you need incremental updates that work on any client, use [`reportProgress`](#progress) with a `message` instead.
-
-To stream from a tool, use the `streamContent` method:
-
-```js
-server.addTool({
-  name: "generateText",
-  description: "Generate text incrementally",
-  parameters: z.object({
-    prompt: z.string(),
-  }),
-  annotations: {
-    streamingHint: true, // Advisory only; see below
-    readOnlyHint: true,
-  },
-  execute: async (args, { streamContent }) => {
-    // Send initial content immediately
-    await streamContent({ type: "text", text: "Starting generation...\n" });
-
-    // Simulate incremental content generation
-    const words = "The quick brown fox jumps over the lazy dog.".split(" ");
-    for (const word of words) {
-      await streamContent({ type: "text", text: word + " " });
-      await new Promise((resolve) => setTimeout(resolve, 300)); // Simulate delay
-    }
-
-    // Always return a final result. Returning nothing sends an empty tool
-    // result, so clients that ignore the streamed notifications see no output
-    // at all.
-    return "The quick brown fox jumps over the lazy dog.";
-  },
-});
-```
-
-> [!WARNING]
-> Returning `undefined` from `execute` produces a tool result with empty `content`. If you stream everything and return nothing, the tool call resolves to an empty result with no indication that anything was lost — including on clients that do log the notification. Return the complete result as well, and treat streamed content purely as a progressive-rendering enhancement.
-
-The `streamingHint` annotation is advisory metadata. It is forwarded verbatim to clients in `tools/list`, but it does not enable or gate `streamContent`, and ViteMCP itself never reads it. No client is known to act on it today, though [SEP-2998](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2998) proposes standardizing the same annotation name.
-
-##### Consuming streamed content
-
-A client sees these notifications only if it registers a handler for the method (or sets a `fallbackNotificationHandler`):
-
-```ts
-import { z } from "zod";
-
-const StreamContentNotificationSchema = z.object({
-  method: z.literal("notifications/tool/streamContent"),
-  params: z.object({
-    content: z.array(z.any()),
-    toolName: z.string(),
-  }),
-});
-
-client.setNotificationHandler(
-  StreamContentNotificationSchema,
-  (notification) => {
-    const { content, toolName } = notification.params;
-    // Render the partial content however you like.
-  },
-);
-```
-
-Note that notifications carry only `toolName`, not a request or progress token, so concurrent calls to the same tool on one session cannot be told apart.
-
-Streaming works with all content types (text, image, audio) and can be combined with progress reporting:
-
-```js
-server.addTool({
-  name: "processData",
-  description: "Process data with streaming updates",
-  parameters: z.object({
-    datasetSize: z.number(),
-  }),
-  annotations: {
-    streamingHint: true,
-  },
-  execute: async (args, { streamContent, reportProgress }) => {
-    const total = args.datasetSize;
-
-    for (let i = 0; i < total; i++) {
-      // Standard progress notification: reaches every spec-compliant client
-      await reportProgress({
-        progress: i,
-        total,
-        message: `Processed ${i} of ${total} items`,
-      });
-
-      // Richer partial content: only reaches clients that opt in
-      if (i % 10 === 0) {
-        await streamContent({
-          type: "text",
-          text: `Processed ${i} of ${total} items...\n`,
-        });
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
-    return "Processing complete!";
-  },
-});
-```
-
-#### Elicitation
-
-Tools can request additional information from the user mid-execution via [elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation), using the `elicit` method in the context object. The client must advertise the matching `elicitation` capability mode — `elicitation: { form: {} }` for form requests (the default) and/or `elicitation: { url: {} }` for url requests.
-
-```js
-server.addTool({
-  name: "delete-file",
-  description: "Delete a file",
-  parameters: z.object({
-    path: z.string(),
-  }),
-  execute: async (args, { elicit }) => {
-    const response = await elicit({
-      message: `Are you sure you want to delete ${args.path}?`,
-      requestedSchema: {
-        type: "object",
-        properties: {
-          confirmed: {
-            type: "boolean",
-          },
-        },
-        required: ["confirmed"],
-      },
-    });
-
-    if (response.action !== "accept" || !response.content?.confirmed) {
-      return "Deletion cancelled.";
-    }
-
-    // ...
-
-    return `Deleted ${args.path}`;
-  },
-});
-```
-
-The response `action` is `"accept"`, `"decline"`, or `"cancel"`; on accept, `content` holds the user's answers matching `requestedSchema`. Elicitation is also available outside of tools via [`session.requestElicitation`](#requestelicitation).
+Progress notifications are only emitted when the client opts in by supplying a `progressToken` on the tool call; otherwise `reportProgress` is a no-op. `notifications/progress` is part of the specification, so this is the portable way to send incremental updates during a long-running tool call.
 
 #### Tool Annotations
 
@@ -1477,7 +1213,7 @@ async load() {
 }
 ```
 
-`load` also receives `auth` (the value returned by your `authenticate` function, if any) and a `context` object as its second and third arguments. `context` mirrors the `client`, `log`, `session`, and `sessionId` fields available to `tool.execute` (see [Session ID and Request ID Tracking](#session-id-and-request-id-tracking)); `reportProgress` and `streamContent` are not included since they are tied to a tool call's progress token:
+`load` receives a `context` object mirroring what `tool.execute` gets — `auth`, `log`, `requestId` and the multi-round-trip helpers. `reportProgress` is not included, since it is tied to a tool call's progress token:
 
 ```ts
 server.addResource({
@@ -2274,88 +2010,6 @@ Tool result: {
 }
 ```
 
-#### Session ID and Request ID Tracking
-
-ViteMCP automatically exposes session and request IDs to tool handlers through the context parameter. This enables per-session state management and request tracking.
-
-**Session ID** (`context.sessionId`):
-
-- Available only for HTTP-based transports (HTTP Stream, SSE)
-- Extracted from the `Mcp-Session-Id` header
-- Remains constant across multiple requests from the same client
-- Useful for maintaining per-session state, counters, or user-specific data
-
-**Request ID** (`context.requestId`):
-
-- Available for all transports when provided by the client
-- Unique for each individual request
-- Useful for request tracing and debugging
-
-```ts
-import { ViteMCP } from "@vitemcp/server";
-import { z } from "zod";
-
-const server = new ViteMCP({
-  name: "Session Counter Server",
-  version: "1.0.0",
-});
-
-// Per-session counter storage
-const sessionCounters = new Map<string, number>();
-
-server.addTool({
-  name: "increment_counter",
-  description: "Increment a per-session counter",
-  parameters: z.object({}),
-  execute: async (args, context) => {
-    if (!context.sessionId) {
-      return "Session ID not available (requires HTTP transport)";
-    }
-
-    const counter = sessionCounters.get(context.sessionId) || 0;
-    const newCounter = counter + 1;
-    sessionCounters.set(context.sessionId, newCounter);
-
-    return `Counter for session ${context.sessionId}: ${newCounter}`;
-  },
-});
-
-server.addTool({
-  name: "show_ids",
-  description: "Display session and request IDs",
-  parameters: z.object({}),
-  execute: async (args, context) => {
-    return `Session ID: ${context.sessionId || "N/A"}
-Request ID: ${context.requestId || "N/A"}`;
-  },
-});
-
-server.start({
-  transportType: "httpStream",
-  httpStream: {
-    port: 8080,
-  },
-});
-```
-
-**Use Cases:**
-
-- **Per-session state management**: Maintain counters, caches, or temporary data unique to each client session
-- **User authentication and authorization**: Track authenticated users across requests
-- **Session-specific resource management**: Allocate and manage resources per session
-- **Multi-tenant implementations**: Isolate data and operations by session
-- **Request tracing**: Track individual requests for debugging and monitoring
-
-**Example:**
-
-See [`src/examples/session-id-counter.ts`](src/examples/session-id-counter.ts) for a complete example demonstrating session-based counter management.
-
-**Notes:**
-
-- Session IDs are automatically generated by the MCP transport layer
-- In stateless mode, session IDs are not persisted across requests
-- For stdio transport, `sessionId` will be `undefined` as there's no HTTP session concept
-
 ### Providing Instructions
 
 You can provide instructions to the server using the `instructions` option:
@@ -2369,170 +2023,88 @@ const server = new ViteMCP({
 });
 ```
 
-### Sessions
+### Multi round-trip requests
 
-The `session` object is an instance of `ViteMCPSession` and it describes active client sessions.
-
-```ts
-server.sessions;
-```
-
-We allocate a new server instance for each client connection to enable 1:1 communication between a client and the server.
-
-### Typed server events
-
-You can listen to events emitted by the server using the `on` method:
+On the stateless protocol a server cannot pause mid-execution and ask the
+client a question — there is no session to hold the suspended call. Instead the
+handler _returns_ a request for more input, and the client re-issues the whole
+call with the answers attached.
 
 ```ts
-server.on("connect", (event) => {
-  console.log("Client connected:", event.session);
-});
+import { z } from "zod";
 
-server.on("disconnect", (event) => {
-  console.log("Client disconnected:", event.session);
-});
-```
+const confirmSchema = z.object({ confirmed: z.boolean() });
 
-## `ViteMCPSession`
-
-`ViteMCPSession` represents a client session and provides methods to interact with the client.
-
-Refer to [Sessions](#sessions) for examples of how to obtain a `ViteMCPSession` instance.
-
-### `requestElicitation`
-
-`requestElicitation` creates an [elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation) request to collect additional information from the user via the client and returns the response. The client must advertise the matching `elicitation` capability mode — `elicitation: { form: {} }` for form requests (the default) and/or `elicitation: { url: {} }` for url requests.
-
-```ts
-await session.requestElicitation({
-  message: "What is your name?",
-  requestedSchema: {
-    type: "object",
-    properties: {
-      name: { type: "string" },
-    },
-    required: ["name"],
-  },
-});
-```
-
-Inside a tool, prefer the `elicit` method from the [context object](#elicitation).
-
-### `requestSampling`
-
-`requestSampling` creates a [sampling](https://modelcontextprotocol.io/docs/concepts/sampling) request and returns the response.
-
-```ts
-await session.requestSampling({
-  messages: [
-    {
-      role: "user",
-      content: {
-        type: "text",
-        text: "What files are in the current directory?",
-      },
-    },
-  ],
-  systemPrompt: "You are a helpful file system assistant.",
-  includeContext: "thisServer",
-  maxTokens: 100,
-});
-```
-
-#### Options
-
-`requestSampling` accepts an optional second parameter for request options:
-
-```ts
-await session.requestSampling(
-  {
-    messages: [
-      {
-        role: "user",
-        content: {
-          type: "text",
-          text: "What files are in the current directory?",
+server.addTool({
+  name: "delete-everything",
+  parameters: z.object({ target: z.string() }),
+  execute: async ({ target }, ctx) => {
+    if (!ctx.inputResponses) {
+      return ctx.inputRequired(
+        {
+          confirm: ctx.elicit({
+            message: `Really delete ${target}?`,
+            requestedSchema: confirmSchema,
+          }),
         },
-      },
-    ],
-    systemPrompt: "You are a helpful file system assistant.",
-    includeContext: "thisServer",
-    maxTokens: 100,
+        // Optional opaque state, echoed back verbatim on the retry.
+        JSON.stringify({ target }),
+      );
+    }
+
+    const answer = ctx.input("confirm", confirmSchema);
+    return answer?.confirmed ? `Deleted ${target}` : "Cancelled";
   },
-  {
-    // Progress callback - called when progress notifications are received
-    onprogress: (progress) => {
-      console.log(`Progress: ${progress.progress}/${progress.total}`);
-    },
-
-    // Abort signal for cancelling the request
-    signal: abortController.signal,
-
-    // Request timeout in milliseconds (default: DEFAULT_REQUEST_TIMEOUT_MSEC)
-    timeout: 30000,
-
-    // Whether progress notifications reset the timeout (default: false)
-    resetTimeoutOnProgress: true,
-
-    // Maximum total timeout regardless of progress (no default)
-    maxTotalTimeout: 60000,
-  },
-);
-```
-
-**Options:**
-
-- `onprogress?: (progress: Progress) => void` - Callback for progress notifications from the remote end
-- `signal?: AbortSignal` - Abort signal to cancel the request
-- `timeout?: number` - Request timeout in milliseconds
-- `resetTimeoutOnProgress?: boolean` - Whether progress notifications reset the timeout
-- `maxTotalTimeout?: number` - Maximum total timeout regardless of progress notifications
-
-### `clientCapabilities`
-
-The `clientCapabilities` property contains the client capabilities.
-
-```ts
-session.clientCapabilities;
-```
-
-### `loggingLevel`
-
-The `loggingLevel` property describes the logging level as set by the client.
-
-```ts
-session.loggingLevel;
-```
-
-### `roots`
-
-The `roots` property contains the roots as set by the client.
-
-```ts
-session.roots;
-```
-
-### `server`
-
-The `server` property contains an instance of MCP server that is associated with the session.
-
-```ts
-session.server;
-```
-
-### Typed session events
-
-You can listen to events emitted by the session using the `on` method:
-
-```ts
-session.on("rootsChanged", (event) => {
-  console.log("Roots changed:", event.roots);
-});
-
-session.on("error", (event) => {
-  console.error("Error:", event.error);
 });
 ```
+
+Two consequences worth internalising:
+
+- **Handlers are re-entrant.** `execute` runs again from the top on the retry.
+  Do not do irreversible work before you have the input you need.
+- **`requestState` is attacker-controlled on the way back.** It round-trips
+  through the client. If it influences authorization or resource access, sign
+  or encrypt it and reject anything that fails verification — ViteMCP does not
+  do that for you.
+
+### Cacheable results
+
+`tools/list`, `prompts/list`, `resources/list`, `resources/templates/list` and
+`resources/read` carry cache hints on this revision. Set them per resource:
+
+```ts
+server.addResource({
+  name: "Changelog",
+  uri: "docs://changelog",
+  cache: { cacheScope: "public", ttlMs: 60_000 },
+  load: async () => ({ text: await readChangelog() }),
+});
+```
+
+`cacheScope: "private"` restricts caching to the requesting client; `"public"`
+permits shared intermediaries.
+
+### Migrating from the session-based API
+
+Revision 2026-07-28 removed protocol sessions, the `initialize` handshake,
+`ping`, `logging/setLevel`, roots, `resources/subscribe` and SSE resumability.
+The corresponding ViteMCP surface went with them:
+
+| Removed                                                                     | Replacement                                           |
+| --------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `ViteMCPSession`, `server.sessions`, `server.on("connect" \| "disconnect")` | Nothing — requests are self-contained                 |
+| `context.session`                                                           | `context.auth` (per-request `authenticate` result)    |
+| `context.sessionId`                                                         | Nothing. Correlate with your own identifier if needed |
+| `await context.elicit(...)`                                                 | Return `ctx.inputRequired({ ... })` — see above       |
+| `session.requestSampling(...)`                                              | Call your LLM provider directly                       |
+| `session.roots`, `session.clientCapabilities`, `session.loggingLevel`       | Nothing                                               |
+| `context.streamContent(...)`                                                | `context.reportProgress(...)`                         |
+| `httpStream.stateless`                                                      | Nothing — every deployment is stateless               |
+| `httpStream.eventStore`                                                     | Nothing — stream resumability was removed             |
+| `ping` / `roots` server options                                             | Nothing                                               |
+
+`authenticate` now receives a web-standard `Request` rather than a Node
+`IncomingMessage`, so read headers with `request.headers.get("...")`.
 
 ## Running Your Server
 
@@ -2579,7 +2151,7 @@ Pass session auth as the second argument, equivalent to what your `authenticate`
 await server.connect(serverTransport, { id: 7, role: "admin" });
 ```
 
-`connect` returns the [`ViteMCPSession`](#vitemcpsession), so you can assert on `session.clientCapabilities`, `session.roots`, and the rest. The transport's lifecycle belongs to you: `stop()` does not close transports passed to `connect`, so close the client (and the session, if you need `disconnect` to fire) when the test finishes.
+The transport's lifecycle belongs to you: `stop()` does not close transports passed to `connect`, so close the client when the test finishes.
 
 ### Test with `mcp-cli`
 

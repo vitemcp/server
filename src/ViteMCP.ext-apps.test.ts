@@ -7,79 +7,11 @@
  * @see https://github.com/punkpeye/vitemcp/issues/229
  * @see https://modelcontextprotocol.github.io/ext-apps/
  */
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { getRandomPort } from "get-port-please";
 import { expect, test } from "vitest";
 import { z } from "zod";
 
-import { ViteMCP, ViteMCPSession } from "./ViteMCP.js";
-
-const runWithTestServer = async ({
-  client: createClient,
-  run,
-  server: createServer,
-}: {
-  client?: () => Promise<Client>;
-  run: ({
-    client,
-    server,
-  }: {
-    client: Client;
-    server: ViteMCP;
-    session: ViteMCPSession;
-  }) => Promise<void>;
-  server?: () => Promise<ViteMCP>;
-}) => {
-  const port = await getRandomPort();
-
-  const server = createServer
-    ? await createServer()
-    : new ViteMCP({
-        name: "Test",
-        version: "1.0.0",
-      });
-
-  await server.start({
-    httpStream: {
-      port,
-    },
-    transportType: "httpStream",
-  });
-
-  try {
-    const client = createClient
-      ? await createClient()
-      : new Client(
-          {
-            name: "example-client",
-            version: "1.0.0",
-          },
-          {
-            capabilities: {},
-          },
-        );
-
-    const transport = new SSEClientTransport(
-      new URL(`http://localhost:${port}/sse`),
-    );
-
-    const session = await new Promise<ViteMCPSession>((resolve) => {
-      server.on("connect", async (event) => {
-        await event.session.waitForReady();
-        resolve(event.session);
-      });
-
-      client.connect(transport);
-    });
-
-    await run({ client, server, session });
-  } finally {
-    await server.stop();
-  }
-
-  return port;
-};
+import { runWithTestServer } from "./testHarness.js";
+import { ViteMCP } from "./ViteMCP.js";
 
 test("includes _meta.ui.resourceUri in tool listing", async () => {
   await runWithTestServer({

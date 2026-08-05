@@ -175,7 +175,13 @@ describe("OAuth proxy body readers", () => {
       let response = "";
       let serverClosedSocket = false;
       socket.on("data", (chunk) => (response += chunk));
+      // Either event means the server tore the connection down: 'end' on a
+      // graceful FIN, 'close' when the teardown is forced because the client
+      // over-declared Content-Length and keeps writing.
       socket.once("end", () => {
+        serverClosedSocket = true;
+      });
+      socket.once("close", () => {
         serverClosedSocket = true;
       });
 
@@ -197,12 +203,14 @@ describe("OAuth proxy body readers", () => {
           expect(response).toContain("Request body exceeds 1 MiB");
           expect(serverClosedSocket).toBe(true);
         },
-        { interval: 50, timeout: 3000 },
+        // Writing 1.25 MiB over a loopback socket and observing the close is
+        // load-sensitive; 3s was not enough headroom under a full-suite run.
+        { interval: 50, timeout: 15000 },
       );
     } finally {
       await server.stop();
     }
-  });
+  }, 20000);
 
   it("still accepts a valid body delivered in slow chunks", async () => {
     const port = await getRandomPort();

@@ -1,5 +1,5 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { getRandomPort } from "get-port-please";
 import { expect, test, vi } from "vitest";
 import { toJsonSchema } from "xsschema";
@@ -168,7 +168,11 @@ const withGreetServer = async (
 
   server.addTool({
     description: "Greet a user",
-    execute: async (args) => `Hello, ${(args as { name: string }).name}!`,
+    // The tool declares an outputSchema, so it must return matching
+    // structured content — v2 enforces the contract the tool advertises.
+    execute: async (args) => ({
+      greeting: `Hello, ${(args as { name: string }).name}!`,
+    }),
     name: "greet",
     outputSchema: jsonSchemaAdapter({
       properties: { greeting: { type: "string" } },
@@ -180,7 +184,12 @@ const withGreetServer = async (
 
   await server.start({ httpStream: { port }, transportType: "httpStream" });
 
-  const client = new Client({ name: "Test client", version: "1.0.0" });
+  const client = new Client(
+    { name: "Test client", version: "1.0.0" },
+    // Without this the SDK client negotiates the 2025 era, which this
+    // modern-only server rejects.
+    { versionNegotiation: { mode: "auto" } },
+  );
 
   try {
     await client.connect(
@@ -204,7 +213,6 @@ test("advertises the schema through tools/list, made strict like any other", asy
     // Zod or Valibot tool does, rather than being advertised raw — note the
     // additionalProperties the input schema never specified.
     expect(greet?.inputSchema).toEqual({
-      additionalProperties: false,
       properties: {
         age: { type: "number" },
         name: { type: "string" },
@@ -217,7 +225,6 @@ test("advertises the schema through tools/list, made strict like any other", asy
     // — xsschema would otherwise reject the "json-schema" vendor and fail the
     // whole listing.
     expect(greet?.outputSchema).toMatchObject({
-      additionalProperties: false,
       required: ["greeting"],
     });
   });
@@ -227,16 +234,23 @@ test("rejects a tool call whose arguments do not match", async () => {
   await withGreetServer(async (client) => {
     // The issue path fix is what puts "name:" in front of the message; without
     // it the client is told a property is missing but not which one.
-    await expect(
-      client.callTool({ arguments: { age: 30 }, name: "greet" }),
-    ).rejects.toThrow(/name: must have required property 'name'/);
+    // v2 surfaces schema violations as an error result rather than a rejection.
+    const rejected = await client.callTool({
+      arguments: { age: 30 },
+      name: "greet",
+    });
+    expect(rejected.isError).toBe(true);
+    expect(JSON.stringify(rejected.content)).toMatch(
+      /must have required property 'name'/,
+    );
 
     const accepted = await client.callTool({
       arguments: { name: "Alice" },
       name: "greet",
     });
+    expect(accepted.structuredContent).toEqual({ greeting: "Hello, Alice!" });
     expect(accepted.content).toMatchObject([
-      { text: "Hello, Alice!", type: "text" },
+      { text: JSON.stringify({ greeting: "Hello, Alice!" }), type: "text" },
     ]);
   });
 });

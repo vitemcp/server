@@ -1,5 +1,3 @@
-import type { IncomingMessage } from "node:http";
-
 import { describe, expect, it } from "vitest";
 
 import { AzureProvider } from "./AzureProvider.js";
@@ -60,7 +58,7 @@ describe("OAuthProvider", () => {
 
     it("should return undefined for request without Authorization header", async () => {
       const provider = new OAuthProvider(baseConfig);
-      const request = { headers: {} } as IncomingMessage;
+      const request = new Request("https://example.com/mcp");
       const result = await provider.authenticate(request);
 
       expect(result).toBeUndefined();
@@ -68,9 +66,9 @@ describe("OAuthProvider", () => {
 
     it("should return undefined for non-Bearer authorization", async () => {
       const provider = new OAuthProvider(baseConfig);
-      const request = {
+      const request = new Request("https://example.com/mcp", {
         headers: { authorization: "Basic dXNlcjpwYXNz" },
-      } as IncomingMessage;
+      });
       const result = await provider.authenticate(request);
 
       expect(result).toBeUndefined();
@@ -78,9 +76,9 @@ describe("OAuthProvider", () => {
 
     it("should return undefined for invalid Bearer token", async () => {
       const provider = new OAuthProvider(baseConfig);
-      const request = {
+      const request = new Request("https://example.com/mcp", {
         headers: { authorization: "Bearer invalid-token" },
-      } as IncomingMessage;
+      });
       const result = await provider.authenticate(request);
 
       // Without valid upstream tokens, should return undefined

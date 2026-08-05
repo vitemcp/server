@@ -1,46 +1,29 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
-  CallToolRequestSchema,
-  ClientCapabilities,
-  CompleteRequestSchema,
-  CreateMessageRequestSchema,
-  ElicitRequestFormParams,
-  ElicitRequestURLParams,
-  ElicitResult,
-  ErrorCode,
-  GetPromptRequestSchema,
-  GetPromptResult,
-  ListPromptsRequestSchema,
-  ListPromptsResult,
-  ListResourcesRequestSchema,
-  ListResourcesResult,
-  ListResourceTemplatesRequestSchema,
-  ListResourceTemplatesResult,
-  ListToolsRequestSchema,
-  ListToolsResult,
-  McpError,
-  ReadResourceRequestSchema,
-  ResourceLink,
-  Root,
-  RootsListChangedNotificationSchema,
-  Tool as SDKTool,
-  ServerCapabilities,
-  SetLevelRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+  acceptedContent,
+  type CacheScope,
+  completable,
+  createMcpHandler,
+  fromJsonSchema,
+  type InputRequest,
+  inputRequired,
+  type InputRequiredResult,
+  localhostAllowedOrigins,
+  type McpHttpHandler,
+  McpServer,
+  originValidationResponse,
+  ResourceTemplate as SDKResourceTemplate,
+  type ToolAnnotations as SDKToolAnnotations,
+} from "@modelcontextprotocol/server";
+import {
+  serveStdio,
+  type StdioServerHandle,
+} from "@modelcontextprotocol/server/stdio";
 import { StandardSchemaV1 } from "@standard-schema/spec";
-import { EventEmitter } from "events";
 import { readFile } from "fs/promises";
-import Fuse from "fuse.js";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import http from "http";
-import { type CorsOptions, startHTTPServer } from "mcp-proxy";
-import { StrictEventEmitter } from "strict-event-emitter-types";
+import https from "https";
 import { setTimeout as delay } from "timers/promises";
 import { fetch } from "undici";
 import parseURITemplate from "uri-templates";
@@ -53,309 +36,27 @@ import type {
   OAuthSession,
 } from "./auth/providers/AuthProvider.js";
 
+import { createOAuthRouter, OAUTH_PROXY_MAX_BODY_SIZE } from "./auth/router.js";
+
 export interface Logger {
-  debug(...args: unknown[]): void;
-  error(...args: unknown[]): void;
-  info(...args: unknown[]): void;
-  log(...args: unknown[]): void;
-  warn(...args: unknown[]): void;
+  debug: (...args: unknown[]) => void;
+  error: (...args: unknown[]) => void;
+  info: (...args: unknown[]) => void;
+  log: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
 }
 
-export type SSEServer = {
-  close: () => Promise<void>;
-};
-
-type ViteMCPEvents<T extends ViteMCPSessionAuth> = {
-  connect: (event: { session: ViteMCPSession<T> }) => void;
-  disconnect: (event: { session: ViteMCPSession<T> }) => void;
-};
-
-type ViteMCPSessionEvents = {
-  error: (event: { error: Error }) => void;
-  ready: () => void;
-  rootsChanged: (event: { roots: Root[] }) => void;
-};
-
-/**
- * Timeout for image/audio URL fetches (in milliseconds). The OAuth upstream
- * fetches (#304) use 10s because they are short interactive exchanges; media
- * downloads can be larger and slower, so 30s is the balance between hanging
- * forever on an unresponsive server and false positives on slow connections.
- */
 export const MEDIA_FETCH_TIMEOUT_MS = 30000;
 
-type MediaContentInput =
+/* -------------------------------------------------------------------------- */
+/* Errors                                                                      */
+/* -------------------------------------------------------------------------- */
+
+type MediaSource = { timeoutMs?: number } & (
   | { buffer: Buffer }
   | { path: string }
-  | { timeoutMs?: number; url: string };
-
-export const imageContent = async (
-  input: MediaContentInput,
-): Promise<ImageContent> => {
-  let rawData: Buffer;
-
-  try {
-    if ("url" in input) {
-      const timeoutMs = input.timeoutMs ?? MEDIA_FETCH_TIMEOUT_MS;
-
-      try {
-        const response = await fetch(input.url, {
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-
-        if (!response.ok) {
-          throw new Error(
-            `Server responded with status: ${response.status} - ${response.statusText}`,
-          );
-        }
-
-        rawData = Buffer.from(await response.arrayBuffer());
-      } catch (error) {
-        // "AbortError" is unreachable today (no caller signal); kept as insurance.
-        if (
-          error instanceof Error &&
-          (error.name === "AbortError" || error.name === "TimeoutError")
-        ) {
-          throw new Error(
-            `Failed to fetch image from URL (${input.url}): timed out after ${timeoutMs}ms`,
-          );
-        }
-
-        throw new Error(
-          `Failed to fetch image from URL (${input.url}): ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    } else if ("path" in input) {
-      try {
-        rawData = await readFile(input.path);
-      } catch (error) {
-        throw new Error(
-          `Failed to read image from path (${input.path}): ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    } else if ("buffer" in input) {
-      rawData = input.buffer;
-    } else {
-      throw new Error(
-        "Invalid input: Provide a valid 'url', 'path', or 'buffer'",
-      );
-    }
-
-    const { fileTypeFromBuffer } = await import("file-type");
-    const mimeType = await fileTypeFromBuffer(rawData);
-
-    if (!mimeType || !mimeType.mime.startsWith("image/")) {
-      console.warn(
-        `Warning: Content may not be a valid image. Detected MIME: ${
-          mimeType?.mime || "unknown"
-        }`,
-      );
-    }
-
-    const base64Data = rawData.toString("base64");
-
-    return {
-      data: base64Data,
-      mimeType: mimeType?.mime ?? "image/png",
-      type: "image",
-    } as const;
-  } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    } else {
-      throw new Error(`Unexpected error processing image: ${String(error)}`);
-    }
-  }
-};
-
-export const audioContent = async (
-  input: MediaContentInput,
-): Promise<AudioContent> => {
-  let rawData: Buffer;
-
-  try {
-    if ("url" in input) {
-      const timeoutMs = input.timeoutMs ?? MEDIA_FETCH_TIMEOUT_MS;
-
-      try {
-        const response = await fetch(input.url, {
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-
-        if (!response.ok) {
-          throw new Error(
-            `Server responded with status: ${response.status} - ${response.statusText}`,
-          );
-        }
-
-        rawData = Buffer.from(await response.arrayBuffer());
-      } catch (error) {
-        // "AbortError" is unreachable today (no caller signal); kept as insurance.
-        if (
-          error instanceof Error &&
-          (error.name === "AbortError" || error.name === "TimeoutError")
-        ) {
-          throw new Error(
-            `Failed to fetch audio from URL (${input.url}): timed out after ${timeoutMs}ms`,
-          );
-        }
-
-        throw new Error(
-          `Failed to fetch audio from URL (${input.url}): ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    } else if ("path" in input) {
-      try {
-        rawData = await readFile(input.path);
-      } catch (error) {
-        throw new Error(
-          `Failed to read audio from path (${input.path}): ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    } else if ("buffer" in input) {
-      rawData = input.buffer;
-    } else {
-      throw new Error(
-        "Invalid input: Provide a valid 'url', 'path', or 'buffer'",
-      );
-    }
-
-    const { fileTypeFromBuffer } = await import("file-type");
-    const mimeType = await fileTypeFromBuffer(rawData);
-
-    if (!mimeType || !mimeType.mime.startsWith("audio/")) {
-      console.warn(
-        `Warning: Content may not be a valid audio file. Detected MIME: ${
-          mimeType?.mime || "unknown"
-        }`,
-      );
-    }
-
-    const base64Data = rawData.toString("base64");
-
-    return {
-      data: base64Data,
-      mimeType: mimeType?.mime ?? "audio/mpeg",
-      type: "audio",
-    } as const;
-  } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    } else {
-      throw new Error(`Unexpected error processing audio: ${String(error)}`);
-    }
-  }
-};
-
-type Context<T extends ViteMCPSessionAuth> = {
-  client: {
-    version: ReturnType<Server["getClientVersion"]>;
-  };
-  /**
-   * Requests additional information from the user via the client
-   * (see https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation).
-   * The client must advertise the matching `elicitation` capability mode —
-   * `elicitation: { form: {} }` for form requests (the default) and/or
-   * `elicitation: { url: {} }` for url requests.
-   */
-  elicit: (
-    params: ElicitRequestFormParams | ElicitRequestURLParams,
-    options?: RequestOptions,
-  ) => Promise<ElicitResult>;
-  log: {
-    debug: (message: string, data?: SerializableValue) => void;
-    error: (message: string, data?: SerializableValue) => void;
-    info: (message: string, data?: SerializableValue) => void;
-    warn: (message: string, data?: SerializableValue) => void;
-  };
-  reportProgress: (progress: Progress) => Promise<void>;
-  /**
-   * Request ID from the current MCP request.
-   * Available for all transports when the client provides it.
-   */
-  requestId?: string;
-  session: T | undefined;
-  /**
-   * Session ID from the Mcp-Session-Id header.
-   * Only available for HTTP-based transports (SSE, HTTP Stream).
-   * Can be used to track per-session state, implement session-specific
-   * counters, or maintain user-specific data across multiple requests.
-   */
-  sessionId?: string;
-  /**
-   * Streams incremental content while the tool is still executing, by emitting
-   * a `notifications/tool/streamContent` notification.
-   *
-   * NOTE: this is a ViteMCP extension, not part of the MCP specification. As of
-   * revision 2025-11-25 the spec has no streaming tool output primitive (see
-   * SEP-2998 for the in-progress proposal). A client only receives these
-   * notifications if it registers a handler for the method or sets a
-   * `fallbackNotificationHandler`; otherwise the SDK drops them silently. No
-   * client is known to render them as tool output.
-   *
-   * Always return a final result from `execute` rather than relying on streamed
-   * content alone, otherwise clients that ignore the notification see an empty
-   * tool result. For incremental status that works everywhere, prefer
-   * {@link Context.reportProgress} with a `message`.
-   */
-  streamContent: (content: Content | Content[]) => Promise<void>;
-};
-
-type Extra = unknown;
-
-type Extras = Record<string, Extra>;
-
-type Literal = boolean | null | number | string | undefined;
-
-/**
- * Context passed to `load` for resources, resource templates, and prompts.
- *
- * This is a subset of the tool execution {@link Context}. `reportProgress`
- * and `streamContent` are tied to a tool call's progress token / streaming
- * notification and are not available outside of `tool.execute`.
- */
-type LoadContext<T extends ViteMCPSessionAuth> = Omit<
-  Context<T>,
-  "reportProgress" | "streamContent"
->;
-
-type Progress = {
-  /**
-   * An optional human-readable message describing the current progress.
-   *
-   * Part of `notifications/progress` since MCP revision 2025-03-26, so unlike
-   * `streamContent` this reaches any spec-compliant client.
-   */
-  message?: string;
-  /**
-   * The progress thus far. This should increase every time progress is made, even if the total is unknown.
-   */
-  progress: number;
-  /**
-   * Total number of items to process (or total progress required), if known.
-   */
-  total?: number;
-};
-
-type SerializableValue =
-  | { [key: string]: SerializableValue }
-  | Literal
-  | SerializableValue[];
-
-type TextContent = {
-  text: string;
-  type: "text";
-};
-
-type ToolParameters = StandardSchemaV1;
+  | { url: string }
+);
 
 export abstract class ViteMCPError extends Error {
   public constructor(message?: string) {
@@ -364,733 +65,329 @@ export abstract class ViteMCPError extends Error {
   }
 }
 
-/**
- * An error raised when a session encounters a problem (e.g. connection
- * failures, protocol violations).  Consumers can use this class to
- * distinguish vitemcp session errors from unrelated runtime errors:
- *
- * ```ts
- * server.on("error", ({ error }) => {
- *   if (error instanceof SessionError) { ... }
- * });
- * ```
- */
-export class SessionError extends ViteMCPError {}
-
 export class UnexpectedStateError extends ViteMCPError {
-  public extras?: Extras;
+  public extras?: Record<string, unknown>;
 
-  public constructor(message: string, extras?: Extras) {
+  public constructor(message: string, extras?: Record<string, unknown>) {
     super(message);
     this.name = new.target.name;
     this.extras = extras;
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Media helpers (protocol-independent)                                        */
+/* -------------------------------------------------------------------------- */
+
 /**
- * An error that is meant to be surfaced to the user.
+ * An error that is meant to be surfaced to the user, rather than logged as an
+ * internal failure. Thrown from a tool handler, it becomes the tool's error
+ * result rather than a protocol-level error.
  */
 export class UserError extends UnexpectedStateError {}
 
-function assertStandardSchema(
-  toolName: string,
-  schemaName: "outputSchema" | "parameters",
-  schema: ToolParameters,
-): void {
-  const standard = (schema as { "~standard"?: { validate?: unknown } })[
-    "~standard"
-  ];
+const readMedia = async (
+  source: MediaSource,
+  kind: "audio" | "image",
+): Promise<{ data: string; mimeType: string }> => {
+  let rawData: Buffer;
 
-  if (typeof standard?.validate === "function") {
-    return;
+  try {
+    if ("url" in source) {
+      const response = await fetch(source.url, {
+        signal: AbortSignal.timeout(source.timeoutMs ?? MEDIA_FETCH_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server responded with status: ${response.status}`);
+      }
+
+      rawData = Buffer.from(await response.arrayBuffer());
+    } else if ("path" in source) {
+      rawData = await readFile(source.path);
+    } else if ("buffer" in source) {
+      rawData = source.buffer;
+    } else {
+      throw new Error(
+        `Invalid ${kind} source: provide one of url, path, or buffer`,
+      );
+    }
+  } catch (error) {
+    if ("url" in source) {
+      const reason =
+        error instanceof Error && error.name === "TimeoutError"
+          ? `timed out after ${source.timeoutMs ?? MEDIA_FETCH_TIMEOUT_MS}ms`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+
+      throw new Error(
+        `Failed to fetch ${kind} from URL (${source.url}): ${reason}`,
+      );
+    }
+
+    if (error instanceof Error) {
+      throw error;
+    }
+
+    throw new Error(`Unexpected error processing ${kind}: ${String(error)}`);
   }
 
-  throw new UserError(
-    `Tool '${toolName}' ${schemaName} must implement Standard Schema. If you are using Zod, upgrade to version 3.24 or later.`,
-  );
-}
+  const { fileTypeFromBuffer } = await import("file-type");
+  const mimeType = await fileTypeFromBuffer(rawData);
 
-function assertToolSchemas(tool: {
-  name: string;
-  outputSchema?: ToolParameters;
-  parameters?: ToolParameters;
-}): void {
-  if (tool.parameters) {
-    assertStandardSchema(tool.name, "parameters", tool.parameters);
-  }
-
-  if (tool.outputSchema) {
-    assertStandardSchema(tool.name, "outputSchema", tool.outputSchema);
-  }
-}
-
-const TextContentZodSchema = z
-  .object({
-    /**
-     * The text content of the message.
-     */
-    text: z.string(),
-    type: z.literal("text"),
-  })
-  .strict() satisfies z.ZodType<TextContent>;
-
-type ImageContent = {
-  data: string;
-  mimeType: string;
-  type: "image";
+  return {
+    data: rawData.toString("base64"),
+    mimeType: mimeType?.mime ?? (kind === "image" ? "image/png" : "audio/mpeg"),
+  };
 };
 
-const ImageContentZodSchema = z
-  .object({
-    /**
-     * The base64-encoded image data.
-     */
-    data: z.string().base64(),
-    /**
-     * The MIME type of the image. Different providers may support different image types.
-     */
-    mimeType: z.string(),
-    type: z.literal("image"),
-  })
-  .strict() satisfies z.ZodType<ImageContent>;
+export const imageContent = async (
+  source: MediaSource,
+): Promise<ImageContent> => {
+  const { data, mimeType } = await readMedia(source, "image");
+  return { data, mimeType, type: "image" } as const;
+};
 
-type AudioContent = {
+export const audioContent = async (
+  source: MediaSource,
+): Promise<AudioContent> => {
+  const { data, mimeType } = await readMedia(source, "audio");
+  return { data, mimeType, type: "audio" } as const;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Content types                                                               */
+/* -------------------------------------------------------------------------- */
+
+export enum ServerState {
+  Error = "error",
+  Running = "running",
+  Starting = "starting",
+  Stopped = "stopped",
+}
+
+export type AudioContent = {
   data: string;
   mimeType: string;
   type: "audio";
 };
 
-const AudioContentZodSchema = z
-  .object({
-    /**
-     * The base64-encoded audio data.
-     */
-    data: z.string().base64(),
-    mimeType: z.string(),
-    type: z.literal("audio"),
-  })
-  .strict() satisfies z.ZodType<AudioContent>;
-
-type ResourceContent = {
-  resource: {
-    blob?: string;
-    mimeType?: string;
-    text?: string;
-    uri: string;
-  };
-  type: "resource";
+/**
+ * Freshness hint attached to cacheable results (`tools/list`, `prompts/list`,
+ * `resources/list`, `resources/templates/list`, `resources/read`). Required by
+ * the 2026-07-28 revision's `CacheableResult`.
+ */
+export type CacheHint = {
+  cacheScope?: CacheScope;
+  ttlMs?: number;
 };
 
-const ResourceContentZodSchema = z
-  .object({
-    resource: z.object({
-      blob: z.string().optional(),
-      mimeType: z.string().optional(),
-      text: z.string().optional(),
-      uri: z.string(),
-    }),
-    type: z.literal("resource"),
-  })
-  .strict() satisfies z.ZodType<ResourceContent>;
+/** The spec's completion payload. */
+export type Completion = {
+  hasMore?: boolean;
+  total?: number;
+  values: string[];
+};
 
-const ResourceLinkZodSchema = z.object({
-  description: z.string().optional(),
-  mimeType: z.string().optional(),
-  name: z.string(),
-  title: z.string().optional(),
-  type: z.literal("resource_link"),
-  uri: z.string(),
-}) satisfies z.ZodType<ResourceLink>;
-
-type Content =
+export type Content =
   | AudioContent
   | ImageContent
   | ResourceContent
   | ResourceLink
   | TextContent;
 
-const ContentZodSchema = z.discriminatedUnion("type", [
-  TextContentZodSchema,
-  ImageContentZodSchema,
-  AudioContentZodSchema,
-  ResourceContentZodSchema,
-  ResourceLinkZodSchema,
-]) satisfies z.ZodType<Content>;
-
-type ContentResult = {
-  _meta?: Record<string, unknown>;
+export type ContentResult = {
   content: Content[];
   isError?: boolean;
-  structuredContent?: Record<string, unknown>;
-};
-
-const ContentResultZodSchema = z
-  .object({
-    _meta: z.record(z.string(), z.unknown()).optional(),
-    content: ContentZodSchema.array(),
-    isError: z.boolean().optional(),
-    structuredContent: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict() satisfies z.ZodType<ContentResult>;
-
-type Completion = {
-  hasMore?: boolean;
-  total?: number;
-  values: string[];
+  structuredContent?: unknown;
 };
 
 /**
- * https://github.com/modelcontextprotocol/typescript-sdk/blob/3164da64d085ec4e022ae881329eee7b72f208d4/src/types.ts#L983-L1003
+ * Context handed to `execute` / `load`.
+ *
+ * On the 2026-07-28 revision there is no protocol session: every request is
+ * self-contained. Anything that used to hang off a session — `sessionId`,
+ * `clientCapabilities`, `roots`, the ready/close lifecycle — is gone. What
+ * survives is per-request.
  */
-const CompletionZodSchema = z.object({
-  /**
-   * Indicates whether there are additional completion options beyond those provided in the current response, even if the exact total is unknown.
-   */
-  hasMore: z.optional(z.boolean()),
-  /**
-   * The total number of completion options available. This can exceed the number of values actually sent in the response.
-   */
-  total: z.optional(z.number().int()),
-  /**
-   * An array of completion values. Must not exceed 100 items.
-   */
-  values: z.array(z.string()).max(100),
-}) satisfies z.ZodType<Completion>;
+export type Context<T extends ViteMCPAuth> = {
+  /** Authentication result for this request, if an `authenticate` hook ran. */
+  auth: T | undefined;
 
-type ArgumentValueCompleter<T extends ViteMCPSessionAuth = ViteMCPSessionAuth> =
-  (value: string, auth?: T) => Promise<Completion>;
+  /**
+   * Builds an embedded elicitation request for {@link Context.inputRequired}.
+   *
+   * This is a *builder*, not a promise: on the stateless protocol the server
+   * cannot block waiting for the client. Return the result of
+   * `inputRequired()` and the client re-issues the whole request with
+   * `inputResponses` populated.
+   */
+  elicit: (params: {
+    message: string;
+    requestedSchema: StandardSchemaV1;
+  }) => InputRequest;
 
-type InputPrompt<
-  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
-  Arguments extends InputPromptArgument<T>[] = InputPromptArgument<T>[],
-  Args = PromptArgumentsToObject<Arguments>,
-> = {
-  arguments?: InputPromptArgument<T>[];
-  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
-  description?: string;
-  load: (
-    args: Args,
-    auth?: T,
-    context?: LoadContext<T>,
-  ) => Promise<PromptResult>;
-  name: string;
+  /**
+   * Reads one entry of `inputResponses` and validates it against the schema
+   * used to request it. Returns `undefined` when the client declined or the
+   * content does not match.
+   */
+  input: <S extends StandardSchemaV1>(
+    key: string,
+    schema: S,
+  ) => StandardSchemaV1.InferOutput<S> | undefined;
+
+  /**
+   * Multi round-trip request: suspend this call and ask the client for more
+   * input. `requestState` is opaque, server-minted, and comes back verbatim —
+   * it is attacker-controlled on return, so integrity-protect it if it
+   * influences authorization or resource access.
+   */
+  inputRequired: (
+    inputRequests: Record<string, InputRequest>,
+    requestState?: string,
+  ) => InputRequiredResult;
+
+  /**
+   * Present when the client is retrying a request that previously returned
+   * `input_required`. Absent on the first call.
+   */
+  inputResponses?: Record<string, unknown>;
+
+  /**
+   * Emits `notifications/message`. The spec forbids emitting these unless the
+   * request opted in via `_meta` log level, so these are dropped when the
+   * client did not ask for logs.
+   */
+  log: {
+    debug: (message: string, data?: SerializableValue) => void;
+    error: (message: string, data?: SerializableValue) => void;
+    info: (message: string, data?: SerializableValue) => void;
+    warn: (message: string, data?: SerializableValue) => void;
+  };
+
+  reportProgress: (progress: Progress) => Promise<void>;
+
+  /** Request ID of the current MCP request. */
+  requestId?: string;
+
+  /** The `requestState` echoed back by the client on an MRTR retry. */
+  requestState?: string;
 };
 
-type InputPromptArgument<T extends ViteMCPSessionAuth = ViteMCPSessionAuth> =
-  Readonly<{
-    complete?: ArgumentValueCompleter<T>;
-    description?: string;
-    enum?: string[];
-    name: string;
-    required?: boolean;
-  }>;
+export type ImageContent = {
+  data: string;
+  mimeType: string;
+  type: "image";
+};
 
-type InputResourceTemplate<
-  T extends ViteMCPSessionAuth,
-  Arguments extends InputResourceTemplateArgument<T>[] =
-    InputResourceTemplateArgument<T>[],
-> = {
-  arguments: Arguments;
-  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
-  description?: string;
-  load: (
-    args: ResourceTemplateArgumentsToObject<Arguments>,
-    auth?: T,
-    context?: LoadContext<T>,
-  ) => Promise<ResourceResult | ResourceResult[]>;
+/**
+ * A single loaded resource body. `uri` is optional: when omitted the server
+ * fills it in from the resource (or the expanded template) that produced it.
+ */
+export type LoadedResource = {
+  blob?: string;
   mimeType?: string;
-  name: string;
-  uriTemplate: string;
+  text?: string;
+  uri?: string;
 };
 
-type InputResourceTemplateArgument<
-  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
-> = Readonly<{
-  complete?: ArgumentValueCompleter<T>;
+export type Prompt<T extends ViteMCPAuth> = {
+  arguments?: PromptArgument[];
+  canAccess?: (auth: T) => boolean;
+  /** Completes any argument. Per-argument `complete` wins over this. */
+  complete?: (name: string, value: string) => Promise<Completion>;
+  description?: string;
+  load: (
+    args: Record<string, string>,
+    context: LoadContext<T>,
+  ) => Promise<{ messages: unknown[] } | string>;
+  name: string;
+};
+
+export type PromptArgument = {
+  complete?: (value: string) => Promise<Completion>;
   description?: string;
   name: string;
   required?: boolean;
-}>;
-
-type LoggingLevel =
-  | "alert"
-  | "critical"
-  | "debug"
-  | "emergency"
-  | "error"
-  | "info"
-  | "notice"
-  | "warning";
-
-type Prompt<
-  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
-  Arguments extends PromptArgument<T>[] = PromptArgument<T>[],
-  Args = PromptArgumentsToObject<Arguments>,
-> = {
-  arguments?: PromptArgument<T>[];
-  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
-  description?: string;
-  load: (
-    args: Args,
-    auth?: T,
-    context?: LoadContext<T>,
-  ) => Promise<PromptResult>;
-  name: string;
 };
 
-type PromptArgument<T extends ViteMCPSessionAuth = ViteMCPSessionAuth> =
-  Readonly<{
-    complete?: ArgumentValueCompleter<T>;
-    description?: string;
-    enum?: string[];
-    name: string;
-    required?: boolean;
-  }>;
-
-type PromptArgumentsToObject<T extends { name: string; required?: boolean }[]> =
-  {
-    [K in T[number]["name"]]: Extract<
-      T[number],
-      { name: K }
-    >["required"] extends true
-      ? string
-      : string | undefined;
-  };
-
-type PromptResult = Pick<GetPromptResult, "messages"> | string;
-
-type Resource<T extends ViteMCPSessionAuth> = {
-  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
+export type Resource<T extends ViteMCPAuth> = {
+  cache?: CacheHint;
+  canAccess?: (auth: T) => boolean;
   description?: string;
-  load: (
-    auth?: T,
-    context?: LoadContext<T>,
-  ) => Promise<ResourceResult | ResourceResult[]>;
+  load: (context: LoadContext<T>) => Promise<LoadedResource | LoadedResource[]>;
   mimeType?: string;
   name: string;
   uri: string;
 };
 
-type ResourceResult =
-  | {
-      blob: string;
-      mimeType?: string;
-      uri?: string;
-    }
-  | {
-      mimeType?: string;
-      text: string;
-      uri?: string;
-    };
+/* -------------------------------------------------------------------------- */
+/* Handler context                                                             */
+/* -------------------------------------------------------------------------- */
 
-type ResourceTemplate<
-  T extends ViteMCPSessionAuth,
-  Arguments extends ResourceTemplateArgument<T>[] =
-    ResourceTemplateArgument<T>[],
-> = {
-  arguments: Arguments;
-  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
+export type ResourceTemplate<T extends ViteMCPAuth> = {
+  arguments?: ResourceTemplateArgument[];
+  cache?: CacheHint;
+  canAccess?: (auth: T) => boolean;
+  /** Completes any template variable. Per-argument `complete` wins over this. */
+  complete?: (name: string, value: string) => Promise<Completion>;
   description?: string;
   load: (
-    args: ResourceTemplateArgumentsToObject<Arguments>,
-    auth?: T,
-    context?: LoadContext<T>,
-  ) => Promise<ResourceResult | ResourceResult[]>;
+    args: Record<string, string>,
+    context: LoadContext<T>,
+  ) => Promise<LoadedResource | LoadedResource[]>;
   mimeType?: string;
   name: string;
   uriTemplate: string;
 };
 
-type ResourceTemplateArgument<
-  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
-> = Readonly<{
-  complete?: ArgumentValueCompleter<T>;
+export type ResourceTemplateArgument = {
+  complete?: (value: string) => Promise<Completion>;
   description?: string;
   name: string;
   required?: boolean;
-}>;
-
-type ResourceTemplateArgumentsToObject<T extends { name: string }[]> = {
-  [K in T[number]["name"]]: string;
 };
 
-type SamplingResponse = {
-  content: AudioContent | ImageContent | TextContent;
-  model: string;
-  role: "assistant" | "user";
-  stopReason?: "endTurn" | "maxTokens" | "stopSequence" | string;
-};
-
-type ServerOptions<T extends ViteMCPSessionAuth> = {
-  /**
-   * Authentication provider for OAuth flows.
-   * When provided, automatically configures the `authenticate` function
-   * and `oauth` settings.
-   *
-   * For custom authentication logic, use the `authenticate` option instead.
-   * If both are provided, `authenticate` takes precedence.
-   *
-   * @example
-   * ```typescript
-   * import { ViteMCP, GitHubProvider } from "@vitemcp/server";
-   *
-   * const server = new ViteMCP({
-   *   auth: new GitHubProvider({
-   *     baseUrl: "http://localhost:8000",
-   *     clientId: process.env.GITHUB_CLIENT_ID!,
-   *     clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-   *   }),
-   *   name: "My Server",
-   *   version: "1.0.0",
-   * });
-   * ```
-   */
+export type ServerOptions<T extends ViteMCPAuth> = {
   auth?: AuthProvider<T extends OAuthSession ? T : OAuthSession>;
   authenticate?: Authenticate<T>;
-  /**
-   * Configuration for the health-check endpoint that can be exposed when the
-   * server is running using the HTTP Stream transport. When enabled, the
-   * server will respond to an HTTP GET request with the configured path (by
-   * default "/health") rendering a plain-text response (by default "ok") and
-   * the configured status code (by default 200).
-   *
-   * The endpoint is only added when the server is started with
-   * `transportType: "httpStream"` – it is ignored for the stdio transport.
-   */
   health?: {
-    /**
-     * When set to `false` the health-check endpoint is disabled.
-     * @default true
-     */
     enabled?: boolean;
-
-    /**
-     * Plain-text body returned by the endpoint.
-     * @default "ok"
-     */
     message?: string;
-
-    /**
-     * HTTP path that should be handled.
-     * @default "/health"
-     */
     path?: string;
-
-    /**
-     * HTTP response status that will be returned.
-     * @default 200
-     */
     status?: number;
   };
   instructions?: string;
-  /**
-   * Custom logger instance. If not provided, defaults to console.
-   * Use this to integrate with your own logging system.
-   */
   logger?: Logger;
   name: string;
-
-  /**
-   * Configuration for OAuth well-known discovery endpoints that can be exposed
-   * when the server is running using HTTP-based transports (SSE or HTTP Stream).
-   * When enabled, the server will respond to requests for OAuth discovery endpoints
-   * with the configured metadata.
-   *
-   * The endpoints are only added when the server is started with
-   * `transportType: "httpStream"` – they are ignored for the stdio transport.
-   * Both SSE and HTTP Stream transports support OAuth endpoints.
-   */
   oauth?: {
-    /**
-     * OAuth Authorization Server metadata for /.well-known/oauth-authorization-server
-     *
-     * This endpoint follows RFC 8414 (OAuth 2.0 Authorization Server Metadata)
-     * and provides metadata about the OAuth 2.0 authorization server.
-     *
-     * Required by MCP Specification 2025-03-26
-     */
-    authorizationServer?: {
-      authorizationEndpoint: string;
-      codeChallengeMethodsSupported?: string[];
-      // DPoP support
-      dpopSigningAlgValuesSupported?: string[];
-      grantTypesSupported?: string[];
-
-      introspectionEndpoint?: string;
-      // Required
-      issuer: string;
-      // Common optional
-      jwksUri?: string;
-      opPolicyUri?: string;
-      opTosUri?: string;
-      registrationEndpoint?: string;
-      responseModesSupported?: string[];
-      responseTypesSupported: string[];
-      revocationEndpoint?: string;
-      scopesSupported?: string[];
-      serviceDocumentation?: string;
-      tokenEndpoint: string;
-      tokenEndpointAuthMethodsSupported?: string[];
-      tokenEndpointAuthSigningAlgValuesSupported?: string[];
-
-      uiLocalesSupported?: string[];
-    };
-
-    /**
-     * Whether OAuth discovery endpoints should be enabled.
-     */
-    enabled: boolean;
-
-    /**
-     * OAuth Protected Resource metadata for `/.well-known/oauth-protected-resource`
-     *
-     * This endpoint follows {@link https://www.rfc-editor.org/rfc/rfc9728.html | RFC 9728}
-     * and provides metadata describing how an OAuth 2.0 protected resource (in this case,
-     * an MCP server) expects to be accessed.
-     *
-     * When configured, ViteMCP will automatically serve this metadata at the
-     * `/.well-known/oauth-protected-resource` endpoint. The `authorizationServers` and `resource`
-     * fields are required. All others are optional and will be omitted from the published
-     * metadata if not specified.
-     *
-     * This satisfies the requirements of the MCP Authorization specification's
-     * {@link https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization#authorization-server-location | Authorization Server Location section}.
-     *
-     * Clients consuming this metadata MUST validate that any presented values comply with
-     * RFC 9728, including strict validation of the `resource` identifier and intended audience
-     * when access tokens are issued and presented (per RFC 8707 §2).
-     *
-     * @remarks Required by MCP Specification version 2025-06-18
-     */
-    protectedResource?: {
-      /**
-       * Allows for additional metadata fields beyond those defined in RFC 9728.
-       *
-       * @remarks This supports vendor-specific or experimental extensions.
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2.3 | RFC 9728 §2.3}
-       */
-      [key: string]: unknown;
-
-      /**
-       * Supported values for the `authorization_details` parameter (RFC 9396).
-       *
-       * @remarks Used when fine-grained access control is in play.
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.23 | RFC 9728 §2.2.23}
-       */
-      authorizationDetailsTypesSupported?: string[];
-
-      /**
-       * List of OAuth 2.0 authorization server issuer identifiers.
-       *
-       * These correspond to ASes that can issue access tokens for this protected resource.
-       * MCP clients use these values to locate the relevant `/.well-known/oauth-authorization-server`
-       * metadata for initiating the OAuth flow.
-       *
-       * @remarks Required by the MCP spec. MCP servers MUST provide at least one issuer.
-       * Clients are responsible for choosing among them (see RFC 9728 §7.6).
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.3 | RFC 9728 §2.2.3}
-       */
-      authorizationServers: string[];
-
-      /**
-       * List of supported methods for presenting OAuth 2.0 bearer tokens.
-       *
-       * @remarks Valid values are `header`, `body`, and `query`.
-       * If omitted, clients MAY assume only `header` is supported, per RFC 6750.
-       * This is a client-side interpretation and not a serialization default.
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.9 | RFC 9728 §2.2.9}
-       */
-      bearerMethodsSupported?: string[];
-
-      /**
-       * Whether this resource requires all access tokens to be DPoP-bound.
-       *
-       * @remarks If omitted, clients SHOULD assume this is `false`.
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.27 | RFC 9728 §2.2.27}
-       */
-      dpopBoundAccessTokensRequired?: boolean;
-
-      /**
-       * Supported algorithms for verifying DPoP proofs (RFC 9449).
-       *
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.25 | RFC 9728 §2.2.25}
-       */
-      dpopSigningAlgValuesSupported?: string[];
-
-      /**
-       * JWKS URI of this resource. Used to validate access tokens or sign responses.
-       *
-       * @remarks When present, this MUST be an `https:` URI pointing to a valid JWK Set (RFC 7517).
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.5 | RFC 9728 §2.2.5}
-       */
-      jwksUri?: string;
-
-      /**
-       * Canonical OAuth resource identifier for this protected resource (the MCP server).
-       *
-       * @remarks Typically the base URL of the MCP server. Clients MUST use this as the
-       * `resource` parameter in authorization and token requests (per RFC 8707).
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.1 | RFC 9728 §2.2.1}
-       */
-      resource: string;
-
-      /**
-       * URL to developer-accessible documentation for this resource.
-       *
-       * @remarks This field MAY be localized.
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.15 | RFC 9728 §2.2.15}
-       */
-      resourceDocumentation?: string;
-
-      /**
-       * Human-readable name for display purposes (e.g., in UIs).
-       *
-       * @remarks This field MAY be localized using language tags (`resource_name#en`, etc.).
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.13 | RFC 9728 §2.2.13}
-       */
-      resourceName?: string;
-
-      /**
-       * URL to a human-readable policy page describing acceptable use.
-       *
-       * @remarks This field MAY be localized.
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.17 | RFC 9728 §2.2.17}
-       */
-      resourcePolicyUri?: string;
-
-      /**
-       * Supported JWS algorithms for signed responses from this resource (e.g., response signing).
-       *
-       * @remarks MUST NOT include `none`.
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.11 | RFC 9728 §2.2.11}
-       */
-      resourceSigningAlgValuesSupported?: string[];
-
-      /**
-       * URL to the protected resource’s Terms of Service.
-       *
-       * @remarks This field MAY be localized.
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.19 | RFC 9728 §2.2.19}
-       */
-      resourceTosUri?: string;
-
-      /**
-       * Supported OAuth scopes for requesting access to this resource.
-       *
-       * @remarks Useful for discovery, but clients SHOULD still request the minimal scope required.
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.7 | RFC 9728 §2.2.7}
-       */
-      scopesSupported?: string[];
-
-      /**
-       * Developer-accessible documentation for how to use the service (not end-user docs).
-       *
-       * @remarks Semantically equivalent to `resourceDocumentation`, but included under its
-       * alternate name for compatibility with tools or schemas expecting either.
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.15 | RFC 9728 §2.2.15}
-       */
-      serviceDocumentation?: string;
-
-      /**
-       * Whether mutual-TLS-bound access tokens are required.
-       *
-       * @remarks If omitted, clients SHOULD assume this is `false` (client-side behavior).
-       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.21 | RFC 9728 §2.2.21}
-       */
-      tlsClientCertificateBoundAccessTokens?: boolean;
-    };
-
-    /**
-     * OAuth Proxy instance for automatic OAuth flow handling.
-     * When provided, ViteMCP will automatically register OAuth endpoints:
-     * - /oauth/register (DCR)
-     * - /oauth/authorize
-     * - /oauth/token
-     * - /oauth/callback
-     * - /oauth/consent
-     */
+    authorizationServer?: Record<string, unknown>;
+    enabled?: boolean;
+    protectedResource?: Record<string, unknown>;
     proxy?: OAuthProxy;
-  };
-  /**
-   * Callback invoked when a tool is called.
-   * Use this to log, audit, or track tool usage.
-   */
-  onToolCall?: (context: {
-    arguments: Record<string, unknown>;
-    toolName: string;
-  }) => Promise<void> | void;
-
-  ping?: {
-    /**
-     * Whether ping should be enabled by default.
-     * - true for SSE or HTTP Stream
-     * - false for stdio
-     */
-    enabled?: boolean;
-    /**
-     * Interval
-     * @default 5000 (5s)
-     */
-    intervalMs?: number;
-    /**
-     * Logging level for ping-related messages.
-     * @default 'debug'
-     */
-    logLevel?: LoggingLevel;
-  };
-  /**
-   * Configuration for roots capability
-   */
-  roots?: {
-    /**
-     * Whether roots capability should be enabled
-     * Set to false to completely disable roots support
-     * @default true
-     */
-    enabled?: boolean;
-  };
-  /**
-   * General utilities
-   */
-  utils?: {
-    formatInvalidParamsErrorMessage?: (
-      issues: readonly StandardSchemaV1.Issue[],
-    ) => string;
   };
   version: `${number}.${number}.${number}`;
 };
 
-type Tool<
-  T extends ViteMCPSessionAuth,
+/* -------------------------------------------------------------------------- */
+/* Authoring types                                                             */
+/* -------------------------------------------------------------------------- */
+
+export type TextContent = {
+  text: string;
+  type: "text";
+};
+
+export type Tool<
+  T extends ViteMCPAuth,
   Params extends ToolParameters = ToolParameters,
   OutputParams extends ToolParameters = ToolParameters,
 > = {
-  /**
-   * MCP ext-apps metadata for linking interactive UI components.
-   * This field is passed through to the tool listing response.
-   * @see https://modelcontextprotocol.github.io/ext-apps/
-   */
-  _meta?: {
-    /** Additional metadata fields */
-    [key: string]: unknown;
-    /** UI component configuration */
-    ui?: {
-      /** URI of the resource serving the UI (e.g., "ui://my-tool/app.html") */
-      resourceUri?: string;
-    };
-  };
-  annotations?: {
-    /**
-     * Advisory metadata signalling that the tool streams incremental content
-     * via {@link Context.streamContent}. Forwarded verbatim in `tools/list`.
-     *
-     * This has no effect on ViteMCP's behavior: it neither enables nor is
-     * required by `streamContent`. No known client interprets it today.
-     */
-    streamingHint?: boolean;
-  } & ToolAnnotations;
+  _meta?: Record<string, unknown>;
+  annotations?: SDKToolAnnotations;
   canAccess?: (auth: T) => boolean;
-
   description?: string;
   execute: (
     args: StandardSchemaV1.InferOutput<Params>,
@@ -1099,6 +396,7 @@ type Tool<
     | AudioContent
     | ContentResult
     | ImageContent
+    | InputRequiredResult
     | ResourceContent
     | ResourceLink
     | StandardSchemaV1.InferOutput<OutputParams>
@@ -1112,3016 +410,1079 @@ type Tool<
   timeoutMs?: number;
 };
 
-/**
- * Tool annotations as defined in MCP Specification (2025-03-26)
- * These provide hints about a tool's behavior.
- */
-type ToolAnnotations = {
-  /**
-   * If true, the tool may perform destructive updates
-   * Only meaningful when readOnlyHint is false
-   * @default true
-   */
-  destructiveHint?: boolean;
+export type ViteMCPAuth = Record<string, unknown> | undefined;
 
-  /**
-   * If true, calling the tool repeatedly with the same arguments has no additional effect
-   * Only meaningful when readOnlyHint is false
-   * @default false
-   */
-  idempotentHint?: boolean;
+type Authenticate<T> = (request: Request) => Promise<T>;
 
-  /**
-   * If true, the tool may interact with an "open world" of external entities
-   * @default true
-   */
-  openWorldHint?: boolean;
+type Literal = boolean | null | number | string | undefined;
 
-  /**
-   * If true, indicates the tool does not modify its environment
-   * @default false
-   */
-  readOnlyHint?: boolean;
+type LoadContext<T extends ViteMCPAuth> = Omit<Context<T>, "reportProgress">;
 
-  /**
-   * A human-readable title for the tool, useful for UI display
-   */
-  title?: string;
+type Progress = {
+  message?: string;
+  progress: number;
+  total?: number;
 };
 
-const ViteMCPSessionEventEmitterBase: {
-  new (): StrictEventEmitter<EventEmitter, ViteMCPSessionEvents>;
-} = EventEmitter;
-
-export enum ServerState {
-  Error = "error",
-  Running = "running",
-  Stopped = "stopped",
-}
-
-/**
- * HTTP method types for custom routes
- */
-export type HTTPMethod =
-  | "DELETE"
-  | "GET"
-  | "OPTIONS"
-  | "PATCH"
-  | "POST"
-  | "PUT";
-
-/**
- * Route handler function type
- */
-export type RouteHandler<T extends ViteMCPSessionAuth = ViteMCPSessionAuth> = (
-  req: ViteMCPRequest<T>,
-  res: ViteMCPResponse,
-) => Promise<void> | void;
-
-/**
- * Options for configuring custom routes
- */
-export interface RouteOptions {
-  /**
-   * Whether this route should bypass authentication.
-   * When true, the route handler will be called without authentication,
-   * and req.auth will be undefined.
-   * @default false
-   */
-  public?: boolean;
-}
-
-/**
- * Enhanced request object for custom routes
- */
-export interface ViteMCPRequest<
-  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
-> {
-  auth?: T;
-  body?: unknown;
-  headers: http.IncomingHttpHeaders;
-  json(): Promise<unknown>;
-  method: string;
-  params: Record<string, string>;
-  query: Record<string, string | string[]>;
-  text(): Promise<string>;
-  url: string;
-}
-
-/**
- * Enhanced response object for custom routes
- */
-export interface ViteMCPResponse {
-  end(data?: Buffer | string): void;
-  json(data: unknown): void;
-  send(data: Buffer | string): void;
-  setHeader(name: string, value: number | string | string[]): ViteMCPResponse;
-  status(code: number): ViteMCPResponse;
-}
-
-type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
-
-type ViteMCPSessionAuth = Record<string, unknown> | undefined;
-
-class ViteMCPSessionEventEmitter extends ViteMCPSessionEventEmitterBase {}
-export class ViteMCPSession<
-  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
-> extends ViteMCPSessionEventEmitter {
-  public get clientCapabilities(): ClientCapabilities | null {
-    return this.#clientCapabilities ?? null;
-  }
-  public get isReady(): boolean {
-    return this.#connectionState === "ready";
-  }
-  public get loggingLevel(): LoggingLevel {
-    return this.#loggingLevel;
-  }
-  public get roots(): Root[] {
-    return this.#roots;
-  }
-  public get server(): Server {
-    return this.#server;
-  }
-  public get sessionId(): string | undefined {
-    return this.#sessionId;
-  }
-  public set sessionId(value: string | undefined) {
-    this.#sessionId = value;
-  }
-  #auth: T | undefined;
-  #capabilities: ServerCapabilities = {};
-  #clientCapabilities?: ClientCapabilities;
-  #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
-  #logger: Logger;
-  #loggingLevel: LoggingLevel = "info";
-  #needsEventLoopFlush: boolean = false;
-  #onToolCall?: ServerOptions<T>["onToolCall"];
-  #pingConfig?: ServerOptions<T>["ping"];
-
-  #pingInterval: null | ReturnType<typeof setInterval> = null;
-
-  #prompts: Map<string, Prompt<T>> = new Map();
-
-  #resources: Map<string, Resource<T>> = new Map();
-
-  #resourceTemplates: Map<string, ResourceTemplate<T>> = new Map();
-
-  #roots: Root[] = [];
-
-  #rootsConfig?: ServerOptions<T>["roots"];
-
-  #server: Server;
-
-  /**
-   * Session ID from the Mcp-Session-Id header (HTTP transports only).
-   * Used to track per-session state across multiple requests.
-   */
-  #sessionId?: string;
-
-  /**
-   * Whether this session serves a single stateless HTTP request. The client
-   * handshake belongs to a different session — potentially on a different
-   * instance — so capabilities can never be inferred here.
-   */
-  #stateless: boolean;
-
-  /**
-   * Resource URIs the connected client has subscribed to via
-   * `resources/subscribe`. Used to scope `notifications/resources/updated`
-   * to interested clients only.
-   */
-  #subscriptions: Set<string> = new Set();
-
-  #utils?: ServerOptions<T>["utils"];
-
-  constructor({
-    auth,
-    instructions,
-    logger,
-    name,
-    onToolCall,
-    ping,
-    prompts,
-    resources,
-    resourcesTemplates,
-    roots,
-    sessionId,
-    stateless = false,
-    tools,
-    transportType,
-    utils,
-    version,
-  }: {
-    auth?: T;
-    instructions?: string;
-    logger: Logger;
-    name: string;
-    onToolCall?: ServerOptions<T>["onToolCall"];
-    ping?: ServerOptions<T>["ping"];
-    prompts: Prompt<T>[];
-    resources: Resource<T>[];
-    resourcesTemplates: InputResourceTemplate<T>[];
-    roots?: ServerOptions<T>["roots"];
-    sessionId?: string;
-    stateless?: boolean;
-    tools: Tool<T>[];
-    transportType?: "httpStream" | "stdio";
-    utils?: ServerOptions<T>["utils"];
-    version: string;
-  }) {
-    super();
-
-    this.#auth = auth;
-    this.#logger = logger;
-    this.#onToolCall = onToolCall;
-    this.#pingConfig = ping;
-    this.#rootsConfig = roots;
-    this.#sessionId = sessionId;
-    this.#stateless = stateless;
-    this.#needsEventLoopFlush = transportType === "httpStream";
-
-    if (tools.length) {
-      this.#capabilities.tools = {};
-    }
-
-    if (resources.length || resourcesTemplates.length) {
-      this.#capabilities.resources = { listChanged: true, subscribe: true };
-    }
-
-    if (prompts.length) {
-      for (const prompt of prompts) {
-        this.addPrompt(prompt);
-      }
-
-      this.#capabilities.prompts = { listChanged: true };
-    }
-
-    this.#capabilities.logging = {};
-
-    this.#capabilities.completions = {};
-
-    this.#server = new Server(
-      { name: name, version: version },
-      { capabilities: this.#capabilities, instructions: instructions },
-    );
-
-    this.#utils = utils;
-
-    this.setupErrorHandling();
-    this.setupLoggingHandlers();
-    this.setupRootsHandlers();
-    this.setupCompleteHandlers();
-
-    if (tools.length) {
-      this.setupToolHandlers(tools);
-    }
-
-    if (resources.length || resourcesTemplates.length) {
-      for (const resource of resources) {
-        this.addResource(resource);
-      }
-
-      this.setupResourceHandlers();
-      this.setupResourceSubscriptionHandlers();
-
-      if (resourcesTemplates.length) {
-        for (const resourceTemplate of resourcesTemplates) {
-          this.addResourceTemplate(resourceTemplate);
-        }
-
-        this.setupResourceTemplateHandlers();
-      }
-    }
-
-    if (prompts.length) {
-      this.setupPromptHandlers();
-    }
-  }
-
-  public async close() {
-    this.#connectionState = "closed";
-
-    if (this.#pingInterval) {
-      clearInterval(this.#pingInterval);
-    }
-
-    try {
-      await this.#server.close();
-    } catch (error) {
-      this.#logger.error("[ViteMCP error]", "could not close server", error);
-    }
-  }
-
-  public async connect(transport: Transport) {
-    if (this.#server.transport) {
-      throw new UnexpectedStateError("Server is already connected");
-    }
-
-    this.#connectionState = "connecting";
-
-    try {
-      await this.#server.connect(transport);
-
-      // Extract session ID from transport if available (HTTP transports only)
-      if ("sessionId" in transport) {
-        const transportWithSessionId = transport as {
-          sessionId?: string;
-        } & Transport;
-        if (typeof transportWithSessionId.sessionId === "string") {
-          this.#sessionId = transportWithSessionId.sessionId;
-        }
-      }
-
-      // Skipped in stateless mode: a session there serves one request, and the
-      // initialize that carried the client's capabilities was handled by a
-      // different session, so polling can only ever time out and warn — once
-      // per request.
-      if (!this.#stateless) {
-        let attempt = 0;
-        const maxAttempts = 10;
-        const retryDelay = 100;
-
-        while (attempt++ < maxAttempts) {
-          const capabilities = this.#server.getClientCapabilities();
-
-          if (capabilities) {
-            this.#clientCapabilities = capabilities;
-            break;
-          }
-
-          await delay(retryDelay);
-        }
-
-        if (!this.#clientCapabilities) {
-          this.#logger.warn(
-            `[ViteMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`,
-          );
-        }
-      }
-
-      if (
-        this.#rootsConfig?.enabled !== false &&
-        this.#clientCapabilities?.roots?.listChanged &&
-        typeof this.#server.listRoots === "function"
-      ) {
-        try {
-          const roots = await this.#server.listRoots();
-          this.#roots = roots?.roots || [];
-        } catch (e) {
-          if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
-            this.#logger.debug(
-              "[ViteMCP debug] listRoots method not supported by client",
-            );
-          } else {
-            this.#logger.error(
-              `[ViteMCP error] received error listing roots.\n\n${
-                e instanceof Error ? e.stack : JSON.stringify(e)
-              }`,
-            );
-          }
-        }
-      }
-
-      if (this.#clientCapabilities) {
-        const pingConfig = this.#getPingConfig(transport);
-
-        if (pingConfig.enabled) {
-          this.#pingInterval = setInterval(async () => {
-            try {
-              await this.#server.ping();
-            } catch {
-              // The reason we are not emitting an error here is because some clients
-              // seem to not respond to the ping request, and we don't want to crash the server,
-              // e.g., https://github.com/punkpeye/vitemcp/issues/38.
-              const logLevel = pingConfig.logLevel;
-
-              if (logLevel === "debug") {
-                this.#logger.debug("[ViteMCP debug] server ping failed");
-              } else if (logLevel === "warning") {
-                this.#logger.warn(
-                  "[ViteMCP warning] server is not responding to ping",
-                );
-              } else if (logLevel === "error") {
-                this.#logger.error(
-                  "[ViteMCP error] server is not responding to ping",
-                );
-              } else {
-                this.#logger.info("[ViteMCP info] server ping failed");
-              }
-            }
-          }, pingConfig.intervalMs);
-        }
-      }
-
-      // Mark connection as ready and emit event
-      this.#connectionState = "ready";
-      this.emit("ready");
-    } catch (error) {
-      this.#connectionState = "error";
-      const errorEvent = {
-        error: error instanceof Error ? error : new Error(String(error)),
-      };
-      this.emit("error", errorEvent);
-      throw error;
-    }
-  }
-
-  promptsListChanged(prompts: Prompt<T>[]) {
-    this.#prompts.clear();
-    for (const prompt of prompts) {
-      this.addPrompt(prompt);
-    }
-    this.setupPromptHandlers();
-    this.triggerListChangedNotification("notifications/prompts/list_changed");
-  }
-
-  public async requestElicitation(
-    params: ElicitRequestFormParams | ElicitRequestURLParams,
-    options?: RequestOptions,
-  ): Promise<ElicitResult> {
-    return this.#server.elicitInput(params, options);
-  }
-
-  public async requestSampling(
-    message: z.infer<typeof CreateMessageRequestSchema>["params"],
-    options?: RequestOptions,
-  ): Promise<SamplingResponse> {
-    return this.#server.createMessage(message, options);
-  }
-
-  resourcesListChanged(resources: Resource<T>[]) {
-    this.#resources.clear();
-    for (const resource of resources) {
-      this.addResource(resource);
-    }
-    this.setupResourceHandlers();
-    this.triggerListChangedNotification("notifications/resources/list_changed");
-  }
-
-  resourceTemplatesListChanged(resourceTemplates: ResourceTemplate<T>[]) {
-    this.#resourceTemplates.clear();
-    for (const resourceTemplate of resourceTemplates) {
-      this.addResourceTemplate(resourceTemplate);
-    }
-    this.setupResourceTemplateHandlers();
-    this.triggerListChangedNotification("notifications/resources/list_changed");
-  }
-
-  /**
-   * Notifies the connected client that the contents of a resource have changed.
-   *
-   * The `notifications/resources/updated` notification is only sent when the
-   * client has subscribed to the URI via `resources/subscribe`; otherwise this
-   * is a no-op.
-   */
-  async sendResourceUpdated(uri: string) {
-    if (!this.#subscriptions.has(uri)) {
-      return;
-    }
-
-    try {
-      await this.#server.sendResourceUpdated({ uri });
-    } catch (error) {
-      this.#logger.error(
-        `[ViteMCP error] failed to send resources/updated notification for '${uri}'.\n\n${
-          error instanceof Error ? error.stack : JSON.stringify(error)
-        }`,
-      );
-    }
-  }
-
-  toolsListChanged(tools: Tool<T>[]) {
-    const allowedTools = tools.filter((tool) =>
-      tool.canAccess ? tool.canAccess(this.#auth as T) : true,
-    );
-    this.setupToolHandlers(allowedTools);
-    this.triggerListChangedNotification("notifications/tools/list_changed");
-  }
-
-  async triggerListChangedNotification(method: string) {
-    try {
-      await this.#server.notification({
-        method,
-      });
-    } catch (error) {
-      this.#logger.error(
-        `[ViteMCP error] failed to send ${method} notification.\n\n${
-          error instanceof Error ? error.stack : JSON.stringify(error)
-        }`,
-      );
-    }
-  }
-
-  /**
-   * Update the session's authentication context.
-   * Called by mcp-proxy when a new token is validated on subsequent requests.
-   */
-  public updateAuth(auth: T): void {
-    this.#auth = auth;
-  }
-
-  public waitForReady(): Promise<void> {
-    if (this.isReady) {
-      return Promise.resolve();
-    }
-
-    if (
-      this.#connectionState === "error" ||
-      this.#connectionState === "closed"
-    ) {
-      return Promise.reject(
-        new Error(`Connection is in ${this.#connectionState} state`),
-      );
-    }
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(
-          new Error(
-            "Connection timeout: Session failed to become ready within 5 seconds",
-          ),
-        );
-      }, 5000);
-
-      this.once("ready", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-
-      this.once("error", (event) => {
-        clearTimeout(timeout);
-        reject(event.error);
-      });
-    });
-  }
-
-  /**
-   * Builds the context object passed as the third argument to
-   * `resource.load` / `resourceTemplate.load` / `prompt.load`.
-   *
-   * This mirrors the `client`, `elicit`, `log`, `requestId`, `session`,
-   * and `sessionId` fields available to `tool.execute` via {@link Context}.
-   * `reportProgress` and `streamContent` are intentionally omitted: they
-   * are tied to a tool call's progress token / streaming notification,
-   * which resource and prompt reads do not have.
-   */
-  #createLoadContext(meta?: Record<string, unknown>): LoadContext<T> {
-    return {
-      client: {
-        version: this.#server.getClientVersion(),
-      },
-      elicit: (
-        params: ElicitRequestFormParams | ElicitRequestURLParams,
-        options?: RequestOptions,
-      ) => this.#server.elicitInput(params, options),
-      log: this.#createLog(),
-      requestId:
-        typeof meta?.requestId === "string" ? meta.requestId : undefined,
-      session: this.#auth,
-      sessionId: this.#sessionId,
-    };
-  }
-
-  #createLog(): Context<T>["log"] {
-    return {
-      debug: (message: string, context?: SerializableValue) => {
-        this.#server.sendLoggingMessage({
-          data: {
-            context,
-            message,
-          },
-          level: "debug",
-        });
-      },
-      error: (message: string, context?: SerializableValue) => {
-        this.#server.sendLoggingMessage({
-          data: {
-            context,
-            message,
-          },
-          level: "error",
-        });
-      },
-      info: (message: string, context?: SerializableValue) => {
-        this.#server.sendLoggingMessage({
-          data: {
-            context,
-            message,
-          },
-          level: "info",
-        });
-      },
-      warn: (message: string, context?: SerializableValue) => {
-        this.#server.sendLoggingMessage({
-          data: {
-            context,
-            message,
-          },
-          level: "warning",
-        });
-      },
-    };
-  }
-
-  #formatSchemaIssues(issues: readonly StandardSchemaV1.Issue[]): string {
-    return this.#utils?.formatInvalidParamsErrorMessage
-      ? this.#utils.formatInvalidParamsErrorMessage(issues)
-      : issues
-          .map((issue) => {
-            const path = issue.path?.join(".") || "root";
-            return `${path}: ${issue.message}`;
-          })
-          .join(", ");
-  }
-
-  #getPingConfig(transport: Transport): {
-    enabled: boolean;
-    intervalMs: number;
-    logLevel: LoggingLevel;
-  } {
-    const pingConfig = this.#pingConfig || {};
-
-    let defaultEnabled = false;
-
-    if ("type" in transport) {
-      // Enable by default for SSE and HTTP streaming
-      if (transport.type === "httpStream") {
-        defaultEnabled = true;
-      }
-    }
-
-    return {
-      enabled:
-        pingConfig.enabled !== undefined ? pingConfig.enabled : defaultEnabled,
-      intervalMs: pingConfig.intervalMs || 5000,
-      logLevel: pingConfig.logLevel || "debug",
-    };
-  }
-
-  async #validateStructuredContent(
-    tool: Tool<T>,
-    value: Record<string, unknown>,
-    toolName: string,
-  ): Promise<Record<string, unknown>> {
-    if (!tool.outputSchema) {
-      return value;
-    }
-
-    const parsed = await tool.outputSchema["~standard"].validate(value);
-
-    if (parsed.issues) {
-      throw new UserError(
-        `Tool '${toolName}' structured output validation failed: ${this.#formatSchemaIssues(parsed.issues)}. Please check the result matches the tool's outputSchema.`,
-      );
-    }
-
-    return parsed.value as Record<string, unknown>;
-  }
-
-  private addPrompt(inputPrompt: InputPrompt<T>) {
-    const completers: Record<string, ArgumentValueCompleter<T>> = {};
-    const enums: Record<string, string[]> = {};
-    const fuseInstances: Record<string, Fuse<string>> = {};
-
-    for (const argument of inputPrompt.arguments ?? []) {
-      if (argument.complete) {
-        completers[argument.name] = argument.complete;
-      }
-
-      if (argument.enum) {
-        enums[argument.name] = argument.enum;
-        fuseInstances[argument.name] = new Fuse(argument.enum, {
-          includeScore: true,
-          threshold: 0.3, // More flexible matching!
-        });
-      }
-    }
-
-    const prompt = {
-      ...inputPrompt,
-      complete: async (name: string, value: string, auth?: T) => {
-        if (completers[name]) {
-          return await completers[name](value, auth);
-        }
-
-        if (inputPrompt.complete) {
-          return await inputPrompt.complete(name, value, auth);
-        }
-
-        if (fuseInstances[name]) {
-          const result = fuseInstances[name].search(value);
-
-          return {
-            total: result.length,
-            values: result.map((item) => item.item),
-          };
-        }
-
-        return {
-          values: [],
-        };
-      },
-    };
-
-    this.#prompts.set(prompt.name, prompt);
-  }
-
-  private addResource(inputResource: Resource<T>) {
-    this.#resources.set(inputResource.uri, inputResource);
-  }
-
-  private addResourceTemplate(inputResourceTemplate: InputResourceTemplate<T>) {
-    const completers: Record<string, ArgumentValueCompleter<T>> = {};
-
-    for (const argument of inputResourceTemplate.arguments ?? []) {
-      if (argument.complete) {
-        completers[argument.name] = argument.complete;
-      }
-    }
-
-    const resourceTemplate = {
-      ...inputResourceTemplate,
-      complete: async (name: string, value: string, auth?: T) => {
-        if (completers[name]) {
-          return await completers[name](value, auth);
-        }
-
-        if (inputResourceTemplate.complete) {
-          return await inputResourceTemplate.complete(name, value, auth);
-        }
-
-        return {
-          values: [],
-        };
-      },
-    };
-
-    this.#resourceTemplates.set(resourceTemplate.name, resourceTemplate);
-  }
-
-  private setupCompleteHandlers() {
-    this.#server.setRequestHandler(CompleteRequestSchema, async (request) => {
-      if (request.params.ref.type === "ref/prompt") {
-        const ref = request.params.ref;
-
-        const prompt = "name" in ref && this.#prompts.get(ref.name);
-
-        if (!prompt) {
-          throw new UnexpectedStateError("Unknown prompt", {
-            request,
-          });
-        }
-
-        if (!prompt.complete) {
-          throw new UnexpectedStateError("Prompt does not support completion", {
-            request,
-          });
-        }
-
-        const completion = CompletionZodSchema.parse(
-          await prompt.complete(
-            request.params.argument.name,
-            request.params.argument.value,
-            this.#auth,
-          ),
-        );
-
-        return {
-          completion,
-        };
-      }
-
-      if (request.params.ref.type === "ref/resource") {
-        const ref = request.params.ref;
-
-        const resource =
-          "uri" in ref &&
-          Array.from(this.#resourceTemplates.values()).find(
-            (resource) => resource.uriTemplate === ref.uri,
-          );
-
-        if (!resource) {
-          throw new UnexpectedStateError("Unknown resource", {
-            request,
-          });
-        }
-
-        if (!("uriTemplate" in resource)) {
-          throw new UnexpectedStateError("Unexpected resource");
-        }
-
-        if (!resource.complete) {
-          throw new UnexpectedStateError(
-            "Resource does not support completion",
-            {
-              request,
-            },
-          );
-        }
-
-        const completion = CompletionZodSchema.parse(
-          await resource.complete(
-            request.params.argument.name,
-            request.params.argument.value,
-            this.#auth,
-          ),
-        );
-
-        return {
-          completion,
-        };
-      }
-
-      throw new UnexpectedStateError("Unexpected completion request", {
-        request,
-      });
-    });
-  }
-  private setupErrorHandling() {
-    this.#server.onerror = (error) => {
-      this.#logger.error("[ViteMCP error]", error);
-    };
-  }
-  private setupLoggingHandlers() {
-    this.#server.setRequestHandler(SetLevelRequestSchema, (request) => {
-      this.#loggingLevel = request.params.level;
-
-      return {};
-    });
-  }
-  private setupPromptHandlers() {
-    let cachedPromptsList: ListPromptsResult["prompts"] | null = null;
-
-    this.#server.setRequestHandler(ListPromptsRequestSchema, async () => {
-      if (cachedPromptsList) {
-        return {
-          prompts: cachedPromptsList,
-        };
-      }
-
-      cachedPromptsList = Array.from(this.#prompts.values()).map((prompt) => {
-        return {
-          arguments: prompt.arguments,
-          complete: prompt.complete,
-          description: prompt.description,
-          name: prompt.name,
-        };
-      });
-
-      return {
-        prompts: cachedPromptsList,
-      };
-    });
-
-    this.#server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-      const prompt = this.#prompts.get(request.params.name);
-
-      if (!prompt) {
-        throw new McpError(
-          ErrorCode.MethodNotFound,
-          `Unknown prompt: ${request.params.name}`,
-        );
-      }
-
-      const args = request.params.arguments;
-
-      for (const arg of prompt.arguments ?? []) {
-        if (arg.required && !(args && arg.name in args)) {
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            `Prompt '${request.params.name}' requires argument '${arg.name}': ${
-              arg.description || "No description provided"
-            }`,
-          );
-        }
-      }
-
-      let result: Awaited<ReturnType<Prompt<T>["load"]>>;
-
-      try {
-        result = await prompt.load(
-          args as Record<string, string | undefined>,
-          this.#auth,
-          this.#createLoadContext(request.params?._meta),
-        );
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        throw new McpError(
-          ErrorCode.InternalError,
-          `Failed to load prompt '${request.params.name}': ${errorMessage}`,
-        );
-      }
-
-      if (typeof result === "string") {
-        return {
-          description: prompt.description,
-          messages: [
-            {
-              content: { text: result, type: "text" },
-              role: "user",
-            },
-          ],
-        };
-      } else {
-        return {
-          description: prompt.description,
-          messages: result.messages,
-        };
-      }
-    });
-  }
-
-  private setupResourceHandlers() {
-    let cachedResourcesList: ListResourcesResult["resources"] | null = null;
-
-    this.#server.setRequestHandler(ListResourcesRequestSchema, async () => {
-      if (cachedResourcesList) {
-        return {
-          resources: cachedResourcesList,
-        };
-      }
-
-      cachedResourcesList = Array.from(this.#resources.values()).map(
-        (resource) => ({
-          description: resource.description,
-          mimeType: resource.mimeType,
-          name: resource.name,
-          uri: resource.uri,
-        }),
-      );
-
-      return {
-        resources: cachedResourcesList,
-      };
-    });
-
-    this.#server.setRequestHandler(
-      ReadResourceRequestSchema,
-      async (request) => {
-        if ("uri" in request.params) {
-          const resource = this.#resources.get(request.params.uri);
-
-          if (!resource) {
-            for (const resourceTemplate of this.#resourceTemplates.values()) {
-              const uriTemplate = parseURITemplate(
-                resourceTemplate.uriTemplate,
-              );
-
-              const match = uriTemplate.fromUri(request.params.uri);
-
-              if (!match) {
-                continue;
-              }
-
-              const uri = uriTemplate.fill(match);
-
-              const result = await resourceTemplate.load(
-                match,
-                this.#auth,
-                this.#createLoadContext(request.params?._meta),
-              );
-
-              const resources = Array.isArray(result) ? result : [result];
-              return {
-                contents: resources.map((resource) => ({
-                  ...resource,
-                  description: resourceTemplate.description,
-                  mimeType: resource.mimeType ?? resourceTemplate.mimeType,
-                  name: resourceTemplate.name,
-                  uri: resource.uri ?? uri,
-                })),
-              };
-            }
-
-            throw new McpError(
-              ErrorCode.MethodNotFound,
-              `Resource not found: '${request.params.uri}'. Available resources: ${
-                Array.from(this.#resources.values())
-                  .map((r) => r.uri)
-                  .join(", ") || "none"
-              }`,
-            );
-          }
-
-          if (!("uri" in resource)) {
-            throw new UnexpectedStateError("Resource does not support reading");
-          }
-
-          let maybeArrayResult: Awaited<ReturnType<Resource<T>["load"]>>;
-
-          try {
-            maybeArrayResult = await resource.load(
-              this.#auth,
-              this.#createLoadContext(request.params?._meta),
-            );
-          } catch (error) {
-            const errorMessage =
-              error instanceof Error ? error.message : String(error);
-            throw new McpError(
-              ErrorCode.InternalError,
-              `Failed to load resource '${resource.name}' (${resource.uri}): ${errorMessage}`,
-              {
-                uri: resource.uri,
-              },
-            );
-          }
-
-          const resourceResults = Array.isArray(maybeArrayResult)
-            ? maybeArrayResult
-            : [maybeArrayResult];
-
-          return {
-            contents: resourceResults.map((result) => ({
-              ...result,
-              mimeType: result.mimeType ?? resource.mimeType,
-              name: resource.name,
-              uri: result.uri ?? resource.uri,
-            })),
-          };
-        }
-
-        throw new UnexpectedStateError("Unknown resource request", {
-          request,
-        });
-      },
-    );
-  }
-
-  private setupResourceSubscriptionHandlers() {
-    this.#server.setRequestHandler(SubscribeRequestSchema, (request) => {
-      this.#subscriptions.add(request.params.uri);
-
-      return {};
-    });
-
-    this.#server.setRequestHandler(UnsubscribeRequestSchema, (request) => {
-      this.#subscriptions.delete(request.params.uri);
-
-      return {};
-    });
-  }
-
-  private setupResourceTemplateHandlers() {
-    let cachedResourceTemplatesList:
-      | ListResourceTemplatesResult["resourceTemplates"]
-      | null = null;
-
-    this.#server.setRequestHandler(
-      ListResourceTemplatesRequestSchema,
-      async () => {
-        if (cachedResourceTemplatesList) {
-          return {
-            resourceTemplates: cachedResourceTemplatesList,
-          };
-        }
-
-        cachedResourceTemplatesList = Array.from(
-          this.#resourceTemplates.values(),
-        ).map((resourceTemplate) => ({
-          description: resourceTemplate.description,
-          mimeType: resourceTemplate.mimeType,
-          name: resourceTemplate.name,
-          uriTemplate: resourceTemplate.uriTemplate,
-        }));
-
-        return {
-          resourceTemplates: cachedResourceTemplatesList,
-        };
-      },
-    );
-  }
-
-  private setupRootsHandlers() {
-    if (this.#rootsConfig?.enabled === false) {
-      this.#logger.debug(
-        "[ViteMCP debug] roots capability explicitly disabled via config",
-      );
-      return;
-    }
-
-    // Only set up roots notification handling if the server supports it
-    if (typeof this.#server.listRoots === "function") {
-      this.#server.setNotificationHandler(
-        RootsListChangedNotificationSchema,
-        () => {
-          this.#server
-            .listRoots()
-            .then((roots) => {
-              this.#roots = roots.roots;
-
-              this.emit("rootsChanged", {
-                roots: roots.roots,
-              });
-            })
-            .catch((error) => {
-              if (
-                error instanceof McpError &&
-                error.code === ErrorCode.MethodNotFound
-              ) {
-                this.#logger.debug(
-                  "[ViteMCP debug] listRoots method not supported by client",
-                );
-              } else {
-                this.#logger.error(
-                  `[ViteMCP error] received error listing roots.\n\n${
-                    error instanceof Error ? error.stack : JSON.stringify(error)
-                  }`,
-                );
-              }
-            });
-        },
-      );
-    } else {
-      this.#logger.debug(
-        "[ViteMCP debug] roots capability not available, not setting up notification handler",
-      );
-    }
-  }
-
-  private setupToolHandlers(tools: Tool<T>[]) {
-    const toolsMap = new Map(tools.map((tool) => [tool.name, tool]));
-    let cachedToolsList: ListToolsResult["tools"] | null = null;
-
-    this.#server.setRequestHandler(ListToolsRequestSchema, async () => {
-      if (cachedToolsList) {
-        return {
-          tools: cachedToolsList,
-        };
-      }
-      cachedToolsList = await Promise.all(
-        tools.map(async (tool) => {
-          return {
-            annotations: tool.annotations,
-            description: tool.description,
-            inputSchema: (tool.parameters
-              ? strictJsonSchema(await toJsonSchema(tool.parameters))
-              : {
-                  additionalProperties: false,
-                  properties: {},
-                  type: "object",
-                }) as SDKTool["inputSchema"],
-            name: tool.name,
-            ...(tool.outputSchema && {
-              outputSchema: strictJsonSchema(
-                await toJsonSchema(tool.outputSchema),
-              ) as SDKTool["inputSchema"],
-            }),
-            // Pass through _meta for MCP ext-apps UI support (issue #229)
-            ...(tool._meta && { _meta: tool._meta }),
-          };
-        }),
-      );
-
-      return {
-        tools: cachedToolsList,
-      };
-    });
-
-    this.#server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const tool = toolsMap.get(request.params.name);
-
-      if (!tool) {
-        throw new McpError(
-          ErrorCode.MethodNotFound,
-          `Unknown tool: ${request.params.name}`,
-        );
-      }
-
-      let args: unknown = undefined;
-
-      if (tool.parameters) {
-        const parsed = await tool.parameters["~standard"].validate(
-          request.params.arguments,
-        );
-
-        if (parsed.issues) {
-          const friendlyErrors = this.#formatSchemaIssues(parsed.issues);
-
-          throw new McpError(
-            ErrorCode.InvalidParams,
-            `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`,
-          );
-        }
-
-        args = parsed.value;
-      }
-
-      const progressToken = request.params?._meta?.progressToken;
-
-      let result: ContentResult;
-
-      try {
-        const reportProgress = async (progress: Progress) => {
-          // Progress notifications must reference the progressToken supplied by
-          // the client in the initiating request. If the client did not request
-          // progress, there is nothing to associate the update with, and sending
-          // a notification without a token produces an invalid message.
-          if (progressToken === undefined) {
-            return;
-          }
-
-          try {
-            await this.#server.notification({
-              method: "notifications/progress",
-              params: {
-                ...progress,
-                progressToken,
-              },
-            });
-
-            if (this.#needsEventLoopFlush) {
-              await new Promise((resolve) => setImmediate(resolve));
-            }
-          } catch (progressError) {
-            this.#logger.warn(
-              `[ViteMCP warning] Failed to report progress for tool '${request.params.name}':`,
-              progressError instanceof Error
-                ? progressError.message
-                : String(progressError),
-            );
-          }
-        };
-
-        const log = this.#createLog();
-
-        // Create a promise for tool execution
-        // Streams partial results while a tool is still executing
-        // Enables progressive rendering and real-time feedback
-        const streamContent = async (content: Content | Content[]) => {
-          const contentArray = Array.isArray(content) ? content : [content];
-
-          try {
-            await this.#server.notification({
-              method: "notifications/tool/streamContent",
-              params: {
-                content: contentArray,
-                toolName: request.params.name,
-              },
-            });
-
-            if (this.#needsEventLoopFlush) {
-              await new Promise((resolve) => setImmediate(resolve));
-            }
-          } catch (streamError) {
-            this.#logger.warn(
-              `[ViteMCP warning] Failed to stream content for tool '${request.params.name}':`,
-              streamError instanceof Error
-                ? streamError.message
-                : String(streamError),
-            );
-          }
-        };
-
-        if (this.#onToolCall) {
-          await this.#onToolCall({
-            arguments: (args ?? {}) as Record<string, unknown>,
-            toolName: request.params.name,
-          });
-        }
-
-        const executeToolPromise = tool.execute(args, {
-          client: {
-            version: this.#server.getClientVersion(),
-          },
-          elicit: (
-            params: ElicitRequestFormParams | ElicitRequestURLParams,
-            options?: RequestOptions,
-          ) => this.#server.elicitInput(params, options),
-          log,
-          reportProgress,
-          requestId:
-            typeof request.params?._meta?.requestId === "string"
-              ? request.params._meta.requestId
-              : undefined,
-          session: this.#auth,
-          sessionId: this.#sessionId,
-          streamContent,
-        });
-
-        // Handle timeout if specified
-        const maybeStringResult = (await (tool.timeoutMs
-          ? Promise.race([
-              executeToolPromise,
-              new Promise<never>((_, reject) => {
-                const timeoutId = setTimeout(() => {
-                  reject(
-                    new UserError(
-                      `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
-                    ),
-                  );
-                }, tool.timeoutMs);
-
-                // If promise resolves first
-                executeToolPromise.then(
-                  () => clearTimeout(timeoutId),
-                  () => clearTimeout(timeoutId),
-                );
-              }),
-            ])
-          : executeToolPromise)) as
-          | AudioContent
-          | ContentResult
-          | ImageContent
-          | null
-          | Record<string, unknown>
-          | ResourceContent
-          | ResourceLink
-          | string
-          | TextContent
-          | undefined;
-
-        // Without this test, we are running into situations where the last progress update is not reported.
-        // See the 'reports multiple progress updates without buffering' test in ViteMCP.test.ts before refactoring.
-        await delay(1);
-
-        if (maybeStringResult === undefined || maybeStringResult === null) {
-          result = ContentResultZodSchema.parse({
-            content: [],
-          });
-        } else if (typeof maybeStringResult === "string") {
-          result = ContentResultZodSchema.parse({
-            content: [{ text: maybeStringResult, type: "text" }],
-          });
-        } else if ("type" in maybeStringResult) {
-          result = ContentResultZodSchema.parse({
-            content: [maybeStringResult],
-          });
-        } else if ("content" in maybeStringResult) {
-          result = ContentResultZodSchema.parse(maybeStringResult);
-          if (result.structuredContent !== undefined && tool.outputSchema) {
-            result.structuredContent = await this.#validateStructuredContent(
-              tool,
-              result.structuredContent,
-              request.params.name,
-            );
-          }
-        } else if (tool.outputSchema) {
-          const structuredContent = await this.#validateStructuredContent(
-            tool,
-            maybeStringResult,
-            request.params.name,
-          );
-          result = ContentResultZodSchema.parse({
-            content: [
-              {
-                text: JSON.stringify(structuredContent),
-                type: "text",
-              },
-            ],
-            structuredContent,
-          });
-        } else {
-          result = ContentResultZodSchema.parse(maybeStringResult);
-        }
-      } catch (error) {
-        if (error instanceof UserError) {
-          return {
-            content: [{ text: error.message, type: "text" }],
-            isError: true,
-            ...(error.extras ? { structuredContent: error.extras } : {}),
-          };
-        }
-
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        return {
-          content: [
-            {
-              text: `Tool '${request.params.name}' execution failed: ${errorMessage}`,
-              type: "text",
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      return result;
-    });
-  }
-}
-
-/**
- * Converts camelCase to snake_case for OAuth endpoint responses
- */
-function camelToSnakeCase(str: string): string {
-  return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-}
-
-/**
- * Converts an object with camelCase keys to snake_case keys
- */
-function convertObjectToSnakeCase(
-  obj: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(obj)) {
-    const snakeKey = camelToSnakeCase(key);
-    result[snakeKey] = value;
-  }
-
-  return result;
-}
-
-function joinPaths(basePath: "" | `/${string}`, path: string): `/${string}` {
-  return `${basePath}${normalizePath(path)}` as `/${string}`;
-}
-
-function normalizeBasePath(path: string | undefined): "" | `/${string}` {
-  if (!path || path === "/") {
-    return "";
-  }
-
-  const withLeadingSlash = path.startsWith("/") ? path : `/${path}`;
-  const withoutTrailingSlash = withLeadingSlash.replace(/\/+$/, "");
-
-  return withoutTrailingSlash ? (withoutTrailingSlash as `/${string}`) : "";
-}
-
-function normalizePath(path: string): `/${string}` {
-  return (path.startsWith("/") ? path : `/${path}`) as `/${string}`;
-}
-
-/**
- * Parses Basic auth header (RFC 6749 Section 2.3.1)
- */
-function parseBasicAuthHeader(
-  authHeader: string | undefined,
-): { clientId: string; clientSecret: string } | null {
-  const basicMatch = authHeader?.match(/^Basic\s+(.+)$/);
-  if (!basicMatch) return null;
-
-  try {
-    const credentials = Buffer.from(basicMatch[1], "base64").toString("utf-8");
-    const credMatch = credentials.match(/^([^:]+):(.*)$/);
-    if (!credMatch) return null;
-
-    return { clientId: credMatch[1], clientSecret: credMatch[2] };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Maximum request body size (in bytes) accepted by the OAuth proxy endpoints
- * (registration, consent and token). These endpoints receive small JSON or
- * form-urlencoded payloads, so 1 MiB is a generous bound that prevents
- * unbounded memory growth from slow or malicious clients.
- */
-const OAUTH_PROXY_MAX_BODY_SIZE = 1024 * 1024; // 1 MiB
-
-function stripBasePath(
-  path: string,
-  basePath: "" | `/${string}`,
-): null | string {
-  if (!basePath) {
-    return path;
-  }
-
-  if (path === basePath) {
-    return "/";
-  }
-
-  if (path.startsWith(`${basePath}/`)) {
-    return path.slice(basePath.length);
-  }
-
-  return null;
-}
-
-const ViteMCPEventEmitterBase: {
-  new (): StrictEventEmitter<EventEmitter, ViteMCPEvents<ViteMCPSessionAuth>>;
-} = EventEmitter;
-
-class ViteMCPEventEmitter extends ViteMCPEventEmitterBase {}
-
-export class ViteMCP<
-  T extends ViteMCPSessionAuth = ViteMCPSessionAuth,
-> extends ViteMCPEventEmitter {
+type ResourceContent = {
+  resource: {
+    blob?: string;
+    mimeType?: string;
+    text?: string;
+    uri: string;
+  };
+  type: "resource";
+};
+
+type ResourceLink = {
+  description?: string;
+  mimeType?: string;
+  name: string;
+  type: "resource_link";
+  uri: string;
+};
+
+type SerializableValue =
+  | { [key: string]: SerializableValue }
+  | Literal
+  | SerializableValue[];
+
+type ToolParameters = StandardSchemaV1;
+
+/* -------------------------------------------------------------------------- */
+/* Server                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   public get serverState(): ServerState {
     return this.#serverState;
   }
-
-  public get sessions(): ViteMCPSession<T>[] {
-    return this.#sessions;
-  }
   #authenticate: Authenticate<T> | undefined;
+  #connectedServers: McpServer[] = [];
+  #corsMiddleware: null | ReturnType<typeof cors> = null;
+  #handler: McpHttpHandler | null = null;
   #honoApp = new Hono();
-  #httpStreamServer: null | SSEServer = null;
+  #httpServer: http.Server | https.Server | null = null;
   #logger: Logger;
   #options: ServerOptions<T>;
-  #prompts: InputPrompt<T>[] = [];
+  #prompts: Prompt<T>[] = [];
   #resources: Resource<T>[] = [];
-  #resourcesTemplates: InputResourceTemplate<T>[] = [];
+  #resourceTemplates: ResourceTemplate<T>[] = [];
   #serverState: ServerState = ServerState.Stopped;
-  #sessions: ViteMCPSession<T>[] = [];
+  #stdioHandle: null | StdioServerHandle = null;
 
   #tools: Tool<T>[] = [];
 
-  constructor(public options: ServerOptions<T>) {
-    super();
-
+  public constructor(options: ServerOptions<T>) {
     this.#options = options;
-    this.#logger = options.logger || console;
+    this.#logger = options.logger ?? console;
 
-    // If auth provider is specified, use it to configure authenticate and oauth
-    if (options.auth) {
-      // Use auth provider's authenticate if not explicitly overridden
-      if (!options.authenticate) {
-        this.#authenticate = ((request: http.IncomingMessage | undefined) =>
-          options.auth!.authenticate(request)) as Authenticate<T>;
-      } else {
-        this.#authenticate = options.authenticate;
-      }
+    // An AuthProvider supplies the authenticate hook. Resolved here rather
+    // than inside the HTTP path so the wiring is not silently absent on
+    // stdio / `connect()`.
+    const provider = options.auth;
+    this.#authenticate =
+      options.authenticate ??
+      (provider
+        ? (((request: Request) =>
+            provider.authenticate(request)) as unknown as Authenticate<T>)
+        : undefined);
 
-      // Use auth provider's oauth config if not explicitly overridden
-      if (!options.oauth) {
-        this.#options = {
-          ...options,
-          oauth: options.auth.getOAuthConfig(),
-        };
-      }
-    } else {
-      this.#authenticate = options.authenticate;
-    }
+    this.#honoApp = this.#freshApp();
   }
 
-  /**
-   * Adds a prompt to the server.
-   */
-  public addPrompt<const Args extends InputPromptArgument<T>[]>(
-    prompt: InputPrompt<T, Args>,
-  ) {
-    this.#prompts = this.#prompts.filter((p) => p.name !== prompt.name);
+  public addPrompt(prompt: Prompt<T>) {
     this.#prompts.push(prompt);
-    if (this.#serverState === ServerState.Running) {
-      this.#promptsListChanged(this.#prompts);
-    }
+    this.#notifyListChanged("prompts");
   }
-  /**
-   * Adds prompts to the server.
-   */
-  public addPrompts<const Args extends InputPromptArgument<T>[]>(
-    prompts: InputPrompt<T, Args>[],
-  ) {
-    const newPromptNames = new Set(prompts.map((prompt) => prompt.name));
-    this.#prompts = this.#prompts.filter((p) => !newPromptNames.has(p.name));
-    this.#prompts.push(...prompts);
 
-    if (this.#serverState === ServerState.Running) {
-      this.#promptsListChanged(this.#prompts);
+  public addPrompts(prompts: Prompt<T>[]) {
+    for (const prompt of prompts) {
+      this.#prompts.push(prompt);
     }
+    this.#notifyListChanged("prompts");
   }
-  /**
-   * Adds a resource to the server.
-   */
+
   public addResource(resource: Resource<T>) {
-    this.#resources = this.#resources.filter((r) => r.name !== resource.name);
-
     this.#resources.push(resource);
-    if (this.#serverState === ServerState.Running) {
-      this.#resourcesListChanged(this.#resources);
-    }
+    this.#notifyListChanged("resources");
   }
-  /**
-   * Adds resources to the server.
-   */
+
   public addResources(resources: Resource<T>[]) {
-    const newResourceNames = new Set(
-      resources.map((resource) => resource.name),
-    );
-    this.#resources = this.#resources.filter(
-      (r) => !newResourceNames.has(r.name),
-    );
-    this.#resources.push(...resources);
-
-    if (this.#serverState === ServerState.Running) {
-      this.#resourcesListChanged(this.#resources);
+    for (const resource of resources) {
+      this.#resources.push(resource);
     }
+    this.#notifyListChanged("resources");
   }
-  /**
-   * Adds a resource template to the server.
-   */
-  public addResourceTemplate<
-    const Args extends InputResourceTemplateArgument[],
-  >(resource: InputResourceTemplate<T, Args>) {
-    this.#resourcesTemplates = this.#resourcesTemplates.filter(
-      (t) => t.name !== resource.name,
-    );
 
-    this.#resourcesTemplates.push(resource);
-    if (this.#serverState === ServerState.Running) {
-      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
-    }
+  public addResourceTemplate(template: ResourceTemplate<T>) {
+    this.#resourceTemplates.push(template);
+    this.#notifyListChanged("resources");
   }
-  /**
-   * Adds resource templates to the server.
-   */
-  public addResourceTemplates<
-    const Args extends InputResourceTemplateArgument[],
-  >(resources: InputResourceTemplate<T, Args>[]) {
-    const newResourceTemplateNames = new Set(
-      resources.map((resource) => resource.name),
-    );
-    this.#resourcesTemplates = this.#resourcesTemplates.filter(
-      (t) => !newResourceTemplateNames.has(t.name),
-    );
-    this.#resourcesTemplates.push(...resources);
 
-    if (this.#serverState === ServerState.Running) {
-      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
+  public addResourceTemplates(templates: ResourceTemplate<T>[]) {
+    for (const template of templates) {
+      this.#resourceTemplates.push(template);
     }
+    this.#notifyListChanged("resources");
   }
-  /**
-   * Adds a tool to the server.
-   */
+
   public addTool<Params extends ToolParameters>(tool: Tool<T, Params>) {
-    assertToolSchemas(tool);
-
-    // Remove existing tool with the same name
-    this.#tools = this.#tools.filter((t) => t.name !== tool.name);
+    assertStandardSchema(tool.parameters, tool.name, "parameters");
+    assertStandardSchema(tool.outputSchema, tool.name, "outputSchema");
     this.#tools.push(tool as unknown as Tool<T>);
-    if (this.#serverState === ServerState.Running) {
-      this.#toolsListChanged(this.#tools);
-    }
+    this.#notifyListChanged("tools");
   }
-  /**
-   * Adds tools to the server.
-   */
+
   public addTools<Params extends ToolParameters>(tools: Tool<T, Params>[]) {
-    tools.forEach(assertToolSchemas);
-
-    const newToolNames = new Set(tools.map((tool) => tool.name));
-    this.#tools = this.#tools.filter((t) => !newToolNames.has(t.name));
-    this.#tools.push(...(tools as unknown as Tool<T>[]));
-
-    if (this.#serverState === ServerState.Running) {
-      this.#toolsListChanged(this.#tools);
+    for (const tool of tools) {
+      assertStandardSchema(tool.parameters, tool.name, "parameters");
+      assertStandardSchema(tool.outputSchema, tool.name, "outputSchema");
+      this.#tools.push(tool as unknown as Tool<T>);
     }
+    this.#notifyListChanged("tools");
   }
 
   /**
-   * Connects the server to a transport you constructed yourself, instead of
-   * letting {@link ViteMCP.start} create one.
-   *
-   * The session is built from the tools, resources and prompts registered on
-   * this instance — exactly as `start()` does — so tests exercise the same
-   * wiring the real server uses. The main use case is driving a server
-   * in-process over `InMemoryTransport` without binding a port:
-   *
-   * ```ts
-   * const [clientTransport, serverTransport] =
-   *   InMemoryTransport.createLinkedPair();
-   *
-   * await Promise.all([
-   *   server.connect(serverTransport),
-   *   client.connect(clientTransport),
-   * ]);
-   * ```
-   *
-   * The transport's lifecycle belongs to the caller: `stop()` does not close
-   * transports passed here. Close the returned session (or the transport) when
-   * you are done with it.
-   *
-   * @param transport - An already-constructed MCP server transport.
-   * @param auth - Session auth, equivalent to what `authenticate` would return.
-   * @returns The session bound to the transport.
+   * Connects the server to an arbitrary transport — used for in-memory unit
+   * testing, where a linked transport pair replaces a real socket.
    */
   public async connect(
-    transport: Transport,
-    auth?: T,
-  ): Promise<ViteMCPSession<T>> {
-    const session = this.#createSession(auth);
-
-    await session.connect(transport);
-
-    this.#sessions.push(session);
-
-    session.once("error", () => {
-      this.#removeSession(session);
-    });
-
-    const originalOnClose = transport.onclose;
-
-    transport.onclose = () => {
-      this.#removeSession(session);
-
-      if (originalOnClose) {
-        originalOnClose();
-      }
-    };
-
-    this.emit("connect", {
-      session: session as ViteMCPSession<ViteMCPSessionAuth>,
-    });
-
+    transport: Parameters<McpServer["connect"]>[0],
+  ): Promise<McpServer> {
+    const server = await this.#buildServer(undefined);
+    await server.connect(transport);
+    this.#connectedServers.push(server);
     this.#serverState = ServerState.Running;
-
-    return session;
+    return server;
   }
 
   /**
-   * Embeds a resource by URI, making it easy to include resources in tool responses.
-   *
-   * @param uri - The URI of the resource to embed
-   * @returns Promise<ResourceContent> - The embedded resource content
+   * Resolves a resource (or resource template) URI to an embeddable resource
+   * body, for returning inline from a tool.
    */
-  public async embedded(uri: string): Promise<ResourceContent["resource"]> {
-    // First, try to find a direct resource match
-    const directResource = this.#resources.find(
-      (resource) => resource.uri === uri,
-    );
+  public async embedded(uri: string): Promise<LoadedResource> {
+    const direct = this.#resources.find((resource) => resource.uri === uri);
 
-    if (directResource) {
-      const result = await directResource.load();
-      const results = Array.isArray(result) ? result : [result];
-      const firstResult = results[0];
-
-      const resourceData: ResourceContent["resource"] = {
-        mimeType: directResource.mimeType,
-        uri,
-      };
-
-      if ("text" in firstResult) {
-        resourceData.text = firstResult.text;
-      }
-
-      if ("blob" in firstResult) {
-        resourceData.blob = firstResult.blob;
-      }
-
-      return resourceData;
+    if (direct) {
+      const loaded = await direct.load(this.#makeContext(undefined, undefined));
+      const first = Array.isArray(loaded) ? loaded[0] : loaded;
+      return { ...first, mimeType: first.mimeType ?? direct.mimeType, uri };
     }
 
-    // Try to match against resource templates
-    for (const template of this.#resourcesTemplates) {
-      const parsedTemplate = parseURITemplate(template.uriTemplate);
-      const params = parsedTemplate.fromUri(uri);
+    for (const template of this.#resourceTemplates) {
+      const params = parseURITemplate(template.uriTemplate).fromUri(uri);
+
       if (!params) {
         continue;
       }
 
-      const result = await template.load(
-        params as ResourceTemplateArgumentsToObject<typeof template.arguments>,
+      const loaded = await template.load(
+        params as Record<string, string>,
+        this.#makeContext(undefined, undefined),
       );
-
-      const resourceData: ResourceContent["resource"] = {
-        mimeType: template.mimeType,
-        uri,
-      };
-
-      if ("text" in result) {
-        resourceData.text = result.text;
-      }
-
-      if ("blob" in result) {
-        resourceData.blob = result.blob;
-      }
-
-      return resourceData; // The resource we're looking for
+      const first = Array.isArray(loaded) ? loaded[0] : loaded;
+      return { ...first, mimeType: first.mimeType ?? template.mimeType, uri };
     }
 
     throw new UnexpectedStateError(`Resource not found: ${uri}`, { uri });
   }
-  /**
-   * Returns the underlying Hono app instance for direct access to Hono's native API.
-   * This allows you to add custom routes, middleware, and handlers using Hono's standard methods.
-   *
-   * @returns The Hono app instance
-   *
-   * @example
-   * ```typescript
-   * const app = server.getApp();
-   *
-   * // Add routes using native Hono API
-   * app.get('/api/users', async (c) => {
-   *   return c.json({ users: [] });
-   * });
-   *
-   * app.post('/api/users/:id', async (c) => {
-   *   const id = c.req.param('id');
-   *   return c.json({ id });
-   * });
-   * ```
-   */
+
+  /** The Hono app serving the HTTP transport, for mounting custom routes. */
   public getApp(): Hono {
     return this.#honoApp;
   }
+
   /**
-   * Removes a prompt from the server.
+   * Publishes `notifications/resources/updated` for a URI to any subscription
+   * that opted in to it.
    */
+  public notifyResourceUpdated(uri: string): void {
+    this.#handler?.notify.resourceUpdated(uri);
+  }
+
   public removePrompt(name: string) {
     this.#prompts = this.#prompts.filter((p) => p.name !== name);
-    if (this.#serverState === ServerState.Running) {
-      this.#promptsListChanged(this.#prompts);
-    }
-  }
-  /**
-   * Removes prompts from the server.
-   */
-  public removePrompts(names: string[]) {
-    for (const name of names) {
-      this.#prompts = this.#prompts.filter((p) => p.name !== name);
-    }
-    if (this.#serverState === ServerState.Running) {
-      this.#promptsListChanged(this.#prompts);
-    }
+    this.#notifyListChanged("prompts");
   }
 
-  /**
-   * Removes a resource from the server.
-   */
+  public removePrompts(names: string[]) {
+    this.#prompts = this.#prompts.filter((p) => !names.includes(p.name));
+    this.#notifyListChanged("prompts");
+  }
+
   public removeResource(name: string) {
     this.#resources = this.#resources.filter((r) => r.name !== name);
-    if (this.#serverState === ServerState.Running) {
-      this.#resourcesListChanged(this.#resources);
-    }
+    this.#notifyListChanged("resources");
   }
-  /**
-   * Removes resources from the server.
-   */
+
   public removeResources(names: string[]) {
-    for (const name of names) {
-      this.#resources = this.#resources.filter((r) => r.name !== name);
-    }
-    if (this.#serverState === ServerState.Running) {
-      this.#resourcesListChanged(this.#resources);
-    }
+    this.#resources = this.#resources.filter((r) => !names.includes(r.name));
+    this.#notifyListChanged("resources");
   }
-  /**
-   * Removes a resource template from the server.
-   */
+
   public removeResourceTemplate(name: string) {
-    this.#resourcesTemplates = this.#resourcesTemplates.filter(
-      (t) => t.name !== name,
+    this.#resourceTemplates = this.#resourceTemplates.filter(
+      (r) => r.name !== name,
     );
-    if (this.#serverState === ServerState.Running) {
-      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
-    }
+    this.#notifyListChanged("resources");
   }
-  /**
-   * Removes resource templates from the server.
-   */
+
   public removeResourceTemplates(names: string[]) {
-    for (const name of names) {
-      this.#resourcesTemplates = this.#resourcesTemplates.filter(
-        (t) => t.name !== name,
-      );
-    }
-    if (this.#serverState === ServerState.Running) {
-      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
-    }
-  }
-
-  /**
-   * Removes a tool from the server.
-   */
-  public removeTool(name: string) {
-    // Remove existing tool with the same name
-    this.#tools = this.#tools.filter((t) => t.name !== name);
-    if (this.#serverState === ServerState.Running) {
-      this.#toolsListChanged(this.#tools);
-    }
-  }
-
-  /**
-   * Removes tools from the server.
-   */
-  public removeTools(names: string[]) {
-    for (const name of names) {
-      this.#tools = this.#tools.filter((t) => t.name !== name);
-    }
-    if (this.#serverState === ServerState.Running) {
-      this.#toolsListChanged(this.#tools);
-    }
-  }
-
-  /**
-   * Notifies subscribed clients that a resource's contents have changed.
-   *
-   * Sends a `notifications/resources/updated` notification to every connected
-   * session that has subscribed to `uri` via `resources/subscribe`. Sessions
-   * that have not subscribed to the URI are skipped, so it is safe to call this
-   * whenever the underlying data changes.
-   *
-   * @param uri - The URI of the resource whose contents changed.
-   */
-  public async sendResourceUpdated(uri: string): Promise<void> {
-    await Promise.all(
-      this.#sessions.map((session) => session.sendResourceUpdated(uri)),
+    this.#resourceTemplates = this.#resourceTemplates.filter(
+      (r) => !names.includes(r.name),
     );
+    this.#notifyListChanged("resources");
   }
 
-  /**
-   * Starts the server.
-   */
+  public removeTool(name: string) {
+    this.#tools = this.#tools.filter((t) => t.name !== name);
+    this.#notifyListChanged("tools");
+  }
+
+  public removeTools(names: string[]) {
+    this.#tools = this.#tools.filter((t) => !names.includes(t.name));
+    this.#notifyListChanged("tools");
+  }
+
   public async start(
-    options?: Partial<{
-      httpStream: {
-        basePath?: `/${string}`;
-        cors?: boolean | CorsOptions;
-        enableJsonResponse?: boolean;
-        endpoint?: `/${string}`;
-        eventStore?: EventStore;
-        host?: string;
-        port: number;
-        sslCa?: string;
-        sslCert?: string;
-        sslKey?: string;
-        stateless?: boolean;
-      };
-      transportType: "httpStream" | "stdio";
-    }>,
-  ) {
-    const config = this.#parseRuntimeConfig(options);
-
-    if (config.transportType === "stdio") {
-      const transport = new StdioServerTransport();
-
-      // For stdio transport, if authenticate function is provided, call it
-      // with undefined request (since stdio doesn't have HTTP request context)
-      let auth: T | undefined;
-
-      if (this.#authenticate) {
-        try {
-          auth = await this.#authenticate(
-            undefined as unknown as http.IncomingMessage,
-          );
-        } catch (error) {
-          this.#logger.error(
-            "[ViteMCP error] Authentication failed for stdio transport:",
-            error instanceof Error ? error.message : String(error),
-          );
-          // Continue without auth if authentication fails
+    options:
+      | {
+          httpStream: {
+            /** Origins permitted to reach the MCP endpoint (DNS-rebinding guard). */
+            allowedOrigins?: string[];
+            basePath?: string;
+            cors?: false | Parameters<typeof cors>[0];
+            enableJsonResponse?: boolean;
+            endpoint?: string;
+            host?: string;
+            /**
+             * Whether to also serve 2025-era clients.
+             *
+             * Defaults to `"stateless"`, which accepts both eras — the SDK
+             * client negotiates 2025 unless configured with
+             * `versionNegotiation: { mode: "auto" }`, so rejecting it locks
+             * out most existing clients.
+             *
+             * `"reject"` serves only 2026-07-28, matching what
+             * `server/discover` advertises and enforcing the required
+             * `Mcp-Method`/`Mcp-Name` headers on every request.
+             */
+            legacy?: "reject" | "stateless";
+            maxBodySize?: number;
+            port: number;
+            sslCa?: string;
+            sslCert?: string;
+            sslKey?: string;
+          };
+          transportType: "httpStream";
         }
-      }
+      | { transportType: "stdio" },
+  ): Promise<void> {
+    this.#serverState = ServerState.Starting;
 
-      const session = new ViteMCPSession<T>({
-        auth,
-        instructions: this.#options.instructions,
-        logger: this.#logger,
-        name: this.#options.name,
-        onToolCall: this.#options.onToolCall,
-        ping: this.#options.ping,
-        prompts: this.#prompts,
-        resources: this.#resources,
-        resourcesTemplates: this.#resourcesTemplates,
-        roots: this.#options.roots,
-        tools: this.#tools,
-        transportType: "stdio",
-        utils: this.#options.utils,
-        version: this.#options.version,
-      });
-
-      await session.connect(transport);
-
-      // Belt-and-suspenders: detect when the MCP client closes its end of
-      // the stdin pipe and shut down the transport so the process doesn't
-      // linger as a zombie/orphan. The upstream SDK fix (PR #2003) handles
-      // this inside StdioServerTransport itself, but adding the listener here
-      // means older SDK versions are also protected.
-      let stdinClosed = false;
-      const onStdinClose = () => {
-        if (stdinClosed) return;
-        stdinClosed = true;
-        process.stdin.off("close", onStdinClose);
-        process.stdin.off("end", onStdinClose);
-        transport.close().catch(() => {});
-      };
-      process.stdin.on("close", onStdinClose);
-      process.stdin.on("end", onStdinClose);
-
-      this.#sessions.push(session);
-
-      session.once("error", () => {
-        this.#removeSession(session);
-      });
-
-      // Monitor the underlying transport for close events
-      if (transport.onclose) {
-        const originalOnClose = transport.onclose;
-
-        transport.onclose = () => {
-          process.stdin.off("close", onStdinClose);
-          process.stdin.off("end", onStdinClose);
-          this.#removeSession(session);
-
-          if (originalOnClose) {
-            originalOnClose();
-          }
-        };
+    try {
+      if (options.transportType === "stdio") {
+        this.#stdioHandle = serveStdio(() => this.#buildServer(undefined));
+        this.#logger.info(`[ViteMCP info] server is running on stdio`);
       } else {
-        transport.onclose = () => {
-          process.stdin.off("close", onStdinClose);
-          process.stdin.off("end", onStdinClose);
-          this.#removeSession(session);
-        };
+        await this.#startHttp(options.httpStream);
       }
 
-      this.emit("connect", {
-        session: session as ViteMCPSession<ViteMCPSessionAuth>,
-      });
       this.#serverState = ServerState.Running;
-    } else if (config.transportType === "httpStream") {
-      const httpConfig = config.httpStream;
-      const protocol =
-        httpConfig.sslCert || httpConfig.sslKey ? "https" : "http";
-      const streamEndpoint = joinPaths(
-        httpConfig.basePath,
-        httpConfig.endpoint,
-      );
-
-      if (httpConfig.stateless) {
-        // Stateless mode - create new server instance for each request
-        this.#logger.info(
-          `[ViteMCP info] Starting server in stateless mode on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
-        );
-
-        this.#httpStreamServer = await startHTTPServer<ViteMCPSession<T>>({
-          ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
-          cors: httpConfig.cors,
-          createServer: async (request) => {
-            let auth: T | undefined;
-
-            if (this.#authenticate) {
-              auth = await this.#authenticate(request);
-
-              // In stateless mode, authentication is REQUIRED
-              if (auth === undefined || auth === null) {
-                throw this.#createUnauthorizedResponse(
-                  "Authentication required",
-                );
-              }
-            }
-
-            // Extract session ID from headers
-            const sessionId = Array.isArray(request.headers["mcp-session-id"])
-              ? request.headers["mcp-session-id"][0]
-              : request.headers["mcp-session-id"];
-
-            // In stateless mode, create a new session for each request
-            // without persisting it in the sessions array
-            return this.#createSession(auth, sessionId, true);
-          },
-          enableJsonResponse: httpConfig.enableJsonResponse,
-          eventStore: httpConfig.eventStore,
-          host: httpConfig.host,
-          ...(this.#options.oauth?.enabled &&
-          this.#options.oauth.protectedResource?.resource
-            ? {
-                oauth: {
-                  protectedResource: {
-                    resource: this.#options.oauth.protectedResource.resource,
-                  },
-                },
-              }
-            : {}),
-          // In stateless mode, we don't track sessions
-          onClose: async () => {
-            // No session tracking in stateless mode
-          },
-          onConnect: async () => {
-            // No persistent session tracking in stateless mode
-            this.#logger.debug(
-              `[ViteMCP debug] Stateless HTTP Stream request handled`,
-            );
-          },
-          onUnhandledRequest: async (req, res) => {
-            await this.#handleUnhandledRequest(
-              req,
-              res,
-              true,
-              httpConfig.host,
-              streamEndpoint,
-              httpConfig.basePath,
-            );
-          },
-          port: httpConfig.port,
-          sslCa: httpConfig.sslCa,
-          sslCert: httpConfig.sslCert,
-          sslKey: httpConfig.sslKey,
-          stateless: true,
-          streamEndpoint,
-        });
-      } else {
-        // Regular mode with session management
-        this.#httpStreamServer = await startHTTPServer<ViteMCPSession<T>>({
-          ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
-          cors: httpConfig.cors,
-          createServer: async (request) => {
-            let auth: T | undefined;
-
-            if (this.#authenticate) {
-              auth = await this.#authenticate(request);
-            }
-
-            // Extract session ID from headers
-            const sessionId = Array.isArray(request.headers["mcp-session-id"])
-              ? request.headers["mcp-session-id"][0]
-              : request.headers["mcp-session-id"];
-
-            return this.#createSession(auth, sessionId);
-          },
-          enableJsonResponse: httpConfig.enableJsonResponse,
-          eventStore: httpConfig.eventStore,
-          host: httpConfig.host,
-          ...(this.#options.oauth?.enabled &&
-          this.#options.oauth.protectedResource?.resource
-            ? {
-                oauth: {
-                  protectedResource: {
-                    resource: this.#options.oauth.protectedResource.resource,
-                  },
-                },
-              }
-            : {}),
-          onClose: async (session) => {
-            const sessionIndex = this.#sessions.indexOf(session);
-
-            if (sessionIndex !== -1) this.#sessions.splice(sessionIndex, 1);
-
-            this.emit("disconnect", {
-              session: session as ViteMCPSession<ViteMCPSessionAuth>,
-            });
-          },
-          onConnect: async (session) => {
-            this.#sessions.push(session);
-
-            this.#logger.info(`[ViteMCP info] HTTP Stream session established`);
-
-            this.emit("connect", {
-              session: session as ViteMCPSession<ViteMCPSessionAuth>,
-            });
-          },
-
-          onUnhandledRequest: async (req, res) => {
-            await this.#handleUnhandledRequest(
-              req,
-              res,
-              false,
-              httpConfig.host,
-              streamEndpoint,
-              httpConfig.basePath,
-            );
-          },
-          port: httpConfig.port,
-          sslCa: httpConfig.sslCa,
-          sslCert: httpConfig.sslCert,
-          sslKey: httpConfig.sslKey,
-          stateless: httpConfig.stateless,
-          streamEndpoint,
-        });
-
-        this.#logger.info(
-          `[ViteMCP info] server is running on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
-        );
-      }
-      this.#serverState = ServerState.Running;
-    } else {
-      throw new Error("Invalid transport type");
+    } catch (error) {
+      this.#serverState = ServerState.Error;
+      throw error;
     }
   }
 
-  /**
-   * Stops the server.
-   */
-  public async stop() {
-    if (this.#httpStreamServer) {
-      await this.#httpStreamServer.close();
+  public async stop(): Promise<void> {
+    // Hono seals its matcher once used, so a restarted server needs a fresh
+    // app; the routes are re-registered by the next `start()`.
+    this.#honoApp = this.#freshApp();
+    this.#corsMiddleware = null;
+
+    for (const server of this.#connectedServers) {
+      await server.close().catch(() => {});
     }
+    this.#connectedServers = [];
+
+    await this.#stdioHandle?.close?.();
+    this.#stdioHandle = null;
+
+    await this.#handler?.close();
+    this.#handler = null;
+
+    if (this.#httpServer) {
+      await new Promise<void>((resolve) =>
+        this.#httpServer!.close(() => resolve()),
+      );
+      this.#httpServer = null;
+    }
+
     this.#serverState = ServerState.Stopped;
   }
 
-  /**
-   * Creates a new ViteMCPSession instance with the current configuration.
-   * Used both for regular sessions and stateless requests.
-   */
-  #createSession(
-    auth?: T,
-    sessionId?: string,
-    stateless = false,
-  ): ViteMCPSession<T> {
-    // Check if authentication failed
-    if (
-      auth &&
-      typeof auth === "object" &&
-      "authenticated" in auth &&
-      !(auth as { authenticated: unknown }).authenticated
-    ) {
-      const errorMessage =
-        "error" in auth &&
-        typeof (auth as { error: unknown }).error === "string"
-          ? (auth as { error: string }).error
-          : "Authentication failed";
-      throw this.#createUnauthorizedResponse(errorMessage);
-    }
+  async #buildServer(auth: T | undefined): Promise<McpServer> {
+    const server = new McpServer(
+      { name: this.#options.name, version: this.#options.version },
+      { instructions: this.#options.instructions },
+    );
 
-    const allowedTools = auth
-      ? this.#tools.filter((tool) =>
-          tool.canAccess ? tool.canAccess(auth) : true,
-        )
-      : this.#tools;
-    return new ViteMCPSession<T>({
-      auth,
-      instructions: this.#options.instructions,
-      logger: this.#logger,
-      name: this.#options.name,
-      onToolCall: this.#options.onToolCall,
-      ping: this.#options.ping,
-      prompts: this.#prompts,
-      resources: this.#resources,
-      resourcesTemplates: this.#resourcesTemplates,
-      roots: this.#options.roots,
-      sessionId,
-      stateless,
-      tools: allowedTools,
-      transportType: "httpStream",
-      utils: this.#options.utils,
-      version: this.#options.version,
-    });
-  }
+    for (const tool of this.#tools) {
+      if (tool.canAccess && !tool.canAccess(auth as T)) {
+        continue;
+      }
 
-  /**
-   * Builds a 401 Unauthorized HTTP Response for authentication failures.
-   *
-   * Throwing a `Response` (rather than a plain `Error`) guarantees that the
-   * transport (e.g. mcp-proxy) surfaces the correct status code directly,
-   * instead of relying on heuristics that infer the status code from the
-   * error message's text (see https://github.com/punkpeye/vitemcp/issues/180).
-   *
-   * The response body matches the JSON-RPC error envelope ViteMCP otherwise
-   * produces, and a `WWW-Authenticate` header is included per RFC 7235 (and
-   * RFC 9728 when protected-resource metadata is configured), so HTTP-aware
-   * clients can distinguish "unauthenticated" from a malformed request.
-   */
-  #createUnauthorizedResponse(message: string): Response {
-    // Only advertise resource_metadata when OAuth is enabled: the
-    // `/.well-known/oauth-protected-resource` endpoint is served only under
-    // `oauth.enabled` (and this matches how the oauth config is forwarded to
-    // mcp-proxy at the httpStream call sites), so gating here avoids pointing
-    // clients at an endpoint that would 404.
-    const oauth = this.#options.oauth;
-    const resource = oauth?.enabled
-      ? oauth.protectedResource?.resource
-      : undefined;
-    const wwwAuthenticateParts = [
-      'error="invalid_token"',
-      `error_description="${message.replace(/"/g, '\\"')}"`,
-    ];
+      server.registerTool(
+        tool.name,
+        {
+          _meta: tool._meta,
+          annotations: tool.annotations,
+          description: tool.description,
+          inputSchema: (await this.#toSdkSchema(
+            tool.parameters,
+            `Tool "${tool.name}" parameters`,
+          )) as never,
+          outputSchema: (await this.#toSdkSchema(
+            tool.outputSchema,
+            `Tool "${tool.name}" outputSchema`,
+          )) as never,
+        },
+        (async (args: unknown, ctx: unknown) => {
+          const context = this.#makeContext(auth, ctx);
 
-    if (resource) {
-      wwwAuthenticateParts.push(
-        `resource_metadata="${resource}/.well-known/oauth-protected-resource"`,
+          try {
+            const result = await (tool.timeoutMs
+              ? withTimeout(
+                  tool.execute(args, context),
+                  tool.timeoutMs,
+                  tool.name,
+                )
+              : tool.execute(args, context));
+            return normalizeToolResult(result);
+          } catch (error) {
+            if (error instanceof UserError) {
+              return {
+                content: [{ text: error.message, type: "text" }],
+                isError: true,
+                ...(error.extras ? { structuredContent: error.extras } : {}),
+              };
+            }
+            throw error;
+          }
+        }) as never,
       );
     }
 
-    return new Response(
-      JSON.stringify({
-        error: { code: -32000, message },
-        id: null,
-        jsonrpc: "2.0",
-      }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "WWW-Authenticate": `Bearer ${wwwAuthenticateParts.join(", ")}`,
+    for (const resource of this.#resources) {
+      if (resource.canAccess && !resource.canAccess(auth as T)) {
+        continue;
+      }
+
+      server.registerResource(
+        resource.name,
+        resource.uri,
+        {
+          cacheHint: resource.cache,
+          description: resource.description,
+          mimeType: resource.mimeType,
         },
-        status: 401,
+        (async (uri: URL, ctx: unknown) => {
+          const context = this.#makeContext(auth, ctx);
+          const loaded = await resource.load(context);
+          const bodies = Array.isArray(loaded) ? loaded : [loaded];
+          return {
+            contents: bodies.map((body) => ({
+              ...body,
+              mimeType: body.mimeType ?? resource.mimeType,
+              uri: body.uri ?? uri.toString(),
+            })),
+          };
+        }) as never,
+      );
+    }
+
+    for (const template of this.#resourceTemplates) {
+      if (template.canAccess && !template.canAccess(auth as T)) {
+        continue;
+      }
+
+      const complete: Record<string, (value: string) => Promise<string[]>> = {};
+      for (const arg of template.arguments ?? []) {
+        const completer =
+          arg.complete ??
+          (template.complete
+            ? (value: string) => template.complete!(arg.name, value)
+            : undefined);
+
+        if (completer) {
+          complete[arg.name] = async (value: string) =>
+            (await completer(value)).values;
+        }
+      }
+
+      server.registerResource(
+        template.name,
+        new SDKResourceTemplate(template.uriTemplate, {
+          complete: complete as never,
+          list: undefined,
+        }),
+        {
+          cacheHint: template.cache,
+          description: template.description,
+          mimeType: template.mimeType,
+        },
+        (async (uri: URL, args: Record<string, string>, ctx: unknown) => {
+          const context = this.#makeContext(auth, ctx);
+          const loaded = await template.load(args ?? {}, context);
+          const bodies = Array.isArray(loaded) ? loaded : [loaded];
+          return {
+            contents: bodies.map((body) => ({
+              ...body,
+              mimeType: body.mimeType ?? template.mimeType,
+              uri: body.uri ?? uri.toString(),
+            })),
+          };
+        }) as never,
+      );
+    }
+
+    for (const prompt of this.#prompts) {
+      if (prompt.canAccess && !prompt.canAccess(auth as T)) {
+        continue;
+      }
+
+      server.registerPrompt(
+        prompt.name,
+        {
+          argsSchema: promptArgsSchema(prompt),
+          description: prompt.description,
+        } as never,
+        (async (args: Record<string, string>, ctx: unknown) => {
+          const context = this.#makeContext(auth, ctx);
+          const loaded = await prompt.load(args ?? {}, context);
+
+          if (typeof loaded !== "string") {
+            return loaded;
+          }
+
+          return {
+            messages: [
+              {
+                content: { text: loaded, type: "text" },
+                role: "user" as const,
+              },
+            ],
+          };
+        }) as never,
+      );
+    }
+
+    return server;
+  }
+
+  /**
+   * Builds the Hono app with the CORS shim already installed.
+   *
+   * Registered up front because Hono runs middleware in registration order and
+   * callers add their own routes via `getApp()` before `start()` — installing
+   * it later would put it behind those routes and never see a preflight.
+   */
+  #freshApp(): Hono {
+    const app = new Hono();
+
+    app.use("*", (c, next) =>
+      this.#corsMiddleware ? this.#corsMiddleware(c, next) : next(),
+    );
+
+    return app;
+  }
+
+  /** Bridges the v2 per-request context onto ViteMCP's `Context`. */
+  #makeContext(auth: T | undefined, rawCtx: unknown): Context<T> {
+    const ctx = rawCtx as {
+      mcpReq?: {
+        _meta?: {
+          "io.modelcontextprotocol/logLevel"?: string;
+          progressToken?: number | string;
+        };
+        id?: string;
+        inputResponses?: Record<string, unknown>;
+        notify?: (n: unknown) => Promise<void>;
+        requestState?: <T>() => T | undefined;
+      };
+    };
+    const mcpReq = ctx?.mcpReq;
+
+    // The spec forbids emitting `notifications/message` for a request that did
+    // not opt in via `_meta`, so the level gates every call. Failures are
+    // swallowed: a log line must never take down the request (or, as an
+    // unhandled rejection, the process).
+    const requestedLevel = mcpReq?._meta?.["io.modelcontextprotocol/logLevel"];
+
+    const emit = (level: string, message: string, data?: SerializableValue) => {
+      if (!requestedLevel) {
+        return;
+      }
+
+      void mcpReq
+        ?.notify?.({
+          method: "notifications/message",
+          params: { data: { context: data, message }, level },
+        })
+        ?.catch(() => {});
+    };
+
+    return {
+      auth,
+      elicit: (params) =>
+        inputRequired.elicit({
+          message: params.message,
+          requestedSchema: params.requestedSchema as never,
+        }),
+      input: (key, schema) =>
+        acceptedContent(mcpReq?.inputResponses, key, schema as never) as never,
+      inputRequired: (inputRequests, requestState) =>
+        inputRequired({ inputRequests, requestState }),
+      inputResponses: mcpReq?.inputResponses,
+      log: {
+        debug: (m, d) => emit("debug", m, d),
+        error: (m, d) => emit("error", m, d),
+        info: (m, d) => emit("info", m, d),
+        warn: (m, d) => emit("warning", m, d),
       },
+      reportProgress: async (progress) => {
+        const progressToken = mcpReq?._meta?.progressToken;
+
+        // No token means the client did not ask for progress on this request;
+        // emitting anyway would be an uncorrelatable notification.
+        if (progressToken === undefined) {
+          return;
+        }
+
+        await mcpReq?.notify?.({
+          method: "notifications/progress",
+          params: {
+            message: progress.message,
+            progress: progress.progress,
+            progressToken,
+            total: progress.total,
+          },
+        });
+      },
+      requestId: mcpReq?.id,
+      // The SDK exposes this as an accessor; call it so callers get the value.
+      requestState: mcpReq?.requestState?.<string>(),
+    };
+  }
+
+  /**
+   * Publishes a change event to any open `subscriptions/listen` stream. This
+   * replaces the 2025-era `notifications/*_list_changed` broadcast, which had
+   * no addressee on a stateless transport.
+   */
+  #notifyListChanged(kind: "prompts" | "resources" | "tools") {
+    // Typed on purpose: an untyped cast here previously let wrong method names
+    // (`toolsListChanged` vs `toolsChanged`) compile and silently no-op.
+    const notifier = this.#handler?.notify;
+
+    if (!notifier) {
+      return;
+    }
+
+    if (kind === "tools") notifier.toolsChanged();
+    if (kind === "prompts") notifier.promptsChanged();
+    if (kind === "resources") notifier.resourcesChanged();
+  }
+
+  async #startHttp(config: {
+    allowedOrigins?: string[];
+    basePath?: string;
+    cors?: false | Parameters<typeof cors>[0];
+    enableJsonResponse?: boolean;
+    endpoint?: string;
+    host?: string;
+    legacy?: "reject" | "stateless";
+    maxBodySize?: number;
+    port: number;
+    sslCa?: string;
+    sslCert?: string;
+    sslKey?: string;
+  }): Promise<void> {
+    this.#handler = createMcpHandler(
+      async (ctx) => {
+        // `ctx.requestInfo` is the real field; a previous cast invented `req`
+        // and silently handed every hook `undefined`.
+        const request = ctx.requestInfo;
+
+        const auth =
+          this.#authenticate && request
+            ? await this.#authenticate(request)
+            : undefined;
+
+        return this.#buildServer(auth);
+      },
+      {
+        // Defaults to serving 2025-era clients as well, because the SDK
+        // client negotiates that era unless told otherwise — rejecting it
+        // would bounce most clients in the wild off a brand-new package.
+        //
+        // The tradeoff is real: `server/discover` advertises only 2026-07-28,
+        // so a legacy request is answered without being advertised, and the
+        // mandatory `Mcp-Method`/`Mcp-Name` validation applies only to modern
+        // requests. Set `legacy: "reject"` for a strictly modern endpoint.
+        legacy: config.legacy ?? "stateless",
+        ...(config.enableJsonResponse ? { responseMode: "json" as const } : {}),
+        onerror: (error) => this.#logger.error("[ViteMCP error]", error),
+      },
+    );
+
+    this.#corsMiddleware = config.cors === false ? null : cors(config.cors);
+
+    const oauth = this.#options.oauth ?? this.#options.auth?.getOAuthConfig();
+
+    if (
+      oauth?.enabled !== false &&
+      (oauth?.proxy ?? oauth?.authorizationServer ?? oauth?.protectedResource)
+    ) {
+      this.#honoApp.route(
+        "/",
+        createOAuthRouter({
+          authorizationServer: oauth.authorizationServer,
+          basePath: config.basePath,
+          endpoint: config.endpoint ?? "/mcp",
+          protectedResource: oauth.protectedResource,
+          proxy: oauth.proxy,
+        }),
+      );
+    }
+
+    const health = this.#options.health;
+    if (health?.enabled !== false) {
+      this.#honoApp.get(health?.path ?? "/health", (c) =>
+        c.text(health?.message ?? "ok", (health?.status ?? 200) as 200),
+      );
+    }
+
+    const endpoint = `${config.basePath ?? ""}${config.endpoint ?? "/mcp"}`;
+    const handler = this.#handler;
+    const host = config.host ?? "127.0.0.1";
+    const isLoopback = ["::1", "127.0.0.1", "localhost"].includes(host);
+
+    // Default-deny for loopback binds, which is precisely the DNS-rebinding
+    // case. A server bound to a routable interface is assumed to be fronted
+    // deliberately, so its origins must be configured explicitly.
+    const allowedOrigins =
+      config.allowedOrigins ?? (isLoopback ? localhostAllowedOrigins() : []);
+
+    if (!config.allowedOrigins && !isLoopback) {
+      this.#logger.warn(
+        `[ViteMCP warning] no 'allowedOrigins' configured while bound to ${host}; browser origins will be rejected`,
+      );
+    }
+
+    // The MCP endpoint is a Hono route rather than a pre-routing short-circuit,
+    // so the CORS middleware registered in the constructor actually covers it.
+    // Routing around Hono meant every browser preflight 405'd, which on this
+    // revision blocks browsers entirely — `Mcp-Method`/`Mcp-Name` make every
+    // POST preflighted.
+    this.#honoApp.all(endpoint, async (c) => {
+      // Transport security (MUST): a present-but-unrecognised Origin is
+      // rejected with 403. This is what stops a malicious page from driving a
+      // locally bound server via DNS rebinding. Requests with no Origin (i.e.
+      // non-browser clients) are unaffected.
+      const rejected = originValidationResponse(c.req.raw, allowedOrigins);
+
+      if (rejected) {
+        return rejected;
+      }
+
+      return handler.fetch(c.req.raw);
+    });
+
+    const app = this.#honoApp;
+    const maxBodySize = config.maxBodySize ?? OAUTH_PROXY_MAX_BODY_SIZE;
+
+    const useTls = Boolean(config.sslCert && config.sslKey);
+
+    const requestListener = (
+      req: http.IncomingMessage,
+      res: http.ServerResponse,
+    ) => {
+      void (async () => {
+        try {
+          // `toWebRequest` reads the Node stream to completion, so the size
+          // cap has to be applied *here* — enforcing it further in would mean
+          // the whole body was already buffered, which is the DoS this guards.
+          const body = await readCappedNodeBody(req, maxBodySize);
+
+          if (body === OVERSIZE) {
+            res.writeHead(400, {
+              Connection: "close",
+              "Content-Type": "application/json",
+            });
+            // Close the socket only once the 400 has actually flushed —
+            // destroying it earlier truncates the response the client needs to
+            // read. Pausing the request stops us draining the rest of the
+            // oversize body in the meantime, which is the exhaustion this
+            // guards against.
+            // Discard the remainder rather than buffering it: the bytes are
+            // dropped as they arrive, so nothing accumulates, and Node can
+            // still complete the exchange. Pausing instead would stall the
+            // response and the client would never see the 400.
+            req.resume();
+
+            // `Connection: close` alone is not enough: Node waits for the
+            // declared Content-Length before closing, and an over-declared
+            // body never finishes arriving. Close once the 400 has flushed.
+            res.once("finish", () => {
+              const socket = res.socket;
+              socket?.end();
+              // A client that over-declared Content-Length keeps writing, so a
+              // half-close can hang. Force the teardown shortly after the FIN.
+              setTimeout(() => socket?.destroy(), 50).unref();
+            });
+            res.end(
+              JSON.stringify({
+                error: "invalid_request",
+                error_description: `Request body exceeds ${formatBytes(maxBodySize)}`,
+              }),
+            );
+            return;
+          }
+
+          // Convert faithfully — method, headers and body all have to survive,
+          // or custom POST routes see an empty request. The Node req/res are
+          // passed as Hono's env so custom routes can still reach
+          // `c.env.incoming`.
+          const response = await app.fetch(
+            nodeToWebRequest(req, body, useTls),
+            {
+              incoming: req,
+              outgoing: res,
+            },
+          );
+
+          res.writeHead(response.status, Object.fromEntries(response.headers));
+          res.end(Buffer.from(await response.arrayBuffer()));
+        } catch (error) {
+          // A body that aborts mid-stream rejects here. Settle with a 400
+          // rather than leaving the exchange pending forever.
+          this.#logger.debug(`[ViteMCP debug] request failed:`, error);
+
+          if (!res.headersSent) {
+            res.writeHead(400, {
+              Connection: "close",
+              "Content-Type": "application/json",
+            });
+          }
+
+          res.end(
+            JSON.stringify({
+              error: "invalid_request",
+              error_description: "Request body could not be read",
+            }),
+          );
+        }
+      })();
+    };
+
+    // TLS is terminated here when certs are supplied, rather than assuming a
+    // proxy in front.
+    this.#httpServer = useTls
+      ? https.createServer(
+          {
+            ...(config.sslCa ? { ca: await readFile(config.sslCa) } : {}),
+            cert: await readFile(config.sslCert!),
+            key: await readFile(config.sslKey!),
+          },
+          requestListener,
+        )
+      : http.createServer(requestListener);
+
+    await new Promise<void>((resolve) =>
+      this.#httpServer!.listen(
+        config.port,
+        config.host ?? "127.0.0.1",
+        resolve,
+      ),
+    );
+
+    this.#logger.info(
+      `[ViteMCP info] server is running on ${useTls ? "HTTPS" : "HTTP"} at ${
+        useTls ? "https" : "http"
+      }://${config.host ?? "127.0.0.1"}:${config.port}${endpoint}`,
     );
   }
 
   /**
-   * Handles unhandled HTTP requests with health, readiness, OAuth endpoints, and custom routes
+   * Builds a fresh `McpServer` for one request. On the stateless protocol
+   * there is nothing to reuse between requests, and building per-request is
+   * what lets `canAccess` filter the listing by the caller's auth.
    */
-  #handleUnhandledRequest = async (
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-    isStateless = false,
-    host: string,
-    streamEndpoint?: string,
-    basePath: "" | `/${string}` = "",
-  ) => {
-    const url = new URL(req.url || "", `http://${host}`);
-    const basePathRelativePath = stripBasePath(url.pathname, basePath);
+  /**
+   * The SDK needs a schema that can produce JSON Schema. Zod v4 does natively;
+   * valibot/arktype do not, so convert those via xsschema and hand the result
+   * back through `fromJsonSchema`. Throws eagerly for anything unsupported so
+   * the failure surfaces at start-up, not on the first tool call.
+   */
+  async #toSdkSchema(schema: unknown, label: string): Promise<unknown> {
+    if (!schema) {
+      return undefined;
+    }
 
-    // Try Hono routes first - users may have added routes via getApp()
+    const standard = (schema as { "~standard"?: { jsonSchema?: unknown } })[
+      "~standard"
+    ];
+
+    if (standard?.jsonSchema) {
+      return schema;
+    }
+
     try {
-      // Convert Node.js IncomingMessage to Web Request
-      const webRequest = this.#nodeRequestToWebRequest(req, url);
-
-      // Call Hono's fetch handler
-      const honoResponse = await this.#honoApp.fetch(webRequest, {
-        incoming: req,
-        outgoing: res,
-      });
-
-      // If Hono handled it (not 404), write response and return
-      if (honoResponse.status !== 404) {
-        // Write Hono response to Node.js response
-        if (!res.headersSent) {
-          res.statusCode = honoResponse.status;
-          honoResponse.headers.forEach((value, key) => {
-            res.setHeader(key, value);
-          });
-
-          if (honoResponse.body) {
-            const reader = honoResponse.body.getReader();
-            try {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                res.write(value);
-              }
-            } finally {
-              reader.releaseLock();
-            }
-          }
-          res.end();
-        }
-        return;
-      }
+      const json = strictJsonSchema(await toJsonSchema(schema as never));
+      return fromJsonSchema(json as never);
     } catch (error) {
-      // If Hono throws, log and continue to other endpoints
-      this.#logger.debug("[ViteMCP debug] Hono route not matched", error);
-    }
-
-    const healthConfig = this.#options.health ?? {};
-
-    const enabled =
-      healthConfig.enabled === undefined ? true : healthConfig.enabled;
-
-    if (enabled) {
-      const path = healthConfig.path ?? "/health";
-
-      try {
-        if (
-          (req.method === "GET" || req.method === "HEAD") &&
-          url.pathname === joinPaths(basePath, path)
-        ) {
-          res
-            .writeHead(healthConfig.status ?? 200, {
-              "Content-Type": "text/plain",
-            })
-            .end(
-              req.method === "HEAD"
-                ? undefined
-                : (healthConfig.message ?? "✓ Ok"),
-            );
-
-          return;
-        }
-
-        // Enhanced readiness check endpoint
-        if (
-          (req.method === "GET" || req.method === "HEAD") &&
-          url.pathname === joinPaths(basePath, "/ready")
-        ) {
-          if (isStateless) {
-            // In stateless mode, we're always ready if the server is running
-            const response = {
-              mode: "stateless",
-              ready: 1,
-              status: "ready",
-              total: 1,
-            };
-
-            res
-              .writeHead(200, {
-                "Content-Type": "application/json",
-              })
-              .end(
-                req.method === "HEAD" ? undefined : JSON.stringify(response),
-              );
-          } else {
-            const readySessions = this.#sessions.filter(
-              (s) => s.isReady,
-            ).length;
-            const totalSessions = this.#sessions.length;
-            const allReady =
-              readySessions === totalSessions && totalSessions > 0;
-
-            const response = {
-              ready: readySessions,
-              status: allReady
-                ? "ready"
-                : totalSessions === 0
-                  ? "no_sessions"
-                  : "initializing",
-              total: totalSessions,
-            };
-
-            res
-              .writeHead(allReady ? 200 : 503, {
-                "Content-Type": "application/json",
-              })
-              .end(
-                req.method === "HEAD" ? undefined : JSON.stringify(response),
-              );
-          }
-
-          return;
-        }
-      } catch (error) {
-        this.#logger.error("[ViteMCP error] health endpoint error", error);
-      }
-    }
-
-    // Handle OAuth well-known endpoints
-    const oauthConfig = this.#options.oauth;
-    if (oauthConfig?.enabled && req.method === "GET") {
-      const url = new URL(req.url || "", `http://${host}`);
-      const authorizationServerMetadataPath = joinPaths(
-        "",
-        `/.well-known/oauth-authorization-server${basePath}`,
+      throw new UnexpectedStateError(
+        `${label} is not a supported Standard Schema: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { label },
       );
-
-      if (
-        url.pathname === authorizationServerMetadataPath &&
-        oauthConfig.authorizationServer
-      ) {
-        const metadata = convertObjectToSnakeCase(
-          oauthConfig.authorizationServer,
-        );
-        res
-          .writeHead(200, {
-            "Content-Type": "application/json",
-          })
-          .end(JSON.stringify(metadata));
-        return;
-      }
-
-      // Handle Protected Resource Metadata with MCP 2025-11-25 compliant discovery
-      // Per spec, clients should search in order:
-      // 1. WWW-Authenticate header (handled by mcp-proxy)
-      // 2. /.well-known/oauth-protected-resource<sub-path> (e.g., /mcp)
-      // 3. /.well-known/oauth-protected-resource (root)
-      if (oauthConfig.protectedResource) {
-        const wellKnownBase = "/.well-known/oauth-protected-resource";
-        let shouldServeMetadata = false;
-
-        // Check for sub-path variant first (higher priority per MCP spec)
-        if (
-          streamEndpoint &&
-          url.pathname === `${wellKnownBase}${streamEndpoint}`
-        ) {
-          shouldServeMetadata = true;
-        }
-        // Fall back to root path
-        else if (url.pathname === wellKnownBase) {
-          shouldServeMetadata = true;
-        }
-
-        if (shouldServeMetadata) {
-          const metadata = convertObjectToSnakeCase(
-            oauthConfig.protectedResource,
-          );
-          res
-            .writeHead(200, {
-              "Content-Type": "application/json",
-            })
-            .end(JSON.stringify(metadata));
-          return;
-        }
-      }
-    }
-
-    // Handle OAuth Proxy endpoints
-    const oauthProxy = oauthConfig?.proxy;
-    if (oauthProxy && oauthConfig?.enabled) {
-      const url = new URL(req.url || "", `http://${host}`);
-      const oauthPath = basePathRelativePath;
-
-      try {
-        // DCR endpoint - POST /oauth/register
-        if (req.method === "POST" && oauthPath === "/oauth/register") {
-          await new Promise<void>((resolve) => {
-            const bodyChunks: Buffer[] = [];
-            let bodySize = 0;
-            let failed = false;
-            const fail = () => {
-              if (failed || res.headersSent) {
-                resolve();
-                return;
-              }
-              failed = true;
-              res
-                .writeHead(400, {
-                  Connection: "close",
-                  "Content-Type": "application/json",
-                })
-                .end(
-                  JSON.stringify({
-                    error: "invalid_request",
-                    error_description: "Request body exceeds 1 MiB",
-                  }),
-                );
-              resolve();
-            };
-            req.on("data", (chunk) => {
-              if (failed) {
-                return;
-              }
-              bodySize += chunk.length;
-              if (bodySize > OAUTH_PROXY_MAX_BODY_SIZE) {
-                fail();
-                return;
-              }
-              bodyChunks.push(chunk);
-            });
-            // An aborted/errored request never emits "end"; settle the promise
-            // instead of leaving the handler pending forever.
-            req.on("aborted", fail);
-            req.on("error", fail);
-            req.on("end", async () => {
-              if (failed) {
-                return;
-              }
-              try {
-                const request = JSON.parse(
-                  Buffer.concat(bodyChunks).toString("utf8"),
-                );
-                const response = await oauthProxy.registerClient(request);
-                res
-                  .writeHead(201, { "Content-Type": "application/json" })
-                  .end(JSON.stringify(response));
-              } catch (error) {
-                const statusCode =
-                  (error as { statusCode?: number }).statusCode || 400;
-                res
-                  .writeHead(statusCode, { "Content-Type": "application/json" })
-                  .end(
-                    JSON.stringify(
-                      (error as { toJSON?: () => unknown }).toJSON?.() || {
-                        error: "invalid_request",
-                      },
-                    ),
-                  );
-              }
-              resolve();
-            });
-          });
-          return;
-        }
-
-        // Authorization endpoint - GET /oauth/authorize
-        if (req.method === "GET" && oauthPath === "/oauth/authorize") {
-          try {
-            const params = Object.fromEntries(url.searchParams.entries());
-            const response = await oauthProxy.authorize(
-              params as {
-                [key: string]: unknown;
-                client_id: string;
-                redirect_uri: string;
-                response_type: string;
-              },
-            );
-
-            // Response is a redirect
-            const location = response.headers.get("Location");
-            if (location) {
-              res.writeHead(response.status, { Location: location }).end();
-            } else {
-              // HTML consent screen
-              const html = await response.text();
-              res
-                .writeHead(response.status, { "Content-Type": "text/html" })
-                .end(html);
-            }
-          } catch (error) {
-            res.writeHead(400, { "Content-Type": "application/json" }).end(
-              JSON.stringify(
-                (error as { toJSON?: () => unknown }).toJSON?.() || {
-                  error: "invalid_request",
-                },
-              ),
-            );
-          }
-          return;
-        }
-
-        // Callback endpoint - GET /oauth/callback
-        if (req.method === "GET" && oauthPath === "/oauth/callback") {
-          try {
-            const mockRequest = new Request(`http://${host}${req.url}`);
-            const response = await oauthProxy.handleCallback(mockRequest);
-
-            const location = response.headers.get("Location");
-            if (location) {
-              res.writeHead(response.status, { Location: location }).end();
-            } else {
-              const text = await response.text();
-              res.writeHead(response.status).end(text);
-            }
-          } catch (error) {
-            res.writeHead(400, { "Content-Type": "application/json" }).end(
-              JSON.stringify(
-                (error as { toJSON?: () => unknown }).toJSON?.() || {
-                  error: "server_error",
-                },
-              ),
-            );
-          }
-          return;
-        }
-
-        // Consent endpoint - POST /oauth/consent
-        if (req.method === "POST" && oauthPath === "/oauth/consent") {
-          await new Promise<void>((resolve) => {
-            const bodyChunks: Buffer[] = [];
-            let bodySize = 0;
-            let failed = false;
-            const fail = () => {
-              if (failed || res.headersSent) {
-                resolve();
-                return;
-              }
-              failed = true;
-              res
-                .writeHead(400, {
-                  Connection: "close",
-                  "Content-Type": "application/json",
-                })
-                .end(
-                  JSON.stringify({
-                    error: "invalid_request",
-                    error_description: "Request body exceeds 1 MiB",
-                  }),
-                );
-              resolve();
-            };
-            req.on("data", (chunk) => {
-              if (failed) {
-                return;
-              }
-              bodySize += chunk.length;
-              if (bodySize > OAUTH_PROXY_MAX_BODY_SIZE) {
-                fail();
-                return;
-              }
-              bodyChunks.push(chunk);
-            });
-            // An aborted/errored request never emits "end"; settle the promise
-            // instead of leaving the handler pending forever.
-            req.on("aborted", fail);
-            req.on("error", fail);
-            req.on("end", async () => {
-              if (failed) {
-                return;
-              }
-              try {
-                const mockRequest = new Request(
-                  `http://${host}${url.pathname}${url.search}`,
-                  {
-                    body: Buffer.concat(bodyChunks).toString("utf8"),
-                    headers: {
-                      "Content-Type": "application/x-www-form-urlencoded",
-                    },
-                    method: "POST",
-                  },
-                );
-                const response = await oauthProxy.handleConsent(mockRequest);
-
-                const location = response.headers.get("Location");
-                if (location) {
-                  res.writeHead(response.status, { Location: location }).end();
-                } else {
-                  const text = await response.text();
-                  res.writeHead(response.status).end(text);
-                }
-              } catch (error) {
-                res.writeHead(400, { "Content-Type": "application/json" }).end(
-                  JSON.stringify(
-                    (error as { toJSON?: () => unknown }).toJSON?.() || {
-                      error: "server_error",
-                    },
-                  ),
-                );
-              }
-              resolve();
-            });
-          });
-          return;
-        }
-
-        // Token endpoint - POST /oauth/token
-        if (req.method === "POST" && oauthPath === "/oauth/token") {
-          await new Promise<void>((resolve) => {
-            const bodyChunks: Buffer[] = [];
-            let bodySize = 0;
-            let failed = false;
-            const fail = () => {
-              if (failed || res.headersSent) {
-                resolve();
-                return;
-              }
-              failed = true;
-              res
-                .writeHead(400, {
-                  Connection: "close",
-                  "Content-Type": "application/json",
-                })
-                .end(
-                  JSON.stringify({
-                    error: "invalid_request",
-                    error_description: "Request body exceeds 1 MiB",
-                  }),
-                );
-              resolve();
-            };
-            req.on("data", (chunk) => {
-              if (failed) {
-                return;
-              }
-              bodySize += chunk.length;
-              if (bodySize > OAUTH_PROXY_MAX_BODY_SIZE) {
-                fail();
-                return;
-              }
-              bodyChunks.push(chunk);
-            });
-            // An aborted/errored request never emits "end"; settle the promise
-            // instead of leaving the handler pending forever.
-            req.on("aborted", fail);
-            req.on("error", fail);
-            req.on("end", async () => {
-              if (failed) {
-                return;
-              }
-              try {
-                const params = new URLSearchParams(
-                  Buffer.concat(bodyChunks).toString("utf8"),
-                );
-                const grantType = params.get("grant_type");
-
-                // Parse Basic auth header (RFC 6749 Section 2.3.1)
-                const basicAuth = parseBasicAuthHeader(
-                  req.headers.authorization,
-                );
-
-                // Use Basic auth credentials if present, otherwise fall back to POST body
-                const clientId =
-                  basicAuth?.clientId || params.get("client_id") || "";
-                const clientSecret =
-                  basicAuth?.clientSecret ??
-                  params.get("client_secret") ??
-                  undefined;
-
-                let response;
-                if (grantType === "authorization_code") {
-                  response = await oauthProxy.exchangeAuthorizationCode({
-                    client_id: clientId,
-                    client_secret: clientSecret,
-                    code: params.get("code") || "",
-                    code_verifier: params.get("code_verifier") || undefined,
-                    grant_type: "authorization_code",
-                    redirect_uri: params.get("redirect_uri") || "",
-                  });
-                } else if (grantType === "refresh_token") {
-                  response = await oauthProxy.exchangeRefreshToken({
-                    client_id: clientId,
-                    client_secret: clientSecret,
-                    grant_type: "refresh_token",
-                    refresh_token: params.get("refresh_token") || "",
-                    scope: params.get("scope") || undefined,
-                  });
-                } else {
-                  throw {
-                    statusCode: 400,
-                    toJSON: () => ({ error: "unsupported_grant_type" }),
-                  };
-                }
-
-                res
-                  .writeHead(200, { "Content-Type": "application/json" })
-                  .end(JSON.stringify(response));
-              } catch (error) {
-                const statusCode =
-                  (error as { statusCode?: number }).statusCode || 400;
-                res
-                  .writeHead(statusCode, { "Content-Type": "application/json" })
-                  .end(
-                    JSON.stringify(
-                      (error as { toJSON?: () => unknown }).toJSON?.() || {
-                        error: "invalid_request",
-                      },
-                    ),
-                  );
-              }
-              resolve();
-            });
-          });
-          return;
-        }
-      } catch (error) {
-        this.#logger.error("[ViteMCP error] OAuth Proxy endpoint error", error);
-        res.writeHead(500).end();
-        return;
-      }
-    }
-  };
-
-  /**
-   * Converts Node.js IncomingMessage to Web Request for Hono
-   */
-  #nodeRequestToWebRequest(req: http.IncomingMessage, url: URL): Request {
-    const method = req.method || "GET";
-
-    // Build headers
-    const headers = new Headers();
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (value) {
-        if (Array.isArray(value)) {
-          for (const v of value) {
-            headers.append(key, v);
-          }
-        } else {
-          headers.set(key, value);
-        }
-      }
-    }
-
-    // Create Web Request
-    // For methods that can have a body, we need to pass the body
-    const hasBody = method !== "GET" && method !== "HEAD";
-
-    if (hasBody) {
-      return new Request(url.toString(), {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        body: req as any, // Node.js IncomingMessage is readable stream
-        duplex: "half", // Required for streaming bodies
-        headers,
-        method,
-      } as RequestInit);
-    } else {
-      return new Request(url.toString(), {
-        headers,
-        method,
-      });
-    }
-  }
-
-  #parseRuntimeConfig(
-    overrides?: Partial<{
-      httpStream: {
-        basePath?: `/${string}`;
-        cors?: boolean | CorsOptions;
-        enableJsonResponse?: boolean;
-        endpoint?: `/${string}`;
-        eventStore?: EventStore;
-        host?: string;
-        port: number;
-        sslCa?: string;
-        sslCert?: string;
-        sslKey?: string;
-        stateless?: boolean;
-      };
-      transportType: "httpStream" | "stdio";
-    }>,
-  ):
-    | {
-        httpStream: {
-          basePath: "" | `/${string}`;
-          cors?: boolean | CorsOptions;
-          enableJsonResponse?: boolean;
-          endpoint: `/${string}`;
-          eventStore?: EventStore;
-          host: string;
-          port: number;
-          sslCa?: string;
-          sslCert?: string;
-          sslKey?: string;
-          stateless?: boolean;
-        };
-        transportType: "httpStream";
-      }
-    | { transportType: "stdio" } {
-    const args = process.argv.slice(2);
-    const getArg = (name: string) => {
-      const index = args.findIndex((arg) => arg === `--${name}`);
-
-      return index !== -1 && index + 1 < args.length
-        ? args[index + 1]
-        : undefined;
-    };
-
-    const transportArg = getArg("transport");
-    const portArg = getArg("port");
-    const endpointArg = getArg("endpoint");
-    const basePathArg = getArg("base-path");
-    const statelessArg = getArg("stateless");
-    const hostArg = getArg("host");
-
-    const envTransport = process.env.VITEMCP_TRANSPORT;
-    const envPort = process.env.VITEMCP_PORT;
-    const envEndpoint = process.env.VITEMCP_ENDPOINT;
-    const envBasePath = process.env.VITEMCP_BASE_PATH;
-    const envStateless = process.env.VITEMCP_STATELESS;
-    const envHost = process.env.VITEMCP_HOST;
-    // Overrides > CLI > env > defaults
-    const transportType =
-      overrides?.transportType ||
-      (transportArg === "http-stream" ? "httpStream" : transportArg) ||
-      envTransport ||
-      "stdio";
-
-    if (transportType === "httpStream") {
-      const port = parseInt(
-        overrides?.httpStream?.port?.toString() || portArg || envPort || "8080",
-      );
-      const host =
-        overrides?.httpStream?.host || hostArg || envHost || "localhost";
-      const endpoint =
-        overrides?.httpStream?.endpoint || endpointArg || envEndpoint || "/mcp";
-      const basePath = normalizeBasePath(
-        overrides?.httpStream?.basePath || basePathArg || envBasePath,
-      );
-      const enableJsonResponse =
-        overrides?.httpStream?.enableJsonResponse || false;
-      const stateless =
-        overrides?.httpStream?.stateless ||
-        statelessArg === "true" ||
-        envStateless === "true" ||
-        false;
-      const cors = overrides?.httpStream?.cors;
-      const eventStore = overrides?.httpStream?.eventStore;
-      const sslCa = overrides?.httpStream?.sslCa;
-      const sslCert = overrides?.httpStream?.sslCert;
-      const sslKey = overrides?.httpStream?.sslKey;
-
-      return {
-        httpStream: {
-          basePath,
-          cors,
-          enableJsonResponse,
-          endpoint: endpoint as `/${string}`,
-          eventStore,
-          host,
-          port,
-          sslCa,
-          sslCert,
-          sslKey,
-          stateless,
-        },
-        transportType: "httpStream" as const,
-      };
-    }
-
-    return { transportType: "stdio" as const };
-  }
-
-  /**
-   * Notifies all sessions that the prompts list has changed.
-   */
-  #promptsListChanged(prompts: Prompt<T>[]) {
-    for (const session of this.#sessions) {
-      session.promptsListChanged(prompts);
-    }
-  }
-  #removeSession(session: ViteMCPSession<T>): void {
-    const sessionIndex = this.#sessions.indexOf(session);
-
-    if (sessionIndex !== -1) {
-      this.#sessions.splice(sessionIndex, 1);
-      this.emit("disconnect", {
-        session: session as ViteMCPSession<ViteMCPSessionAuth>,
-      });
-    }
-  }
-  /**
-   * Notifies all sessions that the resources list has changed.
-   */
-  #resourcesListChanged(resources: Resource<T>[]) {
-    for (const session of this.#sessions) {
-      session.resourcesListChanged(resources);
-    }
-  }
-  /**
-   * Notifies all sessions that the resource templates list has changed.
-   */
-  #resourceTemplatesListChanged(templates: InputResourceTemplate<T>[]) {
-    for (const session of this.#sessions) {
-      session.resourceTemplatesListChanged(templates);
-    }
-  }
-  /**
-   * Notifies all sessions that the tools list has changed.
-   */
-  #toolsListChanged(tools: Tool<T>[]) {
-    for (const session of this.#sessions) {
-      session.toolsListChanged(tools);
     }
   }
 }
 
-// Re-export commonly used auth utilities for convenience
-// Users can also import from "@vitemcp/server/auth" for the full auth module
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Builds a web-standard Request from a Node request whose body has already
+ * been consumed.
+ *
+ * The SDK's `toWebRequest` cannot be used here: it either re-reads the stream
+ * (already drained) or JSON-stringifies a `parsedBody`, which would
+ * double-encode an already-serialized body.
+ */
+const nodeToWebRequest = (
+  req: http.IncomingMessage,
+  body: Buffer,
+  secure: boolean,
+): Request => {
+  const host = req.headers.host ?? "localhost";
+  // Scheme has to follow the listener, or absolute URLs derived from
+  // `c.req.url` (issuers, redirect URIs) come out as http:// under TLS.
+  const url = `${secure ? "https" : "http"}://${host}${req.url ?? "/"}`;
+  const headers = new Headers();
+
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (value === undefined || name.startsWith(":")) {
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        headers.append(name, item);
+      }
+    } else {
+      headers.set(name, value);
+    }
+  }
+
+  const method = (req.method ?? "GET").toUpperCase();
+  const hasBody = method !== "GET" && method !== "HEAD" && body.byteLength > 0;
+
+  return new Request(url, {
+    headers,
+    method,
+    ...(hasBody ? { body } : {}),
+  });
+};
+
+/**
+ * Rejects if a tool has not settled within its `timeoutMs`.
+ *
+ * The underlying work is not cancelled — it cannot be, since `execute` owns
+ * whatever it started — but the caller stops waiting and gets a clear error
+ * instead of an indefinitely hung request.
+ */
+const withTimeout = <T>(
+  work: Promise<T>,
+  timeoutMs: number,
+  toolName: string,
+): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new UserError(`Tool '${toolName}' timed out after ${timeoutMs}ms`, {
+          timeoutMs,
+          toolName,
+        }),
+      );
+    }, timeoutMs);
+
+    work.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
+
+/** Renders a byte cap the way the error message should read (e.g. "1 MiB"). */
+const formatBytes = (bytes: number): string => {
+  if (bytes >= 1024 * 1024 && bytes % (1024 * 1024) === 0) {
+    return `${bytes / (1024 * 1024)} MiB`;
+  }
+
+  if (bytes >= 1024 && bytes % 1024 === 0) {
+    return `${bytes / 1024} KiB`;
+  }
+
+  return `${bytes} bytes`;
+};
+
+/** Sentinel returned when a request body exceeds the configured cap. */
+const OVERSIZE = Symbol("oversize");
+
+/**
+ * Reads a Node request body with a hard cap, bailing out as soon as the limit
+ * is crossed rather than after the fact. A declared `Content-Length` over the
+ * cap short-circuits before any chunk is read.
+ */
+const readCappedNodeBody = async (
+  req: http.IncomingMessage,
+  maxBytes: number,
+): Promise<Buffer | typeof OVERSIZE> => {
+  const declared = Number(req.headers["content-length"] ?? 0);
+
+  if (declared > maxBytes) {
+    return OVERSIZE;
+  }
+
+  let size = 0;
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
+    size += buf.byteLength;
+
+    if (size > maxBytes) {
+      return OVERSIZE;
+    }
+
+    chunks.push(buf);
+  }
+
+  return Buffer.concat(chunks);
+};
+
+/**
+ * Rejects schemas that do not implement Standard Schema, at registration time
+ * rather than on the first request — a typo in a schema should fail at
+ * start-up, not when a caller happens to invoke the tool.
+ */
+const assertStandardSchema = (
+  schema: unknown,
+  toolName: string,
+  field: "outputSchema" | "parameters",
+) => {
+  if (schema === undefined) {
+    return;
+  }
+
+  const standard = (schema as { "~standard"?: { validate?: unknown } })?.[
+    "~standard"
+  ];
+
+  if (typeof standard?.validate !== "function") {
+    throw new UnexpectedStateError(
+      `Tool '${toolName}' ${field} must implement Standard Schema. If you are using Zod, upgrade to version 3.24 or later.`,
+      { toolName },
+    );
+  }
+};
+
+const promptArgsSchema = <T extends ViteMCPAuth>(prompt: Prompt<T>) => {
+  const args = prompt.arguments;
+
+  if (!args?.length) {
+    return undefined;
+  }
+
+  const shape: Record<string, z.ZodType> = {};
+  for (const arg of args) {
+    const completer =
+      arg.complete ??
+      (prompt.complete
+        ? (value: string) => prompt.complete!(arg.name, value)
+        : undefined);
+    // The description has to be on the schema: the SDK derives the public
+    // `prompts/list` argument list from the schema's JSON Schema, not from
+    // this declaration.
+    const described = arg.description
+      ? z.string().describe(arg.description)
+      : z.string();
+    const base = completer
+      ? completable(
+          described,
+          (async (value: string) => (await completer(value)).values) as never,
+        )
+      : described;
+    shape[arg.name] = (arg.required ? base : base.optional()) as z.ZodType;
+  }
+
+  return z.object(shape);
+};
+
+/** Normalizes the several shapes `execute` may return into a CallToolResult. */
+const normalizeToolResult = (result: unknown): unknown => {
+  if (result === undefined || result === null) {
+    return { content: [] };
+  }
+
+  if (typeof result === "string") {
+    return { content: [{ text: result, type: "text" }] };
+  }
+
+  if (typeof result === "object") {
+    const value = result as Record<string, unknown>;
+
+    // Already an input_required (MRTR) or a full content result — pass through.
+    if (value.resultType === "input_required" || Array.isArray(value.content)) {
+      return value;
+    }
+
+    if (
+      value.type === "text" ||
+      value.type === "image" ||
+      value.type === "audio" ||
+      value.type === "resource" ||
+      value.type === "resource_link"
+    ) {
+      return { content: [value] };
+    }
+
+    // Structured results also carry the serialized JSON as a text block: the
+    // spec recommends it so clients that do not read `structuredContent` still
+    // see something meaningful.
+    return {
+      content: [{ text: JSON.stringify(value), type: "text" }],
+      structuredContent: value,
+    };
+  }
+
+  return { content: [{ text: String(result), type: "text" }] };
+};
+
+export { delay };
+
+/* -------------------------------------------------------------------------- */
+/* Re-exports                                                                  */
+/* -------------------------------------------------------------------------- */
+
+// Convenience re-exports so the common auth surface is reachable from the
+// package root; `@vitemcp/server/auth` remains the full module.
 export {
-  // Auth providers
   AuthProvider,
   AzureProvider,
-  // Auth helpers for canAccess
   getAuthSession,
   GitHubProvider,
   GoogleProvider,
@@ -4150,33 +1511,3 @@ export {
   type JsonSchemaObject,
   type JsonSchemaStandardSchema,
 } from "./jsonSchemaAdapter.js";
-
-export type {
-  AudioContent,
-  Content,
-  ContentResult,
-  Context,
-  CorsOptions,
-  ImageContent,
-  InputPrompt,
-  InputPromptArgument,
-  LoadContext,
-  LoggingLevel,
-  Progress,
-  Prompt,
-  PromptArgument,
-  Resource,
-  ResourceContent,
-  ResourceLink,
-  ResourceResult,
-  ResourceTemplate,
-  ResourceTemplateArgument,
-  SerializableValue,
-  ServerOptions,
-  TextContent,
-  Tool,
-  ToolParameters,
-  ViteMCPEvents,
-  ViteMCPSessionAuth,
-  ViteMCPSessionEvents,
-};

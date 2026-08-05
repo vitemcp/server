@@ -23,6 +23,7 @@ import type {
 } from "./types.js";
 
 import { OAuthProxy, OAuthProxyError } from "./OAuthProxy.js";
+import { issuerNamespace } from "./OAuthProxyStateStore.js";
 
 /**
  * Proxy state lives in the TokenStorage, so tests that need to tamper with a
@@ -59,7 +60,8 @@ class InspectableTokenStorage implements TokenStorage {
   }
 }
 
-const TRANSACTION_PREFIX = "transaction:";
+/** Records are namespaced by the upstream issuer (SEP-2352). */
+const TRANSACTION_PREFIX = `transaction:${issuerNamespace("https://provider.com")}:`;
 
 const baseConfig = {
   allowedRedirectUriPatterns: ["https://client.example.com/*"],

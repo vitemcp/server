@@ -28,8 +28,8 @@ const server = new ViteMCP({
 server.addTool({
   canAccess: requireAuth, // Only visible to authenticated users
   description: "Get user information from OAuth token",
-  execute: async (_, { session }) => {
-    const { accessToken } = getAuthSession(session);
+  execute: async (_, { auth }) => {
+    const { accessToken } = getAuthSession(auth);
     return {
       content: [
         {

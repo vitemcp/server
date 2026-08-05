@@ -156,8 +156,8 @@ async function example4_protectedTools() {
     canAccess: () => true, // Verification done in execute
 
     description: "Get authenticated user data (JWKS-verified)",
-    execute: async (_args, { session }) => {
-      const token = (session?.headers as Record<string, string>)?.[
+    execute: async (_args, { auth }) => {
+      const token = (auth?.headers as Record<string, string>)?.[
         "authorization"
       ]?.replace("Bearer ", "");
 

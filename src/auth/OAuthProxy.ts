@@ -22,7 +22,10 @@ import type {
   UpstreamTokenSet,
 } from "./types.js";
 
-import { OAuthProxyStateStore } from "./OAuthProxyStateStore.js";
+import {
+  issuerNamespace,
+  OAuthProxyStateStore,
+} from "./OAuthProxyStateStore.js";
 import {
   DEFAULT_ACCESS_TOKEN_TTL,
   DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH,
@@ -64,6 +67,7 @@ export class OAuthProxy {
   private cleanupInterval: NodeJS.Timeout | null = null;
   private config: OAuthProxyConfig;
   private consentManager: ConsentManager;
+  private issuerNs: string;
   private jwtIssuer?: JWTIssuer;
   /**
    * Keyed by proxy-issued client_id for authorize/token-exchange lookups and
@@ -106,7 +110,9 @@ export class OAuthProxy {
     }
 
     this.tokenStorage = storage;
+    this.issuerNs = issuerNamespace(this.getUpstreamIssuer());
     this.stateStore = new OAuthProxyStateStore({
+      issuer: this.getUpstreamIssuer(),
       registeredClientsByClientId: this.registeredClientsByClientId,
       tokenStorage: this.tokenStorage,
     });
@@ -344,6 +350,7 @@ export class OAuthProxy {
    */
   getAuthorizationServerMetadata(): {
     authorizationEndpoint: string;
+    authorizationResponseIssParameterSupported?: boolean;
     codeChallengeMethodsSupported?: string[];
     dpopSigningAlgValuesSupported?: string[];
     grantTypesSupported?: string[];
@@ -365,6 +372,9 @@ export class OAuthProxy {
   } {
     return {
       authorizationEndpoint: `${this.config.baseUrl}/oauth/authorize`,
+      // RFC 9207 §3: advertise that responses carry `iss`, so clients know to
+      // validate it.
+      authorizationResponseIssParameterSupported: true,
       codeChallengeMethodsSupported: ["S256", "plain"],
       grantTypesSupported: ["authorization_code", "refresh_token"],
       issuer: this.config.baseUrl,
@@ -419,6 +429,19 @@ export class OAuthProxy {
       );
     }
 
+    // RFC 9207 / SEP-2468: when the authorization response carries `iss`, it
+    // MUST match the issuer this transaction was started against, and the code
+    // MUST NOT be redeemed otherwise. This is what defeats a mix-up attack, in
+    // which a malicious AS returns a code minted by a different one.
+    const responseIssuer = url.searchParams.get("iss");
+
+    if (responseIssuer && responseIssuer !== transaction.upstreamIssuer) {
+      throw new OAuthProxyError(
+        "invalid_request",
+        "Authorization response issuer does not match the request issuer",
+      );
+    }
+
     // Exchange code with upstream provider
     const upstreamTokens = await this.exchangeUpstreamCode(code, transaction);
 
@@ -432,6 +455,8 @@ export class OAuthProxy {
     const redirectUrl = new URL(transaction.clientCallbackUrl);
     redirectUrl.searchParams.set("code", clientCode);
     redirectUrl.searchParams.set("state", transaction.state);
+    // RFC 9207 §2: identify the issuer so the client can detect an AS mix-up.
+    redirectUrl.searchParams.set("iss", this.config.baseUrl);
 
     return new Response(null, {
       headers: {
@@ -490,6 +515,7 @@ export class OAuthProxy {
         "User denied authorization",
       );
       redirectUrl.searchParams.set("state", transaction.state);
+      redirectUrl.searchParams.set("iss", this.config.baseUrl);
 
       return new Response(null, {
         headers: {
@@ -527,7 +553,7 @@ export class OAuthProxy {
 
     // Look up token mapping
     const mapping = (await this.tokenStorage.get(
-      `mapping:${result.claims.jti}`,
+      `mapping:${this.issuerNs}:${result.claims.jti}`,
     )) as {
       upstreamTokenKey: string;
     } | null;
@@ -538,7 +564,7 @@ export class OAuthProxy {
 
     // Retrieve upstream tokens
     const upstreamTokens = (await this.tokenStorage.get(
-      `upstream:${mapping.upstreamTokenKey}`,
+      `upstream:${this.issuerNs}:${mapping.upstreamTokenKey}`,
     )) as null | UpstreamTokenSet;
 
     return upstreamTokens;
@@ -570,6 +596,26 @@ export class OAuthProxy {
     // We deliberately do NOT return the upstream provider's client_id/secret here:
     // exposing those would (a) leak credentials to every MCP client and (b) let a
     // client bypass the proxy and talk directly to the upstream provider.
+    // SEP-837: clients specify how they are deployed so OpenID-aware servers
+    // apply the right redirect-URI rules. Inferred from the redirect URIs when
+    // omitted, rather than rejected, so existing clients keep working.
+    const applicationType =
+      request.application_type ??
+      (request.redirect_uris.every((uri) => isLoopbackRedirectUri(uri))
+        ? ("native" as const)
+        : ("web" as const));
+
+    if (
+      request.application_type &&
+      request.application_type !== "native" &&
+      request.application_type !== "web"
+    ) {
+      throw new OAuthProxyError(
+        "invalid_client_metadata",
+        'application_type must be "native" or "web"',
+      );
+    }
+
     const proxyClientId = randomBytes(16).toString("hex");
     const proxyClientSecret = randomBytes(32).toString("base64url");
 
@@ -578,6 +624,7 @@ export class OAuthProxy {
       clientId: proxyClientId,
       clientSecret: proxyClientSecret,
       metadata: {
+        application_type: request.application_type,
         client_name: request.client_name,
         client_uri: request.client_uri,
         contacts: request.contacts,
@@ -599,6 +646,8 @@ export class OAuthProxy {
 
     // Return RFC 7591 compliant response with proxy-issued credentials.
     const response: DCRResponse = {
+      // Echoed so a client can detect a server that silently dropped it.
+      application_type: applicationType,
       client_id: proxyClientId,
       client_id_issued_at: Math.floor(Date.now() / 1000),
       // Echo back optional metadata
@@ -682,6 +731,7 @@ export class OAuthProxy {
       proxyCodeVerifier: proxyPkce.verifier,
       scope: params.scope ? params.scope.split(" ") : this.config.scopes || [],
       state: params.state || this.generateId(),
+      upstreamIssuer: this.getUpstreamIssuer(),
     };
 
     await this.stateStore.saveTransaction(transaction);
@@ -905,6 +955,22 @@ export class OAuthProxy {
   }
 
   /**
+   * Issuer identifier of the upstream authorization server.
+   *
+   * Defaults to the origin of the configured authorization endpoint, which is
+   * what RFC 8414 issuers look like in practice; override with
+   * `upstreamIssuer` when the provider's issuer differs from its endpoint host
+   * (e.g. a tenant-scoped path).
+   */
+  private getUpstreamIssuer(): string {
+    if (this.config.upstreamIssuer) {
+      return this.config.upstreamIssuer;
+    }
+
+    return new URL(this.config.upstreamAuthorizationEndpoint).origin;
+  }
+
+  /**
    * Handle passthrough mode refresh - forward refresh token directly to upstream
    */
   private async handlePassthroughRefresh(
@@ -1007,7 +1073,7 @@ export class OAuthProxy {
 
     try {
       const upstreamTokens = (await this.tokenStorage.get(
-        `upstream:${mapping.upstreamTokenKey}`,
+        `upstream:${this.issuerNs}:${mapping.upstreamTokenKey}`,
       )) as null | UpstreamTokenSet;
 
       if (!upstreamTokens) {
@@ -1043,7 +1109,7 @@ export class OAuthProxy {
       const upstreamStorageTtl = Math.max(accessTokenTtl, refreshTokenTtl, 1);
 
       await this.tokenStorage.save(
-        `upstream:${mapping.upstreamTokenKey}`,
+        `upstream:${this.issuerNs}:${mapping.upstreamTokenKey}`,
         refreshedUpstreamTokens,
         upstreamStorageTtl,
       );
@@ -1112,7 +1178,7 @@ export class OAuthProxy {
     const upstreamStorageTtl = Math.max(accessTokenTtl, refreshTokenTtl, 1);
     const upstreamTokenKey = this.generateId();
     await this.tokenStorage.save(
-      `upstream:${upstreamTokenKey}`,
+      `upstream:${this.issuerNs}:${upstreamTokenKey}`,
       upstreamTokens,
       upstreamStorageTtl,
     );
@@ -1130,7 +1196,7 @@ export class OAuthProxy {
 
     // Store token mapping
     await this.tokenStorage.save(
-      `mapping:${accessJti}`,
+      `mapping:${this.issuerNs}:${accessJti}`,
       {
         clientId,
         createdAt: new Date(),
@@ -1161,7 +1227,7 @@ export class OAuthProxy {
 
       // Store refresh token mapping
       await this.tokenStorage.save(
-        `mapping:${refreshJti}`,
+        `mapping:${this.issuerNs}:${refreshJti}`,
         {
           clientId,
           createdAt: new Date(),
@@ -1209,7 +1275,7 @@ export class OAuthProxy {
 
     const accessJti = await this.extractJti(accessToken);
     await this.tokenStorage.save(
-      `mapping:${accessJti}`,
+      `mapping:${this.issuerNs}:${accessJti}`,
       {
         clientId,
         createdAt: new Date(),
@@ -1238,7 +1304,7 @@ export class OAuthProxy {
       const refreshJti = await this.extractJti(refreshToken);
 
       await this.tokenStorage.save(
-        `mapping:${refreshJti}`,
+        `mapping:${this.issuerNs}:${refreshJti}`,
         {
           clientId,
           createdAt: new Date(),
@@ -1463,7 +1529,11 @@ export class OAuthProxy {
       return;
     }
 
-    await this.tokenStorage.save(`mapping:${jti}`, mapping, ttl);
+    await this.tokenStorage.save(
+      `mapping:${this.issuerNs}:${jti}`,
+      mapping,
+      ttl,
+    );
   }
 
   /**
@@ -1482,7 +1552,7 @@ export class OAuthProxy {
    * non-atomic get + delete for storages that do not implement `take`.
    */
   private async takeMapping(jti: string): Promise<null | unknown> {
-    const key = `mapping:${jti}`;
+    const key = `mapping:${this.issuerNs}:${jti}`;
 
     if (this.tokenStorage.take) {
       return await this.tokenStorage.take(key);
@@ -1543,6 +1613,26 @@ export class OAuthProxy {
 /**
  * OAuth Proxy Error
  */
+/**
+ * True for redirect URIs a natively-installed app would use: loopback HTTP (an
+ * ephemeral local port) or a private-use scheme. Used to infer
+ * `application_type` when a client does not declare one.
+ */
+const isLoopbackRedirectUri = (uri: string): boolean => {
+  try {
+    const url = new URL(uri);
+
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return ["::1", "127.0.0.1", "localhost"].includes(url.hostname);
+    }
+
+    // A private-use URI scheme (e.g. "com.example.app:/callback").
+    return url.protocol !== "";
+  } catch {
+    return false;
+  }
+};
+
 export class OAuthProxyError extends Error {
   constructor(
     public code: string,

@@ -83,17 +83,7 @@ server.addPrompt({
   description: "Generate a prompt to analyze code",
   load: async (args) => {
     const focus = args.focus ? ` focusing on ${args.focus}` : "";
-    return {
-      messages: [
-        {
-          content: {
-            text: `Please analyze the following ${args.language} code${focus}:`,
-            type: "text",
-          },
-          role: "user",
-        },
-      ],
-    };
+    return `Please analyze the following ${args.language} code${focus}:`;
   },
   name: "analyze_code",
 });

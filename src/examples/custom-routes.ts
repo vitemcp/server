@@ -52,7 +52,7 @@ interface UserAuth {
 const server = new ViteMCP<UserAuth>({
   // Simple authentication - in production, use proper tokens/JWTs
   authenticate: async (req) => {
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers.get("authorization");
     if (authHeader === "Bearer admin-token") {
       return { role: "admin", userId: "admin" };
     } else if (authHeader === "Bearer user-token") {
@@ -69,8 +69,9 @@ const app = server.getApp();
 
 // Helper to get authentication from Node.js request
 const getAuth = async (c: Context): Promise<null | UserAuth> => {
-  const req = c.env.incoming;
-  const authHeader = req.headers.authorization;
+  // Use the web-standard request: `c.env.incoming` is a Node IncomingMessage
+  // whose `headers` is a plain object, so `.get()` would throw.
+  const authHeader = c.req.raw.headers.get("authorization");
   if (authHeader === "Bearer admin-token") {
     return { role: "admin", userId: "admin" };
   } else if (authHeader === "Bearer user-token") {

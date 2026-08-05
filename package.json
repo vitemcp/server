@@ -39,19 +39,20 @@
     }
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.24.3",
+    "@modelcontextprotocol/core": "^2.0.0",
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@standard-schema/spec": "^1.0.0",
     "execa": "^9.6.1",
     "file-type": "^21.1.1",
     "fuse.js": "^7.1.0",
     "hono": "^4.11.5",
-    "mcp-proxy": "^6.4.6",
     "strict-event-emitter-types": "^2.0.0",
     "undici": "^7.16.0",
     "uri-templates": "^0.2.0",
     "xsschema": "^0.4.3",
     "yargs": "^18.0.0",
-    "zod": "^4.1.13",
+    "zod": "^4.4.3",
     "zod-to-json-schema": "^3.25.0"
   },
   "peerDependencies": {
@@ -91,6 +92,7 @@
   ],
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/inspector": "^0.16.8",
     "@sebbo2002/semantic-release-jsr": "^3.1.0",
     "@tsconfig/node24": "^24.0.3",

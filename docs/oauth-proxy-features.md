@@ -157,14 +157,10 @@ When both access token and ID token contain claims:
 server.addTool({
   name: "admin-action",
   description: "Perform admin action",
-  canAccess: async ({ session }) => {
-    const token = session?.headers?.["authorization"]?.replace("Bearer ", "");
-    if (!token) return false;
-
-    // Decode proxy JWT (contains custom claims from upstream)
-    const payload = JSON.parse(
-      Buffer.from(token.split(".")[1], "base64url").toString(),
-    );
+  // `canAccess` receives the value your `authenticate` hook returned for this
+  // request. Tools it rejects are filtered out of `tools/list` entirely.
+  canAccess: (auth) => {
+    const payload = auth?.claims ?? {};
 
     // Check role claim passed through from upstream IDP
     return payload.role === "admin" || payload.roles?.includes("admin");
@@ -378,8 +374,8 @@ import {
 
 server.addTool({
   canAccess: requireAuth, // Or: requireScopes("read"), requireRole("admin")
-  execute: async (_args, { session }) => {
-    const { accessToken } = getAuthSession(session);
+  execute: async (_args, { auth }) => {
+    const { accessToken } = getAuthSession(auth);
     const response = await fetch("https://api.provider.com/data", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -391,7 +387,7 @@ server.addTool({
 
 - Use built-in helpers: `requireAuth`, `requireScopes`, `requireRole`, `getAuthSession`
 - Combine with `requireAll` and `requireAny` for complex logic
-- Access upstream token via `getAuthSession(session).accessToken`
+- Access upstream token via `getAuthSession(auth).accessToken`
 
 ### Transport Compatibility
 

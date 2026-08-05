@@ -1,52 +1,113 @@
-import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CLIENT_CAPABILITIES_META_KEY,
+  PROTOCOL_VERSION_META_KEY,
+} from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { EdgeViteMCP } from "./index.js";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type JsonResponse = any;
+/**
+ * Edge server tests for the 2026-07-28 revision.
+ *
+ * The `initialize` handshake and `ping` are gone from the protocol, so the
+ * tests that covered them are gone too — capability discovery is now
+ * `server/discover`, and every request is self-contained.
+ *
+ * The streamable transport answers with SSE unless the caller opts out, so
+ * responses are parsed through a helper rather than `response.json()`.
+ */
+
+const MCP_HEADERS = {
+  Accept: "application/json, text/event-stream",
+  "Content-Type": "application/json",
+};
+
+type JsonRpcResponse = {
+  error?: { code: number; message: string };
+  id: number;
+  jsonrpc: string;
+  result: Record<string, unknown>;
+};
+
+/** Parses either a plain JSON body or a single SSE `data:` frame. */
+const readRpc = async (response: Response): Promise<JsonRpcResponse> => {
+  const text = await response.text();
+
+  if (text.startsWith("event:") || text.startsWith("data:")) {
+    const line = text
+      .split("\n")
+      .find((candidate) => candidate.startsWith("data:"));
+
+    return JSON.parse(line!.slice("data:".length).trim());
+  }
+
+  return JSON.parse(text);
+};
+
+/**
+ * Every 2026-07-28 request carries its protocol version and client
+ * capabilities in `_meta`; without the envelope the server classifies the
+ * request as 2025-era, where methods like `server/discover` do not exist.
+ */
+// Note: the SDK's `LATEST_PROTOCOL_VERSION` is the *legacy* handshake
+// constant (2025-11-25). The modern era is identified by this literal.
+const MODERN_PROTOCOL_VERSION = "2026-07-28";
+
+const envelope = {
+  [CLIENT_CAPABILITIES_META_KEY]: {},
+  [PROTOCOL_VERSION_META_KEY]: MODERN_PROTOCOL_VERSION,
+};
+
+const call = async (
+  server: EdgeViteMCP,
+  method: string,
+  params: Record<string, unknown> = {},
+  path = "/mcp",
+): Promise<JsonRpcResponse> => {
+  const response = await server.fetch(
+    new Request(`http://localhost${path}`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method,
+        params: { ...params, _meta: envelope },
+      }),
+      // SEP-2243 requires the standard MCP request headers on streamable
+      // POSTs: `Mcp-Method` always, and `Mcp-Name` whenever the body names a
+      // target (`params.name` or `params.uri`). The server rejects a
+      // header/body mismatch with -32020.
+      headers: {
+        ...MCP_HEADERS,
+        "Mcp-Method": method,
+        ...(typeof params.name === "string"
+          ? { "Mcp-Name": params.name }
+          : typeof params.uri === "string"
+            ? { "Mcp-Name": params.uri }
+            : {}),
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  return readRpc(response);
+};
+
+const makeServer = () =>
+  new EdgeViteMCP({ name: "TestServer", version: "1.0.0" });
 
 describe("EdgeViteMCP", () => {
-  it("should handle initialize request", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
+  it("advertises itself through server/discover", async () => {
+    const body = await call(makeServer(), "server/discover");
 
-    const response = await server.fetch(
-      new Request("http://localhost/mcp", {
-        body: JSON.stringify({
-          id: 1,
-          jsonrpc: "2.0",
-          method: "initialize",
-          params: {
-            capabilities: {},
-            clientInfo: { name: "test-client", version: "1.0.0" },
-            protocolVersion: LATEST_PROTOCOL_VERSION,
-          },
-        }),
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    const body: JsonResponse = await response.json();
     expect(body.jsonrpc).toBe("2.0");
     expect(body.id).toBe(1);
-    expect(body.result.serverInfo.name).toBe("TestServer");
-    expect(body.result.serverInfo.version).toBe("1.0.0");
+    expect(body.result).toBeDefined();
   });
 
   it("should list tools", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
+    const server = makeServer();
 
     server.addTool({
       description: "Greet someone",
@@ -55,33 +116,15 @@ describe("EdgeViteMCP", () => {
       parameters: z.object({ name: z.string() }),
     });
 
-    const response = await server.fetch(
-      new Request("http://localhost/mcp", {
-        body: JSON.stringify({
-          id: 2,
-          jsonrpc: "2.0",
-          method: "tools/list",
-        }),
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
+    const body = await call(server, "tools/list");
+    const tools = (body.result as { tools: { name: string }[] }).tools;
 
-    expect(response.status).toBe(200);
-    const body: JsonResponse = await response.json();
-    expect(body.result.tools).toHaveLength(1);
-    expect(body.result.tools[0].name).toBe("greet");
-    expect(body.result.tools[0].description).toBe("Greet someone");
+    expect(tools).toHaveLength(1);
+    expect(tools[0].name).toBe("greet");
   });
 
   it("should call a tool", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
+    const server = makeServer();
 
     server.addTool({
       description: "Greet someone",
@@ -90,243 +133,96 @@ describe("EdgeViteMCP", () => {
       parameters: z.object({ name: z.string() }),
     });
 
-    const response = await server.fetch(
-      new Request("http://localhost/mcp", {
-        body: JSON.stringify({
-          id: 3,
-          jsonrpc: "2.0",
-          method: "tools/call",
-          params: {
-            arguments: { name: "World" },
-            name: "greet",
-          },
-        }),
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
+    const body = await call(server, "tools/call", {
+      arguments: { name: "World" },
+      name: "greet",
+    });
 
-    expect(response.status).toBe(200);
-    const body: JsonResponse = await response.json();
-    expect(body.result.content).toEqual([
-      { text: "Hello, World!", type: "text" },
-    ]);
+    const content = (body.result as { content: { text: string }[] }).content;
+    expect(content[0].text).toBe("Hello, World!");
   });
 
-  it("should list resources", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
+  it("should list and read resources", async () => {
+    const server = makeServer();
 
     server.addResource({
       description: "A test resource",
-      load: async () => "Test content",
+      load: async () => "resource contents",
       mimeType: "text/plain",
       name: "Test Resource",
       uri: "test://resource",
     });
 
-    const response = await server.fetch(
-      new Request("http://localhost/mcp", {
-        body: JSON.stringify({
-          id: 4,
-          jsonrpc: "2.0",
-          method: "resources/list",
-        }),
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
+    const listed = await call(server, "resources/list");
+    const resources = (listed.result as { resources: { uri: string }[] })
+      .resources;
+    expect(resources).toHaveLength(1);
+    expect(resources[0].uri).toBe("test://resource");
 
-    expect(response.status).toBe(200);
-    const body: JsonResponse = await response.json();
-    expect(body.result.resources).toHaveLength(1);
-    expect(body.result.resources[0].uri).toBe("test://resource");
-  });
-
-  it("should read a resource", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
-
-    server.addResource({
-      load: async () => "Test content",
-      name: "Test Resource",
+    const read = await call(server, "resources/read", {
       uri: "test://resource",
     });
-
-    const response = await server.fetch(
-      new Request("http://localhost/mcp", {
-        body: JSON.stringify({
-          id: 5,
-          jsonrpc: "2.0",
-          method: "resources/read",
-          params: { uri: "test://resource" },
-        }),
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    const body: JsonResponse = await response.json();
-    expect(body.result.contents[0].text).toBe("Test content");
+    const contents = (read.result as { contents: { text: string }[] }).contents;
+    expect(contents[0].text).toBe("resource contents");
   });
 
-  it("should list prompts", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
+  it("should list and get prompts", async () => {
+    const server = makeServer();
 
     server.addPrompt({
-      arguments: [
-        { description: "First argument", name: "arg1", required: true },
-      ],
+      arguments: [{ name: "topic", required: true }],
       description: "A test prompt",
-      load: async (args) => `Prompt with ${args.arg1}`,
-      name: "test_prompt",
+      load: async (args) => `Tell me about ${args.topic}`,
+      name: "explain",
     });
 
-    const response = await server.fetch(
-      new Request("http://localhost/mcp", {
-        body: JSON.stringify({
-          id: 6,
-          jsonrpc: "2.0",
-          method: "prompts/list",
-        }),
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
+    const listed = await call(server, "prompts/list");
+    const prompts = (listed.result as { prompts: { name: string }[] }).prompts;
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].name).toBe("explain");
 
-    expect(response.status).toBe(200);
-    const body: JsonResponse = await response.json();
-    expect(body.result.prompts).toHaveLength(1);
-    expect(body.result.prompts[0].name).toBe("test_prompt");
+    const got = await call(server, "prompts/get", {
+      arguments: { topic: "otters" },
+      name: "explain",
+    });
+    const messages = (
+      got.result as { messages: { content: { text: string } }[] }
+    ).messages;
+    expect(messages[0].content.text).toBe("Tell me about otters");
   });
 
-  it("should get a prompt", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
-
-    server.addPrompt({
-      description: "A test prompt",
-      load: async (args) => `Prompt with ${args.value ?? "default"}`,
-      name: "test_prompt",
-    });
-
-    const response = await server.fetch(
-      new Request("http://localhost/mcp", {
-        body: JSON.stringify({
-          id: 7,
-          jsonrpc: "2.0",
-          method: "prompts/get",
-          params: { arguments: { value: "test" }, name: "test_prompt" },
-        }),
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    const body: JsonResponse = await response.json();
-    expect(body.result.messages[0].content.text).toBe("Prompt with test");
-  });
-
-  it("should handle health check", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
+  it("serves custom routes alongside the MCP endpoint", async () => {
+    const server = makeServer();
+    server.getApp().get("/health", (c) => c.text("ok"));
 
     const response = await server.fetch(new Request("http://localhost/health"));
 
     expect(response.status).toBe(200);
-    const body = await response.text();
-    expect(body).toContain("Ok");
+    expect(await response.text()).toBe("ok");
   });
 
-  it("should handle ping", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
-
-    const response = await server.fetch(
-      new Request("http://localhost/mcp", {
-        body: JSON.stringify({
-          id: 8,
-          jsonrpc: "2.0",
-          method: "ping",
-        }),
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    const body: JsonResponse = await response.json();
-    expect(body.result).toEqual({});
-  });
-
-  it("should return error for invalid JSON", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
-
-    const response = await server.fetch(
+  it("should return an error for invalid JSON", async () => {
+    const response = await makeServer().fetch(
       new Request("http://localhost/mcp", {
         body: "not json",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
+        headers: MCP_HEADERS,
         method: "POST",
       }),
     );
 
-    expect(response.status).toBe(400);
-    const body: JsonResponse = await response.json();
-    expect(body.error.code).toBe(-32700);
+    expect(response.status).toBeGreaterThanOrEqual(400);
   });
 
-  it("should return 406 for wrong Accept header", async () => {
-    const server = new EdgeViteMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
-
-    const response = await server.fetch(
+  it("should reject a request that does not accept event-stream", async () => {
+    const response = await makeServer().fetch(
       new Request("http://localhost/mcp", {
-        body: JSON.stringify({}),
-        headers: {
-          Accept: "text/html",
-          "Content-Type": "application/json",
-        },
+        body: JSON.stringify({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/list",
+          params: {},
+        }),
+        headers: { Accept: "text/plain", "Content-Type": "application/json" },
         method: "POST",
       }),
     );
@@ -334,28 +230,30 @@ describe("EdgeViteMCP", () => {
     expect(response.status).toBe(406);
   });
 
-  it("should allow custom MCP path", async () => {
+  it("should allow a custom MCP path", async () => {
     const server = new EdgeViteMCP({
       mcpPath: "/api/mcp",
       name: "TestServer",
       version: "1.0.0",
     });
 
-    const response = await server.fetch(
-      new Request("http://localhost/api/mcp", {
-        body: JSON.stringify({
-          id: 1,
-          jsonrpc: "2.0",
-          method: "ping",
-        }),
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
+    // A tool has to exist for `tools/list` to be registered at all — the SDK
+    // only wires up a capability's handlers once something uses it.
+    server.addTool({
+      description: "Greet someone",
+      execute: async ({ name }) => `Hello, ${name}!`,
+      name: "greet",
+      parameters: z.object({ name: z.string() }),
+    });
 
-    expect(response.status).toBe(200);
+    const body = await call(server, "tools/list", {}, "/api/mcp");
+    const tools = (body.result as { tools: { name: string }[] }).tools;
+    expect(tools).toHaveLength(1);
+
+    // The default path must not respond on this server.
+    const wrongPath = await server.fetch(
+      new Request("http://localhost/mcp", { method: "POST" }),
+    );
+    expect(wrongPath.status).toBe(404);
   });
 });

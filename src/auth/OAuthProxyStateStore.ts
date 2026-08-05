@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { z } from "zod";
 
 import type {
@@ -13,6 +14,18 @@ const STORAGE_KEY_PREFIX = {
   code: "code:",
   transaction: "transaction:",
 } as const;
+
+/**
+ * Namespaces every stored record by the issuer it belongs to.
+ *
+ * Credentials issued by one authorization server must never be reused with
+ * another (SEP-2352). Sharing one storage backend across a config change would
+ * otherwise let a registration or refresh token minted by AS-A be presented to
+ * AS-B; keying by issuer makes that structurally impossible instead of relying
+ * on operators to clear the store.
+ */
+export const issuerNamespace = (issuer: string): string =>
+  createHash("sha256").update(issuer).digest("hex").slice(0, 16);
 
 const storedDateSchema = z
   .union([z.date(), z.string()])
@@ -103,6 +116,7 @@ const oauthTransactionStorageSchema: z.ZodType<OAuthTransaction> = z.object({
   proxyCodeVerifier: z.string(),
   scope: z.array(z.string()),
   state: z.string(),
+  upstreamIssuer: z.string(),
 });
 
 /**
@@ -116,6 +130,8 @@ export type ConsumedClientCode =
   | { expiresAt: Date; status: "spent" };
 
 interface OAuthProxyStateStoreConfig {
+  /** Issuer identifier whose records this store owns. */
+  readonly issuer: string;
   readonly registeredClientsByClientId: Map<string, ProxyDCRClient>;
   readonly tokenStorage: TokenStorage;
 }
@@ -131,12 +147,14 @@ interface OAuthProxyStateStoreConfig {
  * a second time.
  */
 export class OAuthProxyStateStore {
+  private readonly namespace: string;
   private readonly registeredClientsByClientId: Map<string, ProxyDCRClient>;
   private readonly tokenStorage: TokenStorage;
 
   constructor(config: OAuthProxyStateStoreConfig) {
     this.registeredClientsByClientId = config.registeredClientsByClientId;
     this.tokenStorage = config.tokenStorage;
+    this.namespace = issuerNamespace(config.issuer);
   }
 
   cacheRegisteredClient(client: ProxyDCRClient): void {
@@ -154,7 +172,7 @@ export class OAuthProxyStateStore {
    */
   async consumeClientCode(code: string): Promise<ConsumedClientCode | null> {
     const stored = await this.takeFromStorage(
-      `${STORAGE_KEY_PREFIX.code}${code}`,
+      this.key(STORAGE_KEY_PREFIX.code, code),
     );
 
     const spent = spentClientCodeStorageSchema.safeParse(stored);
@@ -186,7 +204,7 @@ export class OAuthProxyStateStore {
     transactionId: string,
   ): Promise<null | OAuthTransaction> {
     const stored = await this.takeFromStorage(
-      `${STORAGE_KEY_PREFIX.transaction}${transactionId}`,
+      this.key(STORAGE_KEY_PREFIX.transaction, transactionId),
     );
     const parsed = oauthTransactionStorageSchema.safeParse(stored);
 
@@ -199,7 +217,7 @@ export class OAuthProxyStateStore {
 
   async deleteTransaction(transactionId: string): Promise<void> {
     await this.tokenStorage.delete(
-      `${STORAGE_KEY_PREFIX.transaction}${transactionId}`,
+      this.key(STORAGE_KEY_PREFIX.transaction, transactionId),
     );
   }
 
@@ -212,7 +230,7 @@ export class OAuthProxyStateStore {
     }
 
     const stored = await this.tokenStorage.get(
-      `${STORAGE_KEY_PREFIX.client}${clientId}`,
+      this.key(STORAGE_KEY_PREFIX.client, clientId),
     );
     const parsed = proxyDcrClientStorageSchema.safeParse(stored);
 
@@ -232,7 +250,7 @@ export class OAuthProxyStateStore {
     transactionId: string,
   ): Promise<null | OAuthTransaction> {
     const stored = await this.tokenStorage.get(
-      `${STORAGE_KEY_PREFIX.transaction}${transactionId}`,
+      this.key(STORAGE_KEY_PREFIX.transaction, transactionId),
     );
     const parsed = oauthTransactionStorageSchema.safeParse(stored);
 
@@ -268,7 +286,7 @@ export class OAuthProxyStateStore {
    */
   async markClientCodeSpent(code: string, expiresAt: Date): Promise<void> {
     await this.tokenStorage.save(
-      `${STORAGE_KEY_PREFIX.code}${code}`,
+      this.key(STORAGE_KEY_PREFIX.code, code),
       { expiresAt, used: true },
       this.getTtlSeconds(expiresAt),
     );
@@ -276,7 +294,7 @@ export class OAuthProxyStateStore {
 
   async saveClientCode(clientCode: ClientCode): Promise<void> {
     await this.tokenStorage.save(
-      `${STORAGE_KEY_PREFIX.code}${clientCode.code}`,
+      this.key(STORAGE_KEY_PREFIX.code, clientCode.code),
       clientCode,
       this.getTtlSeconds(clientCode.expiresAt),
     );
@@ -284,14 +302,14 @@ export class OAuthProxyStateStore {
 
   async saveRegisteredClient(client: ProxyDCRClient): Promise<void> {
     await this.tokenStorage.save(
-      `${STORAGE_KEY_PREFIX.client}${client.clientId}`,
+      this.key(STORAGE_KEY_PREFIX.client, client.clientId),
       client,
     );
   }
 
   async saveTransaction(transaction: OAuthTransaction): Promise<void> {
     await this.tokenStorage.save(
-      `${STORAGE_KEY_PREFIX.transaction}${transaction.id}`,
+      this.key(STORAGE_KEY_PREFIX.transaction, transaction.id),
       transaction,
       this.getTtlSeconds(transaction.expiresAt),
     );
@@ -304,6 +322,15 @@ export class OAuthProxyStateStore {
 
   private isExpired(expiresAt: Date): boolean {
     return expiresAt.getTime() < Date.now();
+  }
+
+  /**
+   * Builds a storage key. The record type leads so keys stay groupable by
+   * prefix; the issuer namespace sits between type and id so records from
+   * different authorization servers can never collide.
+   */
+  private key(prefix: string, id: string): string {
+    return `${prefix}${this.namespace}:${id}`;
   }
 
   /**

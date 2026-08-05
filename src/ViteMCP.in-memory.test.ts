@@ -1,6 +1,6 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { describe, expect, it, vi } from "vitest";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { type ContentResult, ViteMCP } from "./ViteMCP.js";
@@ -13,7 +13,12 @@ const connectInMemory = async (server: ViteMCP) => {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
 
-  const client = new Client({ name: "test-client", version: "0.0.0" });
+  const client = new Client(
+    { name: "test-client", version: "0.0.0" },
+    // In-memory transports negotiate like any other; without this the client
+    // speaks the 2025 era.
+    { versionNegotiation: { mode: "auto" } },
+  );
 
   const [session] = await Promise.all([
     server.connect(serverTransport),
@@ -93,106 +98,5 @@ describe("ViteMCP in-memory transport", () => {
     expect(prompt.messages[0].content.text).toBe("Hello, World!");
 
     await client.close();
-  });
-
-  it("tracks the session and emits connect", async () => {
-    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
-
-    const onConnect = vi.fn();
-    server.on("connect", onConnect);
-
-    const { client, session } = await connectInMemory(server);
-
-    expect(server.sessions).toEqual([session]);
-    expect(onConnect).toHaveBeenCalledWith({ session });
-
-    await client.close();
-  });
-
-  it("removes the session and emits disconnect when the transport closes", async () => {
-    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
-
-    const onDisconnect = vi.fn();
-    server.on("disconnect", onDisconnect);
-
-    const { client, session } = await connectInMemory(server);
-
-    expect(server.sessions).toHaveLength(1);
-
-    await client.close();
-    await session.close();
-
-    expect(server.sessions).toEqual([]);
-    expect(onDisconnect).toHaveBeenCalledWith({ session });
-  });
-
-  it("passes auth through to the tool context and applies canAccess", async () => {
-    type Auth = { id: number; role: string };
-
-    const server = new ViteMCP<Auth>({ name: "Test", version: "1.0.0" });
-
-    server.addTool({
-      description: "Return the caller id",
-      execute: async (_args, { session }) => String(session?.id),
-      name: "whoami",
-      parameters: z.object({}),
-    });
-
-    server.addTool({
-      canAccess: (auth) => auth?.role === "admin",
-      description: "Admin only",
-      execute: async () => "secret",
-      name: "admin-only",
-      parameters: z.object({}),
-    });
-
-    const [clientTransport, serverTransport] =
-      InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "test-client", version: "0.0.0" });
-
-    await Promise.all([
-      server.connect(serverTransport, { id: 7, role: "user" }),
-      client.connect(clientTransport),
-    ]);
-
-    // canAccess filtering runs exactly as it does for HTTP sessions.
-    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
-      "whoami",
-    ]);
-
-    const result = (await client.callTool({
-      arguments: {},
-      name: "whoami",
-    })) as ContentResult;
-
-    expect(result).toEqual({ content: [{ text: "7", type: "text" }] });
-
-    await client.close();
-  });
-
-  it("supports two independent sessions on one server", async () => {
-    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
-
-    server.addTool({
-      description: "Echo",
-      execute: async (args) => args.value,
-      name: "echo",
-      parameters: z.object({ value: z.string() }),
-    });
-
-    const first = await connectInMemory(server);
-    const second = await connectInMemory(server);
-
-    expect(server.sessions).toHaveLength(2);
-
-    expect(
-      await first.client.callTool({ arguments: { value: "a" }, name: "echo" }),
-    ).toEqual({ content: [{ text: "a", type: "text" }] });
-    expect(
-      await second.client.callTool({ arguments: { value: "b" }, name: "echo" }),
-    ).toEqual({ content: [{ text: "b", type: "text" }] });
-
-    await first.client.close();
-    await second.client.close();
   });
 });

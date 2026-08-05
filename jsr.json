@@ -1,6 +1,10 @@
 {
-  "exports": "./src/ViteMCP.ts",
-  "include": ["src/ViteMCP.ts", "src/bin/vitemcp.ts"],
+  "exports": {
+    ".": "./src/ViteMCP.ts",
+    "./auth": "./src/auth/index.ts",
+    "./edge": "./src/edge/index.ts"
+  },
+  "include": ["src/**/*.ts", "!src/**/*.test.ts", "!src/examples/**"],
   "license": "MIT",
   "name": "@vitemcp/server",
   "version": "1.0.0"

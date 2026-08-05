@@ -16,18 +16,6 @@ import { ViteMCP } from "../ViteMCP.js";
 
 const server = new ViteMCP({
   name: "Addition",
-  ping: {
-    // enabled: undefined,
-    // Automatically enabled/disabled based on transport type
-    // Using a longer interval to reduce log noise
-    intervalMs: 10000, // default is 5000ms
-    // Reduce log verbosity
-    logLevel: "debug", // default
-  },
-  roots: {
-    // You can explicitly disable roots support if needed
-    // enabled: false,
-  },
   version: "1.0.0",
 });
 
@@ -126,9 +114,8 @@ server.addTool({
   annotations: {
     openWorldHint: false,
     readOnlyHint: true,
-    streamingHint: true,
   },
-  description: "Generate a poem line by line with streaming output",
+  description: "Generate a poem, reporting progress as each line is written",
   execute: async (args, context) => {
     const { theme } = args;
     const lines = [
@@ -138,17 +125,18 @@ server.addTool({
       `Poem about ${theme} - line 4`,
     ];
 
-    for (const line of lines) {
-      await context.streamContent({
-        text: line,
-        type: "text",
+    for (const [index, line] of lines.entries()) {
+      // `notifications/progress` reaches any spec-compliant client, unlike the
+      // old streamContent extension it replaces.
+      await context.reportProgress({
+        message: line,
+        progress: index + 1,
+        total: lines.length,
       });
 
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
-    // Return the complete poem as well: clients that do not handle the
-    // non-standard streamContent notification would otherwise see nothing.
     return lines.join("\n");
   },
   name: "stream-poem",
@@ -279,8 +267,8 @@ if (transportType === "httpStream") {
   console.log("Use StreamableHTTPClientTransport to connect to this server");
   console.log("For example:");
   console.log(`
-  import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-  import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+  import { Client } from "@modelcontextprotocol/client";
+  import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
   
   const client = new Client(
     {
@@ -298,38 +286,10 @@ if (transportType === "httpStream") {
   
   await client.connect(transport);
   `);
-} else if (process.argv.includes("--explicit-ping-config")) {
-  server.start({
-    transportType: "stdio",
-  });
-
-  console.log(
-    "Started stdio transport with explicit ping configuration from server options",
-  );
-} else if (process.argv.includes("--disable-roots")) {
-  // Example of disabling roots at runtime
-  const serverWithDisabledRoots = new ViteMCP({
-    name: "Addition (No Roots)",
-    ping: {
-      intervalMs: 10000,
-      logLevel: "debug",
-    },
-    roots: {
-      enabled: false,
-    },
-    version: "1.0.0",
-  });
-
-  serverWithDisabledRoots.start({
-    transportType: "stdio",
-  });
-
-  console.log("Started stdio transport with roots support disabled");
 } else {
-  // Disable by default for:
   server.start({
     transportType: "stdio",
   });
 
-  console.log("Started stdio transport with ping disabled by default");
+  console.log("Started stdio transport");
 }

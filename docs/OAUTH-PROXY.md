@@ -64,8 +64,8 @@ const server = new ViteMCP({
 server.addTool({
   canAccess: requireAuth,
   description: "Get user profile",
-  execute: async (_args, { session }) => {
-    const { accessToken } = getAuthSession(session);
+  execute: async (_args, { auth }) => {
+    const { accessToken } = getAuthSession(auth);
     const response = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {
@@ -230,8 +230,8 @@ import {
 server.addTool({
   canAccess: requireAuth,
   description: "Get authenticated user data",
-  execute: async (_args, { session }) => {
-    const { accessToken } = getAuthSession(session);
+  execute: async (_args, { auth }) => {
+    const { accessToken } = getAuthSession(auth);
     const response = await fetch("https://api.provider.com/user", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
