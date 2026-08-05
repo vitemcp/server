@@ -1,3 +1,5 @@
+import type { ClientIdMetadataOptions } from "./clientIdMetadata.js";
+
 /**
  * OAuth Proxy Types
  * Type definitions for the OAuth 2.1 Proxy implementation
@@ -239,6 +241,15 @@ export interface OAuthProxyConfig {
   authorizationCodeTtl?: number;
   /** Base URL of this proxy server */
   baseUrl: string;
+  /**
+   * Client ID Metadata Document support (the mechanism that supersedes DCR).
+   *
+   * Enabled by default. Because resolving a URL-formatted `client_id` means
+   * fetching a client-supplied URL, the resolver refuses internal addresses,
+   * does not follow redirects, and caps both response size and time; set
+   * `allowedDomains` to narrow it further to hosts you trust.
+   */
+  clientIdMetadata?: ClientIdMetadataOptions;
   /** Require user consent (default: true) */
   consentRequired?: boolean;
   /** Secret key for signing consent cookies */

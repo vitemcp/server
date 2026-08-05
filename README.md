@@ -2084,6 +2084,53 @@ server.addResource({
 `cacheScope: "private"` restricts caching to the requesting client; `"public"`
 permits shared intermediaries.
 
+### Client ID Metadata Documents
+
+Dynamic Client Registration is deprecated on this revision. The replacement is
+Client ID Metadata Documents: a client identifies itself with an HTTPS URL that
+serves a JSON document describing it, so no registration step is needed and the
+identity is portable across authorization servers.
+
+ViteMCP's OAuth proxy resolves URL-formatted `client_id`s automatically and
+advertises `client_id_metadata_document_supported` in its metadata. A client
+document looks like this:
+
+```json
+{
+  "client_id": "https://app.example.com/oauth/client.json",
+  "client_name": "Example MCP Client",
+  "redirect_uris": ["http://127.0.0.1:3000/callback"],
+  "grant_types": ["authorization_code"],
+  "response_types": ["code"]
+}
+```
+
+> [!WARNING]
+>
+> Resolving a URL-formatted `client_id` means **your server fetches a URL an
+> unauthenticated caller chose** — a server-side request forgery surface. The
+> resolver defends it by refusing non-HTTPS URLs and bare origins, refusing
+> addresses that resolve into private, loopback, link-local or CGNAT ranges
+> (including `169.254.169.254`, the cloud instance-metadata endpoint), not
+> following redirects, and capping both response size and time.
+>
+> The address check runs inside the connection's own DNS lookup, so a name that
+> resolves publicly during validation and internally at connect time — DNS
+> rebinding — is still refused.
+
+Narrow it further with a trust policy, or turn it off:
+
+```ts
+const authProxy = new OAuthProxy({
+  // ...
+  clientIdMetadata: {
+    allowedDomains: ["app.example.com", ".trusted-partner.com"],
+    fetchTimeoutMs: 3000,
+    maxDocumentBytes: 32 * 1024,
+  },
+});
+```
+
 ### Migrating from the session-based API
 
 Revision 2026-07-28 removed protocol sessions, the `initialize` handshake,

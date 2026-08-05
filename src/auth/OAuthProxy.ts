@@ -23,6 +23,11 @@ import type {
 } from "./types.js";
 
 import {
+  ClientIdMetadataError,
+  ClientIdMetadataResolver,
+  isClientIdMetadataUrl,
+} from "./clientIdMetadata.js";
+import {
   issuerNamespace,
   OAuthProxyStateStore,
 } from "./OAuthProxyStateStore.js";
@@ -65,6 +70,7 @@ const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
 export class OAuthProxy {
   private claimsExtractor: ClaimsExtractor | null = null;
   private cleanupInterval: NodeJS.Timeout | null = null;
+  private clientIdMetadata: ClientIdMetadataResolver;
   private config: OAuthProxyConfig;
   private consentManager: ConsentManager;
   private issuerNs: string;
@@ -110,6 +116,9 @@ export class OAuthProxy {
     }
 
     this.tokenStorage = storage;
+    this.clientIdMetadata = new ClientIdMetadataResolver(
+      this.config.clientIdMetadata,
+    );
     this.issuerNs = issuerNamespace(this.getUpstreamIssuer());
     this.stateStore = new OAuthProxyStateStore({
       issuer: this.getUpstreamIssuer(),
@@ -165,20 +174,16 @@ export class OAuthProxy {
       );
     }
 
-    // RFC 6749 §5.2 - reject unknown clients with invalid_client.
-    // MCP clients receive a proxy-issued client_id during DCR (not the upstream
-    // provider's credentials), so we look up by that proxy client_id.
-    const registeredClient =
-      await this.stateStore.getRegisteredClientByClientId(params.client_id);
-    if (!registeredClient) {
-      throw new OAuthProxyError("invalid_client", "Unknown client_id");
-    }
+    // Two ways to be a known client: a URL-formatted client_id resolved as a
+    // Client ID Metadata Document, or a proxy-issued id from DCR.
+    const registeredUris = await this.resolveClientRedirectUris(
+      params.client_id,
+    );
 
     // RFC 6749 §3.1.2.3 / RFC 6819 §4.1.5 - the redirect_uri MUST be one
-    // that was registered by this specific client. Skipping this check is
-    // CWE-601: an attacker can steal an authorization code by passing their
-    // own URL as redirect_uri.
-    if (!registeredClient.redirectUris.includes(params.redirect_uri)) {
+    // the client declared. Skipping this check is CWE-601: an attacker can
+    // steal an authorization code by passing their own URL as redirect_uri.
+    if (!registeredUris.includes(params.redirect_uri)) {
       throw new OAuthProxyError(
         "invalid_request",
         "redirect_uri is not registered for this client",
@@ -351,6 +356,7 @@ export class OAuthProxy {
   getAuthorizationServerMetadata(): {
     authorizationEndpoint: string;
     authorizationResponseIssParameterSupported?: boolean;
+    clientIdMetadataDocumentSupported?: boolean;
     codeChallengeMethodsSupported?: string[];
     dpopSigningAlgValuesSupported?: string[];
     grantTypesSupported?: string[];
@@ -375,6 +381,8 @@ export class OAuthProxy {
       // RFC 9207 §3: advertise that responses carry `iss`, so clients know to
       // validate it.
       authorizationResponseIssParameterSupported: true,
+      // Clients prefer CIMD over DCR when both are offered.
+      clientIdMetadataDocumentSupported: this.clientIdMetadata.enabled,
       codeChallengeMethodsSupported: ["S256", "plain"],
       grantTypesSupported: ["authorization_code", "refresh_token"],
       issuer: this.config.baseUrl,
@@ -1498,6 +1506,40 @@ export class OAuthProxy {
       scope: tokens.scope ? tokens.scope.split(" ") : [],
       tokenType: tokens.token_type || "Bearer",
     };
+  }
+
+  /**
+   * Redirect URIs the given client is allowed to use.
+   *
+   * A URL-formatted client_id is resolved as a Client ID Metadata Document
+   * (the preferred mechanism on this revision); anything else must have been
+   * registered through DCR.
+   */
+  private async resolveClientRedirectUris(clientId: string): Promise<string[]> {
+    if (this.clientIdMetadata.enabled && isClientIdMetadataUrl(clientId)) {
+      try {
+        const metadata = await this.clientIdMetadata.resolve(clientId);
+        return metadata.redirect_uris;
+      } catch (error) {
+        throw new OAuthProxyError(
+          "invalid_client",
+          error instanceof ClientIdMetadataError
+            ? error.message
+            : "Could not resolve client metadata",
+        );
+      }
+    }
+
+    // RFC 6749 §5.2 - reject unknown clients with invalid_client. MCP clients
+    // receive a proxy-issued client_id during DCR, so we look up by that.
+    const registeredClient =
+      await this.stateStore.getRegisteredClientByClientId(clientId);
+
+    if (!registeredClient) {
+      throw new OAuthProxyError("invalid_client", "Unknown client_id");
+    }
+
+    return registeredClient.redirectUris;
   }
 
   /**
