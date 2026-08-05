@@ -48,10 +48,6 @@ export interface Logger {
 
 export const MEDIA_FETCH_TIMEOUT_MS = 30000;
 
-/* -------------------------------------------------------------------------- */
-/* Errors                                                                      */
-/* -------------------------------------------------------------------------- */
-
 type MediaSource = { timeoutMs?: number } & (
   | { buffer: Buffer }
   | { path: string }
@@ -74,10 +70,6 @@ export class UnexpectedStateError extends ViteMCPError {
     this.extras = extras;
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* Media helpers (protocol-independent)                                        */
-/* -------------------------------------------------------------------------- */
 
 /**
  * An error that is meant to be surfaced to the user, rather than logged as an
@@ -156,10 +148,6 @@ export const audioContent = async (
   return { data, mimeType, type: "audio" } as const;
 };
 
-/* -------------------------------------------------------------------------- */
-/* Content types                                                               */
-/* -------------------------------------------------------------------------- */
-
 export enum ServerState {
   Error = "error",
   Running = "running",
@@ -204,24 +192,18 @@ export type ContentResult = {
 };
 
 /**
- * Context handed to `execute` / `load`.
- *
- * On the 2026-07-28 revision there is no protocol session: every request is
- * self-contained. Anything that used to hang off a session — `sessionId`,
- * `clientCapabilities`, `roots`, the ready/close lifecycle — is gone. What
- * survives is per-request.
+ * Context handed to `execute` / `load`. Everything here is per-request: the
+ * 2026-07-28 revision has no protocol session.
  */
 export type Context<T extends ViteMCPAuth> = {
   /** Authentication result for this request, if an `authenticate` hook ran. */
   auth: T | undefined;
 
   /**
-   * Builds an embedded elicitation request for {@link Context.inputRequired}.
+   * Builds an elicitation request for {@link Context.inputRequired}.
    *
-   * This is a *builder*, not a promise: on the stateless protocol the server
-   * cannot block waiting for the client. Return the result of
-   * `inputRequired()` and the client re-issues the whole request with
-   * `inputResponses` populated.
+   * A builder, not a promise — the server cannot block waiting for a reply.
+   * The client re-issues the whole request with `inputResponses` populated.
    */
   elicit: (params: {
     message: string;
@@ -239,10 +221,10 @@ export type Context<T extends ViteMCPAuth> = {
   ) => StandardSchemaV1.InferOutput<S> | undefined;
 
   /**
-   * Multi round-trip request: suspend this call and ask the client for more
-   * input. `requestState` is opaque, server-minted, and comes back verbatim —
-   * it is attacker-controlled on return, so integrity-protect it if it
-   * influences authorization or resource access.
+   * Ask the client for more input and end this round.
+   *
+   * `requestState` round-trips through the client, so it is
+   * attacker-controlled on return: sign it if it affects authorization.
    */
   inputRequired: (
     inputRequests: Record<string, InputRequest>,
@@ -309,6 +291,8 @@ export type Prompt<T extends ViteMCPAuth> = {
 export type PromptArgument = {
   complete?: (value: string) => Promise<Completion>;
   description?: string;
+  /** Constrains the argument to a fixed set of values. */
+  enum?: string[];
   name: string;
   required?: boolean;
 };
@@ -322,10 +306,6 @@ export type Resource<T extends ViteMCPAuth> = {
   name: string;
   uri: string;
 };
-
-/* -------------------------------------------------------------------------- */
-/* Handler context                                                             */
-/* -------------------------------------------------------------------------- */
 
 export type ResourceTemplate<T extends ViteMCPAuth> = {
   arguments?: ResourceTemplateArgument[];
@@ -370,10 +350,6 @@ export type ServerOptions<T extends ViteMCPAuth> = {
   };
   version: `${number}.${number}.${number}`;
 };
-
-/* -------------------------------------------------------------------------- */
-/* Authoring types                                                             */
-/* -------------------------------------------------------------------------- */
 
 export type TextContent = {
   text: string;
@@ -448,10 +424,6 @@ type SerializableValue =
   | SerializableValue[];
 
 type ToolParameters = StandardSchemaV1;
-
-/* -------------------------------------------------------------------------- */
-/* Server                                                                      */
-/* -------------------------------------------------------------------------- */
 
 export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   public get serverState(): ServerState {
@@ -657,16 +629,10 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
             endpoint?: string;
             host?: string;
             /**
-             * Whether to also serve 2025-era clients.
-             *
-             * Defaults to `"stateless"`, which accepts both eras — the SDK
-             * client negotiates 2025 unless configured with
-             * `versionNegotiation: { mode: "auto" }`, so rejecting it locks
-             * out most existing clients.
-             *
-             * `"reject"` serves only 2026-07-28, matching what
-             * `server/discover` advertises and enforcing the required
-             * `Mcp-Method`/`Mcp-Name` headers on every request.
+             * Whether to also serve 2025-era clients. Defaults to
+             * `"stateless"`: the SDK client negotiates 2025 unless given
+             * `versionNegotiation: { mode: "auto" }`. `"reject"` serves only
+             * 2026-07-28 and enforces `Mcp-Method`/`Mcp-Name`.
              */
             legacy?: "reject" | "stateless";
             maxBodySize?: number;
@@ -882,13 +848,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     return server;
   }
 
-  /**
-   * Builds the Hono app with the CORS shim already installed.
-   *
-   * Registered up front because Hono runs middleware in registration order and
-   * callers add their own routes via `getApp()` before `start()` — installing
-   * it later would put it behind those routes and never see a preflight.
-   */
+  /** Builds the Hono app with the CORS shim installed ahead of user routes. */
   #freshApp(): Hono {
     const app = new Hono();
 
@@ -915,10 +875,9 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     };
     const mcpReq = ctx?.mcpReq;
 
-    // The spec forbids emitting `notifications/message` for a request that did
-    // not opt in via `_meta`, so the level gates every call. Failures are
-    // swallowed: a log line must never take down the request (or, as an
-    // unhandled rejection, the process).
+    // The spec forbids `notifications/message` for a request that did not opt
+    // in via `_meta`. Failures are swallowed: a log line must never take down
+    // the request.
     const requestedLevel = mcpReq?._meta?.["io.modelcontextprotocol/logLevel"];
 
     const emit = (level: string, message: string, data?: SerializableValue) => {
@@ -983,8 +942,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
    * no addressee on a stateless transport.
    */
   #notifyListChanged(kind: "prompts" | "resources" | "tools") {
-    // Typed on purpose: an untyped cast here previously let wrong method names
-    // (`toolsListChanged` vs `toolsChanged`) compile and silently no-op.
+    // Typed on purpose: a cast here once let wrong method names no-op.
     const notifier = this.#handler?.notify;
 
     if (!notifier) {
@@ -1024,14 +982,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         return this.#buildServer(auth);
       },
       {
-        // Defaults to serving 2025-era clients as well, because the SDK
-        // client negotiates that era unless told otherwise — rejecting it
-        // would bounce most clients in the wild off a brand-new package.
-        //
-        // The tradeoff is real: `server/discover` advertises only 2026-07-28,
-        // so a legacy request is answered without being advertised, and the
-        // mandatory `Mcp-Method`/`Mcp-Name` validation applies only to modern
-        // requests. Set `legacy: "reject"` for a strictly modern endpoint.
+        // Tradeoff: `server/discover` advertises only 2026-07-28, so legacy
+        // requests are answered unadvertised and skip Mcp-* validation.
         legacy: config.legacy ?? "stateless",
         ...(config.enableJsonResponse ? { responseMode: "json" as const } : {}),
         onerror: (error) => this.#logger.error("[ViteMCP error]", error),
@@ -1070,9 +1022,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     const host = config.host ?? "127.0.0.1";
     const isLoopback = ["::1", "127.0.0.1", "localhost"].includes(host);
 
-    // Default-deny for loopback binds, which is precisely the DNS-rebinding
-    // case. A server bound to a routable interface is assumed to be fronted
-    // deliberately, so its origins must be configured explicitly.
+    // Default-deny on loopback (the DNS-rebinding case); a routable bind is
+    // assumed deliberate and must configure its own origins.
     const allowedOrigins =
       config.allowedOrigins ?? (isLoopback ? localhostAllowedOrigins() : []);
 
@@ -1082,16 +1033,12 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
       );
     }
 
-    // The MCP endpoint is a Hono route rather than a pre-routing short-circuit,
-    // so the CORS middleware registered in the constructor actually covers it.
-    // Routing around Hono meant every browser preflight 405'd, which on this
-    // revision blocks browsers entirely — `Mcp-Method`/`Mcp-Name` make every
-    // POST preflighted.
+    // A Hono route, not a pre-routing short-circuit, so CORS covers it.
+    // Routing around Hono 405'd every preflight — and this revision makes
+    // every POST preflighted via `Mcp-Method`/`Mcp-Name`.
     this.#honoApp.all(endpoint, async (c) => {
-      // Transport security (MUST): a present-but-unrecognised Origin is
-      // rejected with 403. This is what stops a malicious page from driving a
-      // locally bound server via DNS rebinding. Requests with no Origin (i.e.
-      // non-browser clients) are unaffected.
+      // Transport security (MUST): a present-but-unrecognised Origin is 403.
+      // Stops DNS rebinding; requests with no Origin are unaffected.
       const rejected = originValidationResponse(c.req.raw, allowedOrigins);
 
       if (rejected) {
@@ -1112,9 +1059,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     ) => {
       void (async () => {
         try {
-          // `toWebRequest` reads the Node stream to completion, so the size
-          // cap has to be applied *here* — enforcing it further in would mean
-          // the whole body was already buffered, which is the DoS this guards.
+          // The cap must apply before conversion: reading first and
+          // measuring after is the DoS this guards against.
           const body = await readCappedNodeBody(req, maxBodySize);
 
           if (body === OVERSIZE) {
@@ -1122,23 +1068,10 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
               Connection: "close",
               "Content-Type": "application/json",
             });
-            // Close the socket only once the 400 has actually flushed —
-            // destroying it earlier truncates the response the client needs to
-            // read. Pausing the request stops us draining the rest of the
-            // oversize body in the meantime, which is the exhaustion this
-            // guards against.
-            // Discard the remainder rather than buffering it: the bytes are
-            // dropped as they arrive, so nothing accumulates, and Node can
-            // still complete the exchange. Pausing instead would stall the
-            // response and the client would never see the 400.
+            // Drain rather than pause (pausing stalls the response), then
+            // half-close once the 400 has flushed. A forced destroy would RST
+            // while the client is still writing and discard the response.
             req.resume();
-
-            // `Connection: close` alone is not enough: Node waits for the
-            // declared Content-Length before closing, and an over-declared
-            // body never finishes arriving. Close once the 400 has flushed.
-            // Half-close only. A forced destroy here would send an RST while
-            // the client may still be writing, and the pending RST discards
-            // whatever it had buffered — including this 400.
             res.once("finish", () => res.socket?.end());
             res.end(
               JSON.stringify({
@@ -1149,10 +1082,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
             return;
           }
 
-          // Convert faithfully — method, headers and body all have to survive,
-          // or custom POST routes see an empty request. The Node req/res are
-          // passed as Hono's env so custom routes can still reach
-          // `c.env.incoming`.
+          // Node req/res go through as Hono's env so custom routes can still
+          // reach `c.env.incoming`.
           const response = await app.fetch(
             nodeToWebRequest(req, body, useTls),
             {
@@ -1214,15 +1145,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   }
 
   /**
-   * Builds a fresh `McpServer` for one request. On the stateless protocol
-   * there is nothing to reuse between requests, and building per-request is
-   * what lets `canAccess` filter the listing by the caller's auth.
-   */
-  /**
-   * The SDK needs a schema that can produce JSON Schema. Zod v4 does natively;
-   * valibot/arktype do not, so convert those via xsschema and hand the result
-   * back through `fromJsonSchema`. Throws eagerly for anything unsupported so
-   * the failure surfaces at start-up, not on the first tool call.
+   * Converts a schema the SDK cannot consume directly. Zod v4 emits JSON
+   * Schema natively; valibot/arktype go via xsschema.
    */
   async #toSdkSchema(schema: unknown, label: string): Promise<unknown> {
     if (!schema) {
@@ -1251,17 +1175,10 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Helpers                                                                     */
-/* -------------------------------------------------------------------------- */
-
 /**
- * Builds a web-standard Request from a Node request whose body has already
- * been consumed.
- *
- * The SDK's `toWebRequest` cannot be used here: it either re-reads the stream
- * (already drained) or JSON-stringifies a `parsedBody`, which would
- * double-encode an already-serialized body.
+ * Builds a web-standard Request from a Node request whose body is already
+ * consumed. The SDK's `toWebRequest` would either re-read the drained stream
+ * or JSON-stringify the body a second time.
  */
 const nodeToWebRequest = (
   req: http.IncomingMessage,
@@ -1299,11 +1216,8 @@ const nodeToWebRequest = (
 };
 
 /**
- * Rejects if a tool has not settled within its `timeoutMs`.
- *
- * The underlying work is not cancelled — it cannot be, since `execute` owns
- * whatever it started — but the caller stops waiting and gets a clear error
- * instead of an indefinitely hung request.
+ * Rejects if a tool outruns its `timeoutMs`. The work itself is not cancelled
+ * — `execute` owns whatever it started — but the caller stops waiting.
  */
 const withTimeout = <T>(
   work: Promise<T>,
@@ -1371,11 +1285,7 @@ const readCappedNodeBody = async (
   return Buffer.concat(chunks);
 };
 
-/**
- * Rejects schemas that do not implement Standard Schema, at registration time
- * rather than on the first request — a typo in a schema should fail at
- * start-up, not when a caller happens to invoke the tool.
- */
+/** Rejects non-Standard-Schema at registration, not on first call. */
 const assertStandardSchema = (
   schema: unknown,
   toolName: string,
@@ -1411,12 +1321,14 @@ const promptArgsSchema = <T extends ViteMCPAuth>(prompt: Prompt<T>) => {
       (prompt.complete
         ? (value: string) => prompt.complete!(arg.name, value)
         : undefined);
-    // The description has to be on the schema: the SDK derives the public
-    // `prompts/list` argument list from the schema's JSON Schema, not from
-    // this declaration.
-    const described = arg.description
-      ? z.string().describe(arg.description)
+    // On the schema, not here: the SDK derives `prompts/list` arguments from
+    // the schema's JSON Schema.
+    const valueSchema = arg.enum?.length
+      ? z.enum(arg.enum as [string, ...string[]])
       : z.string();
+    const described = arg.description
+      ? valueSchema.describe(arg.description)
+      : valueSchema;
     const base = completer
       ? completable(
           described,
@@ -1457,9 +1369,8 @@ const normalizeToolResult = (result: unknown): unknown => {
       return { content: [value] };
     }
 
-    // Structured results also carry the serialized JSON as a text block: the
-    // spec recommends it so clients that do not read `structuredContent` still
-    // see something meaningful.
+    // Also carry serialized JSON as text, for clients that ignore
+    // `structuredContent`.
     return {
       content: [{ text: JSON.stringify(value), type: "text" }],
       structuredContent: value,
@@ -1470,10 +1381,6 @@ const normalizeToolResult = (result: unknown): unknown => {
 };
 
 export { delay };
-
-/* -------------------------------------------------------------------------- */
-/* Re-exports                                                                  */
-/* -------------------------------------------------------------------------- */
 
 // Convenience re-exports so the common auth surface is reachable from the
 // package root; `@vitemcp/server/auth` remains the full module.

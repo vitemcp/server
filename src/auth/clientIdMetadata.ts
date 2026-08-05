@@ -1,14 +1,11 @@
 /**
  * OAuth Client ID Metadata Documents (CIMD).
  *
- * A client identifies itself with an HTTPS URL that serves a JSON document
- * describing it, instead of registering ahead of time. The authorization
- * server fetches that document on demand — which means **the server can be
- * induced to make an HTTP request to an attacker-chosen URL**. Everything
- * defensive in this file exists for that reason.
+ * A client identifies itself with an HTTPS URL serving a JSON document, which
+ * the server fetches on demand — so **the server can be induced to request an
+ * attacker-chosen URL**. Everything defensive here exists for that reason.
  *
  * @see https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-00
- * @see https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration
  */
 import { lookup as dnsLookup } from "node:dns";
 import { isIP } from "node:net";
@@ -30,9 +27,8 @@ export interface ClientIdMetadata {
 
 export interface ClientIdMetadataOptions {
   /**
-   * Restricts which hosts may serve metadata documents (a trust policy).
-   * Entries match the host exactly, or as a suffix when written `.example.com`.
-   * Omitted means any public host is acceptable.
+   * Trust policy: hosts allowed to serve metadata. Exact match, or suffix when
+   * written `.example.com`. Omitted allows any public host.
    */
   allowedDomains?: string[];
   /** How long a fetched document may be reused when the response gives no cache headers. */
@@ -52,11 +48,8 @@ const DEFAULTS = {
 } as const;
 
 /**
- * Address ranges a metadata fetch must never reach.
- *
- * Loopback and private ranges are the obvious targets; link-local matters
- * because 169.254.169.254 is the cloud instance-metadata endpoint, which is
- * the highest-value SSRF destination in a hosted deployment.
+ * Address ranges a metadata fetch must never reach. Link-local matters most:
+ * 169.254.169.254 serves cloud instance credentials.
  */
 const isBlockedIpv4 = (ip: string): boolean => {
   const parts = ip.split(".").map(Number);
@@ -114,11 +107,10 @@ const stripBrackets = (host: string): string =>
 /**
  * A dispatcher whose DNS resolution rejects internal addresses.
  *
- * Validating the hostname *before* fetching would leave a DNS-rebinding
- * window: the name could resolve to a public address during the check and to
- * 169.254.169.254 when the socket is actually opened. Hooking the lookup the
- * connection itself uses closes that window, because the address that gets
- * validated is the address that gets connected to.
+ * Checking the hostname before fetching would leave a rebinding window — the
+ * name could resolve publicly during the check and internally at connect.
+ * Hooking the connection's own lookup means the validated address is the
+ * connected one.
  */
 const ssrfSafeAgent = new Agent({
   connect: {
@@ -167,8 +159,7 @@ export class ClientIdMetadataError extends Error {
 export const isClientIdMetadataUrl = (clientId: string): boolean => {
   try {
     const url = new URL(clientId);
-    // The spec requires https and a path component; a bare origin is not a
-    // metadata document and allowing it would widen the fetch surface.
+    // Spec requires https and a path; a bare origin only widens the surface.
     return url.protocol === "https:" && url.pathname.length > 1;
   } catch {
     return false;
@@ -211,11 +202,8 @@ interface CacheEntry {
 }
 
 /**
- * Parses and validates a metadata document body.
- *
- * Exported as a pure function so the structural rules can be tested without
- * standing up a server — and so the SSRF guard, which refuses loopback, does
- * not get in the way of testing them.
+ * Parses and validates a metadata document body. Pure so the structural rules
+ * are testable without a server (the SSRF guard refuses loopback).
  *
  * @throws {ClientIdMetadataError} when the document is unusable.
  */
@@ -293,8 +281,8 @@ export class ClientIdMetadataResolver {
   /**
    * Fetches and validates the metadata document for a client_id URL.
    *
-   * @throws {ClientIdMetadataError} if the URL is unacceptable, the fetch is
-   * refused, or the document fails validation.
+   * @throws {ClientIdMetadataError} on a bad URL, refused fetch, or invalid
+   * document.
    */
   public async resolve(clientId: string): Promise<ClientIdMetadata> {
     if (!this.#options.enabled) {
@@ -323,9 +311,8 @@ export class ClientIdMetadataResolver {
       );
     }
 
-    // A literal address never reaches the DNS hook — there is no name to
-    // resolve — so it has to be checked here or it would bypass the guard
-    // entirely and simply hang until the timeout.
+    // Literals never reach the DNS hook — no name to resolve — so they must
+    // be checked here or they bypass the guard entirely.
     const literalFamily = isIP(stripBrackets(url.hostname));
 
     if (
@@ -363,10 +350,8 @@ export class ClientIdMetadataResolver {
         dispatcher: ssrfSafeAgent,
         headers: { accept: "application/json" },
         headersTimeout: this.#options.fetchTimeoutMs,
-        // Redirects are NOT followed. undici does not follow them unless a
-        // redirect interceptor is installed, and none is here: each hop would
-        // need re-validating, and a redirect to an internal address is the
-        // classic SSRF bypass.
+        // No redirect interceptor is installed, so redirects are not
+        // followed: a hop to an internal address is the classic SSRF bypass.
         method: "GET",
         signal: AbortSignal.timeout(this.#options.fetchTimeoutMs),
       });
@@ -385,7 +370,7 @@ export class ClientIdMetadataResolver {
       );
     }
 
-    // Read with a hard cap so an endless body cannot exhaust memory.
+    // Hard cap: an endless body must not exhaust memory.
     let size = 0;
     const chunks: Buffer[] = [];
 

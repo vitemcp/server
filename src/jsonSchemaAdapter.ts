@@ -42,40 +42,25 @@ type AjvValidateFunction = {
 };
 
 /**
- * Wraps a plain JSON Schema object so it can be used as a tool's `parameters`
- * or `outputSchema`, without pulling in Zod, Valibot, or another validation
- * library.
+ * Wraps a plain JSON Schema object for use as a tool's `parameters` or
+ * `outputSchema`, without pulling in Zod or Valibot.
  *
- * Validation uses AJV, which is an optional peer dependency — install `ajv`
- * (and `ajv-formats` if you use `format` keywords) to use this. It is imported
- * on first validation, so servers that never call this pay nothing for it.
- *
- * Note that ViteMCP applies the same strictness to every tool schema: objects
- * are advertised with `additionalProperties: false`, whatever the input schema
- * said.
+ * Validation uses AJV, an optional peer dependency — install `ajv` (plus
+ * `ajv-formats` for `format` keywords). It is imported on first validation, so
+ * servers that never call it pay nothing.
  *
  * @example
  * ```ts
- * import { ViteMCP, jsonSchemaAdapter } from "@vitemcp/server";
- *
- * const server = new ViteMCP({ name: "Example", version: "1.0.0" });
- *
  * server.addTool({
  *   name: "greet",
- *   description: "Greet a user",
  *   parameters: jsonSchemaAdapter({
  *     type: "object",
- *     properties: {
- *       name: { type: "string" },
- *     },
+ *     properties: { name: { type: "string" } },
  *     required: ["name"],
  *   }),
  *   execute: async ({ name }) => `Hello, ${name}!`,
  * });
  * ```
- *
- * @param schema - A plain JSON Schema object
- * @returns A Standard Schema that validates against `schema`
  */
 export function jsonSchemaAdapter(
   schema: JsonSchemaObject,

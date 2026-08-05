@@ -119,7 +119,7 @@ If you are looking for a boilerplate repository to build your own MCP server, ch
 
 ### Remote Server Options
 
-ViteMCP supports multiple transport options for remote communication, allowing an MCP hosted on a remote machine to be accessed over the network.
+ViteMCP can serve over HTTP, so a server on a remote machine is reachable over the network.
 
 #### HTTP Streaming
 
@@ -136,20 +136,18 @@ server.start({
 });
 ```
 
-This will start the server and listen for HTTP streaming connections on `http://localhost:8080/mcp`.
+The server then listens on `http://localhost:8080/mcp`.
 
 > **Note:** You can also customize the endpoint path using the `httpStream.endpoint` option (default is `/mcp`).
 
 > **Note:** To serve HTTP streaming and built-in OAuth routes under an issuer path, set `httpStream.basePath` (for example, `/issuer1`). This exposes authorization server metadata at `/.well-known/oauth-authorization-server/issuer1` per RFC 8414.
 
-> **Note:** This also starts an SSE server on `http://localhost:8080/sse`.
-
-You can connect to these servers using the appropriate client transport.
+Connect with a client transport:
 
 For HTTP streaming connections:
 
 ```ts
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 const client = new Client(
   {
@@ -157,7 +155,9 @@ const client = new Client(
     version: "1.0.0",
   },
   {
-    capabilities: {},
+    // Required: the SDK client negotiates the 2025 protocol era unless told
+    // otherwise, and this server serves only 2026-07-28.
+    versionNegotiation: { mode: "auto" },
   },
 );
 
@@ -168,29 +168,9 @@ const transport = new StreamableHTTPClientTransport(
 await client.connect(transport);
 ```
 
-For SSE connections:
-
-```ts
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-
-const client = new Client(
-  {
-    name: "example-client",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {},
-  },
-);
-
-const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
-
-await client.connect(transport);
-```
-
 ##### HTTPS Support
 
-ViteMCP supports HTTPS for secure connections by providing SSL certificate options:
+Pass SSL certificates to terminate TLS directly:
 
 ```ts
 server.start({
@@ -204,7 +184,7 @@ server.start({
 });
 ```
 
-This will start the server with HTTPS on `https://localhost:8443/mcp`.
+The server then listens on `https://localhost:8443/mcp`.
 
 **SSL Options:**
 
@@ -237,9 +217,7 @@ server.start({
         "Content-Type",
         "Authorization",
         "Accept",
-        "Mcp-Session-Id",
         "Mcp-Protocol-Version",
-        "Last-Event-Id",
         "X-Custom-Header",
       ],
       credentials: true,
@@ -264,7 +242,7 @@ The `CorsOptions` type is exported from `vitemcp` for convenience.
 
 #### Custom HTTP Routes
 
-ViteMCP allows you to add custom HTTP routes alongside MCP endpoints, enabling you to build comprehensive HTTP services that include REST APIs, webhooks, admin interfaces, and more - all within the same server process.
+Custom HTTP routes live alongside the MCP endpoint in the same process — REST APIs, webhooks, admin interfaces.
 
 ```ts
 const app = server.getApp();
@@ -319,12 +297,11 @@ Routes are matched in the order they are registered, allowing you to define spec
 Custom Hono routes are public unless you add your own route middleware or authentication checks. For protected custom routes, put your auth logic in a reusable helper and call it from both ViteMCP's `authenticate` option and your Hono route handlers:
 
 ```ts
-import type { IncomingMessage } from "node:http";
 import type { Context } from "hono";
 import { ViteMCP } from "@vitemcp/server";
 
-async function authenticateRequest(request: IncomingMessage) {
-  const apiKey = request.headers["x-api-key"];
+async function authenticateRequest(request: Request) {
+  const apiKey = request.headers.get("x-api-key");
   return apiKey === "123" ? { userId: "123" } : undefined;
 }
 
@@ -383,7 +360,7 @@ See the [custom-routes example](src/examples/custom-routes.ts) for a complete de
 
 #### Edge Runtime Support
 
-ViteMCP supports edge runtimes like Cloudflare Workers, enabling deployment of MCP servers to the edge with minimal latency worldwide.
+ViteMCP runs on edge runtimes such as Cloudflare Workers.
 
 ##### Choosing Between ViteMCP and EdgeViteMCP
 
@@ -583,7 +560,9 @@ server.addTool({
 ```
 
 Works for `outputSchema` too. Note that ViteMCP advertises every tool schema
-with `additionalProperties: false`, whatever your schema said — the same
+with `additionalProperties: false` when it has to convert them through
+xsschema (Valibot, and anything else without native JSON Schema output). Zod
+and ArkType emit their own JSON Schema and pass through unchanged — the same
 treatment Zod and Valibot schemas get.
 
 Unlike the schema libraries above, a plain JSON Schema carries no TypeScript
@@ -687,7 +666,7 @@ When `outputSchema` is provided, ViteMCP validates `structuredContent` before se
 
 #### Tool Authorization
 
-You can control which tools are available to authenticated users by adding an optional `canAccess` function to a tool's definition. This function receives the authentication context and should return `true` if the user is allowed to access the tool.
+A tool's optional `canAccess` receives the request's auth context and returns whether the caller may use it. Tools it rejects are filtered out of `tools/list` entirely.
 
 ```typescript
 server.addTool({
@@ -829,48 +808,7 @@ server.addTool({
 });
 ```
 
-### Health-check Endpoint
-
-When you run ViteMCP with the `httpStream` transport you can optionally expose a
-simple HTTP endpoint that returns a plain-text response useful for load-balancer
-or container orchestration liveness checks.
-
-Enable (or customise) the endpoint via the `health` key in the server options:
-
-```ts
-const server = new ViteMCP({
-  name: "My Server",
-  version: "1.0.0",
-  health: {
-    // Enable / disable (default: true)
-    enabled: true,
-    // Body returned by the endpoint (default: 'ok')
-    message: "healthy",
-    // Path that should respond (default: '/health')
-    path: "/healthz",
-    // HTTP status code to return (default: 200)
-    status: 200,
-  },
-});
-
-await server.start({
-  transportType: "httpStream",
-  httpStream: { port: 8080 },
-});
-```
-
-Now a request to `http://localhost:8080/healthz` will return:
-
-```
-HTTP/1.1 200 OK
-content-type: text/plain
-
-healthy
-```
-
-The endpoint is ignored when the server is started with the `stdio` transport.
-
-### Returning an audio
+#### Returning an audio
 
 Use the `audioContent` to create a content object for an audio:
 
@@ -942,7 +880,7 @@ server.addTool({
 
 #### Return combination type
 
-You can combine various types in this way and send them back to AI
+Content types can be combined in one result:
 
 ```js
 server.addTool({
@@ -996,7 +934,7 @@ server.addTool({
 
 #### Custom Logger
 
-ViteMCP allows you to provide a custom logger implementation to control how the server logs messages. This is useful for integrating with existing logging infrastructure or customizing log formatting.
+Provide a `logger` to route server logs into your own infrastructure.
 
 ```ts
 import { ViteMCP, Logger } from "@vitemcp/server";
@@ -1034,7 +972,19 @@ See `src/examples/custom-logger.ts` for examples with Winston, Pino, and file-ba
 
 #### Logging
 
-Tools can log messages to the client using the `log` object in the context object:
+Tools can log messages to the client using the `log` object in the context object.
+
+> [!IMPORTANT]
+>
+> Log notifications are **only emitted when the client asks for them**, by
+> setting `io.modelcontextprotocol/logLevel` in the request's `_meta`. The
+> revision forbids servers from sending `notifications/message` for a request
+> that did not opt in, so `log.*` is a no-op otherwise — that is expected
+> behaviour, not a bug.
+>
+> Logging is also deprecated as of 2026-07-28. For diagnostics that always
+> reach you, write to `stderr` (stdio servers) or use OpenTelemetry; for
+> user-visible progress, prefer [`reportProgress`](#progress).
 
 ```js
 server.addTool({
@@ -1130,7 +1080,7 @@ Progress notifications are only emitted when the client opts in by supplying a `
 
 #### Tool Annotations
 
-As of the MCP Specification (2025-03-26), tools can include annotations that provide richer context and control by adding metadata about a tool's behavior:
+Tools can include annotations that provide richer context and control by adding metadata about a tool's behavior:
 
 ```typescript
 server.addTool({
@@ -1161,6 +1111,47 @@ The available annotations are:
 | `openWorldHint`   | boolean | `true`  | If true, the tool may interact with an "open world" of external entities                                                             |
 
 These annotations help clients and LLMs better understand how to use the tools and what to expect when calling them.
+
+### Health-check Endpoint
+
+When you run ViteMCP with the `httpStream` transport you can optionally expose a
+simple HTTP endpoint that returns a plain-text response useful for load-balancer
+or container orchestration liveness checks.
+
+Enable (or customise) the endpoint via the `health` key in the server options:
+
+```ts
+const server = new ViteMCP({
+  name: "My Server",
+  version: "1.0.0",
+  health: {
+    // Enable / disable (default: true)
+    enabled: true,
+    // Body returned by the endpoint (default: 'ok')
+    message: "healthy",
+    // Path that should respond (default: '/health')
+    path: "/healthz",
+    // HTTP status code to return (default: 200)
+    status: 200,
+  },
+});
+
+await server.start({
+  transportType: "httpStream",
+  httpStream: { port: 8080 },
+});
+```
+
+Now a request to `http://localhost:8080/healthz` will return:
+
+```
+HTTP/1.1 200 OK
+content-type: text/plain
+
+healthy
+```
+
+The endpoint is ignored when the server is started with the `stdio` transport.
 
 ### Resources
 
@@ -1220,7 +1211,7 @@ server.addResource({
   uri: "file:///logs/app.log",
   name: "Application Logs",
   mimeType: "text/plain",
-  async load(auth, context) {
+  async load(context) {
     context.log.info("loading application logs", { requestedBy: auth?.userId });
 
     return {
@@ -1229,26 +1220,6 @@ server.addResource({
   },
 });
 ```
-
-#### Subscribing to resource updates
-
-Clients can subscribe to a resource with the MCP [`resources/subscribe`](https://modelcontextprotocol.io/specification/2025-06-18/server/resources#subscriptions) method to be notified whenever its contents change. ViteMCP advertises the `subscribe` capability automatically for any server that exposes resources, tracks each client's subscriptions, and lets you emit an update with `sendResourceUpdated`:
-
-```ts
-server.addResource({
-  uri: "file:///logs/app.log",
-  name: "Application Logs",
-  mimeType: "text/plain",
-  async load() {
-    return { text: await readLogFile() };
-  },
-});
-
-// Whenever the underlying data changes, notify subscribed clients:
-await server.sendResourceUpdated("file:///logs/app.log");
-```
-
-`sendResourceUpdated` only notifies clients that have subscribed to the given URI, so it is safe to call whenever your data changes. ViteMCP also advertises the `listChanged` capability for resources and prompts and emits `notifications/resources/list_changed` / `notifications/prompts/list_changed` automatically when you add or remove resources, resource templates, or prompts at runtime.
 
 ### Resource templates
 
@@ -1453,7 +1424,7 @@ server.addPrompt({
       required: true,
     },
   ],
-  load: async (args, auth, context) => {
+  load: async (args, context) => {
     context.log.debug("generating git commit prompt", { user: auth?.userId });
 
     return `Generate a concise but descriptive commit message for these changes:\n\n${args.changes}`;
@@ -1544,8 +1515,8 @@ const server = new ViteMCP({
 server.addTool({
   canAccess: requireAuth,
   description: "Get user profile",
-  execute: async (_args, { session }) => {
-    const { accessToken } = getAuthSession(session);
+  execute: async (_args, { auth }) => {
+    const { accessToken } = getAuthSession(auth);
     const response = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {
@@ -1651,7 +1622,7 @@ server.addTool({
 
 **Extracting Session Data:**
 
-Use `getAuthSession` for type-safe access to the OAuth session in your tool execute functions:
+Use `getAuthSession` for type-safe access to the OAuth session, which arrives on `context.auth`:
 
 ```typescript
 import { getAuthSession, GoogleSession } from "@vitemcp/server";
@@ -1659,12 +1630,12 @@ import { getAuthSession, GoogleSession } from "@vitemcp/server";
 server.addTool({
   canAccess: requireAuth,
   name: "get-profile",
-  execute: async (_args, { session }) => {
+  execute: async (_args, { auth }) => {
     // Type-safe destructuring (throws if not authenticated)
-    const { accessToken } = getAuthSession(session);
+    const { accessToken } = getAuthSession(auth);
 
     // Or with provider-specific typing:
-    // const { accessToken } = getAuthSession<GoogleSession>(session);
+    // const { accessToken } = getAuthSession<GoogleSession>(auth);
 
     const response = await fetch("https://api.example.com/user", {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -1685,7 +1656,7 @@ const server = new ViteMCP({
   name: "My Server",
   version: "1.0.0",
   authenticate: (request) => {
-    const apiKey = request.headers["x-api-key"];
+    const apiKey = request.headers.get("x-api-key");
 
     if (apiKey !== "123") {
       throw new Response(null, {
@@ -1700,7 +1671,7 @@ const server = new ViteMCP({
 
 server.addTool({
   name: "sayHello",
-  execute: async (args, { session }) => {
+  execute: async (args, { auth }) => {
     return `Hello, ${session.id}!`;
   },
 });
@@ -1741,8 +1712,8 @@ const server = new ViteMCP({
 server.addTool({
   canAccess: requireAuth,
   name: "protected-tool",
-  execute: async (_args, { session }) => {
-    const { accessToken } = getAuthSession(session);
+  execute: async (_args, { auth }) => {
+    const { accessToken } = getAuthSession(auth);
     // Use accessToken to call upstream APIs
     return "Authenticated!";
   },
@@ -1784,7 +1755,7 @@ const server = new ViteMCP({
 
 #### OAuth Discovery Endpoints
 
-ViteMCP also supports OAuth discovery endpoints for direct integration with OAuth providers, supporting both **MCP Specification 2025-03-26** and **MCP Specification 2025-06-18**. This provides standard discovery endpoints that comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9470 (OAuth 2.0 Protected Resource Metadata):
+ViteMCP also supports OAuth discovery endpoints for direct integration with OAuth providers. These comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9728 (OAuth 2.0 Protected Resource Metadata):
 
 ```ts
 import { ViteMCP } from "@vitemcp/server";
@@ -1809,7 +1780,7 @@ const server = new ViteMCP({
     },
   },
   authenticate: async (request) => {
-    const authHeader = request.headers.authorization;
+    const authHeader = request.headers.get("authorization");
 
     if (!authHeader?.startsWith("Bearer ")) {
       throw new Response(null, {
@@ -1881,9 +1852,9 @@ This configuration automatically exposes OAuth discovery endpoints:
 - `/.well-known/oauth-authorization-server` - Authorization server metadata (RFC 8414)
 - `/.well-known/oauth-authorization-server<basePath>` - Authorization server metadata when `httpStream.basePath` is set (RFC 8414 Section 3)
 - `/.well-known/oauth-protected-resource` - Protected resource metadata (RFC 9728)
-- `/.well-known/oauth-protected-resource<endpoint>` - Protected resource metadata at sub-path (MCP 2025-11-25)
+- `/.well-known/oauth-protected-resource<endpoint>` - Protected resource metadata at sub-path
 
-**Discovery Mechanism (MCP Specification 2025-11-25):**
+**Discovery Mechanism:**
 
 Clients discover protected resource metadata using the following search order:
 
@@ -1950,8 +1921,8 @@ server.start({
 A client that would connect to this may look something like this:
 
 ```ts
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { Client } from "@modelcontextprotocol/client";
 
 const transport = new StreamableHTTPClientTransport(
   new URL(`http://localhost:8080/mcp`),
@@ -2058,7 +2029,12 @@ server.addTool({
 });
 ```
 
-Two consequences worth internalising:
+A complete worked version, including HMAC-signing `requestState` and
+distinguishing "declined" from "answered no", is in
+[`src/examples/multi-round-trip.ts`](src/examples/multi-round-trip.ts). Per-request
+auth is demonstrated in [`src/examples/auth-context.ts`](src/examples/auth-context.ts).
+
+Three consequences worth internalising:
 
 - **Handlers are re-entrant.** `execute` runs again from the top on the retry.
   Do not do irreversible work before you have the input you need.
@@ -2066,6 +2042,9 @@ Two consequences worth internalising:
   through the client. If it influences authorization or resource access, sign
   or encrypt it and reject anything that fails verification — ViteMCP does not
   do that for you.
+- **`ctx.input()` returns `undefined` when the client declined**, which is not
+  the same as the user answering "no". Handle the two separately, or a decline
+  silently reads as a negative answer.
 
 ### Cacheable results
 
@@ -2153,6 +2132,17 @@ The corresponding ViteMCP surface went with them:
 `authenticate` now receives a web-standard `Request` rather than a Node
 `IncomingMessage`, so read headers with `request.headers.get("...")`.
 
+**The SDK you build clients with also changed.** `@modelcontextprotocol/sdk`
+v1 is replaced by `@modelcontextprotocol/{core,server,client,node}` v2, so every
+SDK import in your own code moves.
+
+**Clients must opt into the new protocol era.** The v2 client negotiates the
+2025 era by default; this server serves only 2026-07-28. Construct clients with
+`versionNegotiation: { mode: "auto" }` or they will be rejected with
+`Unsupported protocol version`. If you need to serve older clients during a
+transition, pass `httpStream: { legacy: "stateless" }` — but note the server
+then answers requests it does not advertise support for.
+
 ## Running Your Server
 
 ### Unit testing with an in-memory transport
@@ -2160,21 +2150,24 @@ The corresponding ViteMCP surface went with them:
 `server.connect(transport)` attaches the server to a transport you construct yourself, instead of letting `start()` create one. Paired with the SDK's `InMemoryTransport`, this lets you drive a server in-process — no port to bind, no subprocess to spawn — which is usually what you want for testing a `stdio` server:
 
 ```ts
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 
 async function createTestClient(server: ViteMCP) {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
 
-  const client = new Client({ name: "test-client", version: "0.0.0" });
+  const client = new Client(
+    { name: "test-client", version: "0.0.0" },
+    { versionNegotiation: { mode: "auto" } },
+  );
 
-  const [session] = await Promise.all([
+  await Promise.all([
     server.connect(serverTransport),
     client.connect(clientTransport),
   ]);
 
-  return { client, session };
+  return { client };
 }
 
 test("adds two numbers", async () => {
@@ -2190,15 +2183,11 @@ test("adds two numbers", async () => {
 });
 ```
 
-The session is built from the tools, resources and prompts registered on the instance, exactly as `start()` builds it, so your tests exercise the same wiring the real server uses — including `canAccess` filtering and the `connect`/`disconnect` events.
+The server instance is built from the tools, resources and prompts registered on it, exactly as `start()` builds it, so tests exercise the same wiring the real server uses.
 
-Pass session auth as the second argument, equivalent to what your `authenticate` function would return:
+`connect()` does not run your `authenticate` hook — there is no HTTP request to authenticate — so `context.auth` is `undefined` on this path and `canAccess` sees `undefined`. Test authorization through the HTTP transport instead.
 
-```ts
-await server.connect(serverTransport, { id: 7, role: "admin" });
-```
-
-The transport's lifecycle belongs to you: `stop()` does not close transports passed to `connect`, so close the client when the test finishes.
+The transport's lifecycle belongs to you: close the client when the test finishes. `stop()` closes servers created via `connect()` but not the transports you passed in.
 
 ### Test with `mcp-cli`
 
@@ -2253,26 +2242,8 @@ Refer to this [issue](https://github.com/vitemcp/vitemcp/issues/25#issuecomment-
 
 ## Showcase
 
-> [!NOTE]
->
-> If you've developed a server using ViteMCP, please [submit a PR](https://github.com/vitemcp/vitemcp) to showcase it here!
-
-> [!NOTE]
->
-> If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
-
-- [apinetwork/piapi-mcp-server](https://github.com/apinetwork/piapi-mcp-server) - generate media using Midjourney/Flux/Kling/LumaLabs/Udio/Chrip/Trellis
-- [domdomegg/computer-use-mcp](https://github.com/domdomegg/computer-use-mcp) - controls your computer
-- [LiterallyBlah/Dradis-MCP](https://github.com/LiterallyBlah/Dradis-MCP) – manages projects and vulnerabilities in Dradis
-- [Meeting-Baas/meeting-mcp](https://github.com/Meeting-Baas/meeting-mcp) - create meeting bots, search transcripts, and manage recording data
-- [drumnation/unsplash-smart-mcp-server](https://github.com/drumnation/unsplash-smart-mcp-server) – enables AI agents to seamlessly search, recommend, and deliver professional stock photos from Unsplash
-- [ssmanji89/halopsa-workflows-mcp](https://github.com/ssmanji89/halopsa-workflows-mcp) - HaloPSA Workflows integration with AI assistants
-- [aiamblichus/mcp-chat-adapter](https://github.com/aiamblichus/mcp-chat-adapter) – provides a clean interface for LLMs to use chat completion
-- [eyaltoledano/claude-task-master](https://github.com/eyaltoledano/claude-task-master) – advanced AI project/task manager powered by ViteMCP
-- [cswkim/discogs-mcp-server](https://github.com/cswkim/discogs-mcp-server) - connects to the Discogs API for interacting with your music collection
-- [Panzer-Jack/feuse-mcp](https://github.com/Panzer-Jack/feuse-mcp) - Frontend Useful MCP Tools - Essential utilities for web developers to automate API integration and code generation
-- [sunra-ai/sunra-clients](https://github.com/sunra-ai/sunra-clients/tree/main/mcp-server) - Sunra.ai is a generative media platform built for developers, providing high-performance AI model inference capabilities.
-- [foxtrottwist/shortcuts-mcp](https://github.com/foxtrottwist/shortcuts-mcp) - connects Claude to macOS Shortcuts for system automation, app integration, and interactive workflows
+Built something with ViteMCP? [Open a PR](https://github.com/vitemcp/vitemcp) to
+list it here.
 
 ## Acknowledgements
 

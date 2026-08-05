@@ -52,26 +52,16 @@ export interface JWKSVerifierConfig {
 }
 
 /**
- * JWKS Verifier
- * Verifies JWTs using public keys from a JWKS endpoint
- *
- * This class requires the 'jose' package to be installed:
- * ```bash
- * npm install jose
- * ```
+ * Verifies JWTs against a JWKS endpoint. Requires the optional `jose` package.
  *
  * @example
- * ```typescript
+ * ```ts
  * const verifier = new JWKSVerifier({
- *   jwksUri: 'https://accounts.google.com/.well-known/jwks.json',
- *   audience: 'your-client-id',
- *   issuer: 'https://accounts.google.com'
+ *   audience: "your-client-id",
+ *   issuer: "https://accounts.google.com",
+ *   jwksUri: "https://accounts.google.com/.well-known/jwks.json",
  * });
- *
- * const result = await verifier.verify(token);
- * if (result.valid) {
- *   console.log('Token claims:', result.claims);
- * }
+ * const { valid, claims } = await verifier.verify(token);
  * ```
  */
 export class JWKSVerifier implements TokenVerifier {

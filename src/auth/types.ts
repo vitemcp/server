@@ -49,7 +49,6 @@ export interface ClientCode {
   createdAt: Date;
   /** Code expiration timestamp */
   expiresAt: Date;
-  /** Associated transaction ID */
   transactionId: string;
   /** Upstream tokens obtained from provider */
   upstreamTokens: UpstreamTokenSet;
@@ -123,7 +122,6 @@ export interface DCRRequest {
    * OpenID-aware authorization servers do not mis-apply redirect-URI rules.
    */
   application_type?: "native" | "web";
-  /** Client name */
   client_name?: string;
   /** Client homepage URL */
   client_uri?: string;
@@ -133,7 +131,6 @@ export interface DCRRequest {
   grant_types?: string[];
   /** JWKS object */
   jwks?: Record<string, unknown>;
-  /** JWKS URI */
   jwks_uri?: string;
   /** Client logo URL */
   logo_uri?: string;
@@ -147,7 +144,6 @@ export interface DCRRequest {
   scope?: string;
   /** Software identifier */
   software_id?: string;
-  /** Software version */
   software_version?: string;
   /** Token endpoint authentication method */
   token_endpoint_auth_method?: string;
@@ -166,7 +162,6 @@ export interface DCRResponse {
   /** Client ID issued timestamp */
   client_id_issued_at?: number;
   client_name?: string;
-  /** Client secret */
   client_secret?: string;
   /** Client secret expiration (0 = never) */
   client_secret_expires_at?: number;
@@ -179,9 +174,7 @@ export interface DCRResponse {
   policy_uri?: string;
   /** Echo back all registered metadata */
   redirect_uris: string[];
-  /** Registration access token */
   registration_access_token?: string;
-  /** Registration client URI */
   registration_client_uri?: string;
   response_types?: string[];
   scope?: string;
@@ -399,7 +392,6 @@ export interface RefreshRequest {
  * Maps JTI to upstream token reference
  */
 export interface TokenMapping {
-  /** Client ID */
   clientId: string;
   /** Creation timestamp */
   createdAt: Date;
@@ -489,7 +481,6 @@ export interface TokenVerifier {
  * Token set from upstream OAuth provider
  */
 export interface UpstreamTokenSet {
-  /** Access token */
   accessToken: string;
   /** Token expiration in seconds */
   expiresIn: number;

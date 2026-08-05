@@ -462,17 +462,7 @@ Built-in debugging capabilities:
 
 ### Production Checklist
 
-- [ ] Use HTTPS for all endpoints (required for OAuth 2.0)
-- [ ] Enable consent screen (`consentRequired: true`)
-- [ ] Use persistent storage (DiskStore or custom)
-- [ ] Wrap storage with encryption (`EncryptedTokenStorage`)
-- [ ] Derive signing keys from secrets (`JWTIssuer.deriveKey()`)
-- [ ] Configure allowed redirect URI patterns
-- [ ] Use strong secrets (minimum 32 bytes)
-- [ ] Set appropriate TTL values
-- [ ] Implement rate limiting on token endpoints
-- [ ] Monitor cleanup operations
-- [ ] Implement proper key rotation procedures
+See the [implementation guide](oauth-proxy-guide.md#production-checklist).
 
 ### Threat Mitigation
 

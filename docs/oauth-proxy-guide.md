@@ -1026,6 +1026,9 @@ Share the token storage and the key material across instances, and implement
 `TokenStorage.take` so authorization codes stay single-use. See
 [Running Multiple Instances](#running-multiple-instances).
 
+9. **Rate-limit the token endpoint**, monitor storage cleanup, and have a
+   key-rotation procedure ready before you need one.
+
 ### Environment Variables
 
 Store all secrets in environment variables:

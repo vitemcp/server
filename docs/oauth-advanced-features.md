@@ -278,16 +278,10 @@ const upstreamTokens = await proxy.loadUpstreamTokens(response.access_token);
 
 ### Production Checklist
 
-- [ ] Use `DiskStore` for persistent storage
-- [ ] Wrap storage with `EncryptedTokenStorage`
-- [ ] Derive JWT signing keys using `JWTIssuer.deriveKey()`
-- [ ] Use strong secrets (minimum 32 bytes)
-- [ ] Enable token swap pattern for enhanced security
-- [ ] Set appropriate TTL values for your use case
-- [ ] Implement proper key rotation procedures
-- [ ] Monitor storage cleanup operations
-- [ ] Use HTTPS for all proxy endpoints
-- [ ] Implement rate limiting on token endpoints
+See the [implementation guide](oauth-proxy-guide.md#production-checklist).
+
+Additionally, for the features on this page: monitor storage cleanup, and plan
+a key-rotation procedure before you need one.
 
 ### Key Management
 

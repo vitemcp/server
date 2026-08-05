@@ -1,13 +1,8 @@
 /**
- * Shared test harness.
+ * Shared test harness: start a server, point a client at it, run.
  *
- * On the 2026-07-28 revision there is no handshake and no session, so the
- * harness is just: start a server, point a client at it, run. The old harness
- * had to wait on a `connect` event and `session.waitForReady()` before it could
- * issue a request — neither exists now.
- *
- * SSE is not used: the HTTP+SSE transport is deprecated and the streamable
- * endpoint is the only one the server exposes.
+ * There is no handshake or session to wait on, and SSE is not used — the
+ * streamable endpoint is the only one served.
  */
 import {
   Client,
@@ -78,13 +73,9 @@ export const runWithTestServer = async ({
 };
 
 /**
- * Strips the protocol envelope the 2026-07-28 revision attaches to every
- * result — `_meta` (server identity, subscription ids) and the cache hints on
- * cacheable results.
- *
- * Tests asserting the *shape of a payload* should not have to restate spec
- * boilerplate; the envelope itself is covered directly in
- * `ViteMCP.protocol.test.ts`.
+ * Strips the 2026-07-28 result envelope (`_meta`, `ttlMs`, `cacheScope`) so
+ * payload assertions need not restate spec boilerplate. The envelope itself is
+ * covered in `ViteMCP.protocol.test.ts`.
  */
 export const withoutEnvelope = <T>(result: T): T => {
   if (Array.isArray(result)) {

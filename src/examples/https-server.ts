@@ -3,45 +3,12 @@ import { z } from "zod";
 import { ViteMCP } from "../ViteMCP.js";
 
 /**
- * Example demonstrating HTTPS support in ViteMCP
+ * HTTPS support, using the self-signed certs in src/fixtures/certs/.
  *
- * This example uses pre-generated self-signed certificates from src/fixtures/certs/
+ * Run: `npx tsx src/examples/https-server.ts`
+ * Test: `curl -k https://localhost:8443/health`
  *
- * To run this example:
- * ```bash
- * npx tsx src/examples/https-server.ts
- * ```
- *
- * Test with curl (use -k to ignore self-signed cert warnings):
- * ```bash
- * # Health check
- * curl -k https://localhost:8443/health
- *
- * # Call the greet tool
- * curl -k -X POST https://localhost:8443/mcp \
- *   -H "Content-Type: application/json" \
- *   -H "Accept: application/json, text/event-stream" \
- *   -d '{
- *     "jsonrpc": "2.0",
- *     "id": 1,
- *     "method": "tools/call",
- *     "params": {
- *       "name": "greet",
- *       "arguments": {
- *         "name": "World"
- *       }
- *     }
- *   }'
- * ```
- *
- * For production, obtain certificates from a trusted CA like Let's Encrypt:
- * ```bash
- * # Using certbot for Let's Encrypt
- * certbot certonly --standalone -d yourdomain.com
- *
- * # Or for testing with self-signed (NOT for production):
- * openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=yourdomain.com"
- * ```
+ * For production use a real CA (e.g. `certbot certonly --standalone -d yourdomain.com`).
  */
 
 const server = new ViteMCP({

@@ -1,12 +1,4 @@
-/**
- * OAuth proxy HTTP routes, as a Hono router.
- *
- * The 2025-era implementation of this lived inside the Node `http` request
- * handler and hand-rolled body buffering, size limits and abort handling. The
- * proxy's own methods already speak web-standard `Request`/`Response`, so on
- * the Hono/fetch layer the same endpoints are a fraction of the code and the
- * runtime enforces the parts that used to be manual.
- */
+/** OAuth proxy HTTP routes, as a Hono router. */
 import { Hono } from "hono";
 
 import type { OAuthProxy } from "./OAuthProxy.js";
@@ -28,13 +20,8 @@ const errorResponse = (error: unknown) => {
 };
 
 /**
- * Reads a request body with a hard size cap, streaming rather than buffering.
- *
- * The cap is enforced *while* reading so an oversize body is rejected before it
- * has been fully received — buffering first and measuring afterwards would let
- * a client push arbitrary bytes into memory. A declared `Content-Length` over
- * the cap short-circuits before a single chunk is read, and an aborted or
- * errored stream returns `null` instead of hanging the handler.
+ * Reads a body under a hard cap, enforced *while* reading — measuring after
+ * buffering would let a client push arbitrary bytes into memory.
  *
  * Returns `null` when the body is too large, aborted, or unreadable.
  */
@@ -105,12 +92,8 @@ const tooLarge = {
 };
 
 /**
- * RFC 8414 / RFC 9728 metadata is snake_case on the wire; ViteMCP's config is
- * camelCase, so convert at the boundary.
- *
- * Top-level keys only: nested values are caller-defined payloads (and may be
- * arbitrary JSON the spec does not rename), so rewriting them would corrupt
- * them.
+ * RFC 8414 / 9728 metadata is snake_case on the wire; config is camelCase.
+ * Top-level keys only — nested values are caller-defined payloads.
  */
 const toSnakeCase = (value: unknown): unknown => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -143,15 +126,13 @@ export const createOAuthRouter = (options: OAuthRouterOptions): Hono => {
   const basePath = options.basePath ?? "";
   const endpoint = options.endpoint ?? "";
 
-  // RFC 8414 §3 / RFC 9728 §3: metadata lives at the well-known prefix
-  // followed by the resource's own path components. Unrelated suffixes must
-  // 404 rather than serve metadata, so these are exact routes, not wildcards.
+  // RFC 8414 §3 / 9728 §3: exact routes, not wildcards — an unrelated suffix
+  // must 404 rather than serve metadata.
   const serve = (path: string, body: unknown) =>
     app.get(path, (c) => c.json(body as never));
 
   if (options.authorizationServer) {
-    // Issuer-scoped: when the server is mounted under a base path, the
-    // metadata lives there and the bare root is not a valid location.
+    // Issuer-scoped: under a base path, the bare root is not valid.
     serve(
       `/.well-known/oauth-authorization-server${basePath}`,
       toSnakeCase(options.authorizationServer),
@@ -162,8 +143,7 @@ export const createOAuthRouter = (options: OAuthRouterOptions): Hono => {
     const body = toSnakeCase(options.protectedResource);
     const scoped = `/.well-known/oauth-protected-resource${basePath}${endpoint}`;
 
-    // The sub-path variant takes priority, with the root kept as the
-    // documented fallback for clients that do not build the scoped URL.
+    // Sub-path takes priority; root stays as the documented fallback.
     serve(scoped, body);
 
     if (scoped !== "/.well-known/oauth-protected-resource") {
@@ -214,8 +194,7 @@ export const createOAuthRouter = (options: OAuthRouterOptions): Hono => {
     try {
       const params = Object.fromEntries(new URLSearchParams(text).entries());
 
-      // RFC 6749 §2.3.1: credentials may arrive via Basic auth instead of the
-      // body. Body values win if both are present.
+      // RFC 6749 §2.3.1: credentials may arrive via Basic auth. Body wins.
       const authHeader = raw.headers.get("authorization");
 
       if (authHeader?.toLowerCase().startsWith("basic ")) {

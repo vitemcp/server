@@ -21,7 +21,6 @@ export interface JWTClaims {
   [key: string]: unknown;
   /** Audience */
   aud: string;
-  /** Client ID */
   client_id: string;
   /** Expiration time (seconds since epoch) */
   exp: number;

@@ -1,14 +1,8 @@
 /**
  * Edge-compatible ViteMCP server for Cloudflare Workers, Deno, and Bun.
  *
- * Web-standard APIs only — no Node.js dependencies. On the 2026-07-28 revision
- * the protocol is stateless, so the SDK's `createMcpHandler` already exposes
- * exactly the `(Request) => Response` shape edge runtimes want. This module is
- * a thin, ergonomic wrapper over it.
- *
- * The hand-rolled `WebStreamableHTTPServerTransport` this module used to ship
- * existed to implement SSE resumability (`Last-Event-ID`), which the spec
- * removed. It is gone.
+ * Web-standard APIs only. `createMcpHandler` already exposes the
+ * `(Request) => Response` shape edge runtimes want; this is a thin wrapper.
  */
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { StandardSchemaV1 } from "@standard-schema/spec";

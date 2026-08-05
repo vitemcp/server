@@ -153,6 +153,39 @@ describe("protocol envelope", () => {
     });
   });
 
+  it("constrains a prompt argument declared with an enum", async () => {
+    await runWithTestServer({
+      run: async ({ client }) => {
+        const { prompts } = await client.listPrompts();
+        const arg = prompts
+          .find((p) => p.name === "pick")
+          ?.arguments?.find((a) => a.name === "country");
+
+        expect(arg?.description).toBe("Name of the country");
+        expect(arg?.required).toBe(true);
+      },
+      server: () => {
+        const server = withTool();
+
+        server.addPrompt({
+          arguments: [
+            {
+              description: "Name of the country",
+              enum: ["Germany", "France", "Italy"],
+              name: "country",
+              required: true,
+            },
+          ],
+          description: "Pick a country",
+          load: async (args) => `You picked ${args.country}`,
+          name: "pick",
+        });
+
+        return server;
+      },
+    });
+  });
+
   it("returns tools in a deterministic order", async () => {
     await runWithTestServer({
       run: async ({ client }) => {

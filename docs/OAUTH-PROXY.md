@@ -1,366 +1,83 @@
 # OAuth Proxy for ViteMCP
 
-The OAuth Proxy enables ViteMCP servers to authenticate with traditional OAuth providers that don't support Dynamic Client Registration (DCR) by presenting a DCR-compliant interface to MCP clients while using pre-registered credentials with upstream providers.
+Lets MCP clients authenticate against providers that do not support Dynamic
+Client Registration, by presenting a DCR-compliant face to the client while
+using pre-registered credentials upstream.
+
+This page is the index and the operational reference. The task-oriented
+material lives in the documents below rather than being repeated here.
 
 ## Documentation
 
-This is the main entry point for OAuth Proxy documentation. For detailed information, see:
+| Document                                            | Covers                                                                                                  |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **[Implementation Guide](oauth-proxy-guide.md)**    | Quick start, provider setup (Google, GitHub, Azure), configuration, troubleshooting                     |
+| **[Features](oauth-proxy-features.md)**             | Capabilities, storage backends, limitations                                                             |
+| **[Advanced Features](oauth-advanced-features.md)** | Persistent storage, JWT issuance, token swap, encryption                                                |
+| **[Examples](../src/examples/)**                    | `oauth-integrated-server.ts`, `oauth-proxy-server.ts`, `oauth-proxy-github.ts`, `oauth-proxy-custom.ts` |
 
-### 📚 Core Documentation
-
-1. **[OAuth Proxy Features](oauth-proxy-features.md)**
-   - Complete feature overview
-   - Security features and capabilities
-   - Token management options
-   - Storage backends
-   - Advanced features
-
-2. **[Implementation Guide](oauth-proxy-guide.md)**
-   - Quick start examples
-   - Provider setup (Google, GitHub, Azure)
-   - Configuration options
-   - Advanced features (token swap, encryption)
-   - Security best practices
-   - Troubleshooting
-
-### 🔗 Additional Resources
-
-- **[Advanced Features](oauth-advanced-features.md)** - Detailed coverage of:
-  - Persistent token storage (DiskStore)
-  - JWT token issuance
-  - Token swap pattern
-  - Encrypted storage
-
-- **[Example Implementations](../src/examples/)**
-  - [`oauth-integrated-server.ts`](../src/examples/oauth-integrated-server.ts) - Complete ViteMCP integration
-  - [`oauth-proxy-server.ts`](../src/examples/oauth-proxy-server.ts) - Standalone proxy
-  - [`oauth-proxy-github.ts`](../src/examples/oauth-proxy-github.ts) - GitHub provider
-  - [`oauth-proxy-custom.ts`](../src/examples/oauth-proxy-custom.ts) - Custom provider
-
-## Quick Start
-
-### Seamless Integration (Just 2 Steps!)
-
-```typescript
-import {
-  ViteMCP,
-  getAuthSession,
-  GoogleProvider,
-  requireAuth,
-} from "@vitemcp/server";
-
-// 1. Create ViteMCP with OAuth provider
-const server = new ViteMCP({
-  auth: new GoogleProvider({
-    baseUrl: "https://your-server.com",
-    clientId: process.env.GOOGLE_CLIENT_ID!,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-  }),
-  name: "My Server",
-  version: "1.0.0",
-});
-
-// 2. Add protected tools
-server.addTool({
-  canAccess: requireAuth,
-  description: "Get user profile",
-  execute: async (_args, { auth }) => {
-    const { accessToken } = getAuthSession(auth);
-    const response = await fetch(
-      "https://www.googleapis.com/oauth2/v2/userinfo",
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
-    );
-    return JSON.stringify(await response.json());
-  },
-  name: "get-profile",
-});
-
-await server.start({
-  transportType: "httpStream",
-  httpStream: { port: 3000 },
-});
-```
-
-**That's it!** All OAuth endpoints are automatically registered:
-
-- `/oauth/register` - DCR endpoint
-- `/oauth/authorize` - Authorization endpoint
-- `/oauth/token` - Token exchange
-- `/oauth/callback` - OAuth callback handler
-- `/oauth/consent` - User consent screen
-
-No manual route setup required. 🎉
-
-## Available Providers
-
-### Pre-configured Providers
-
-#### Google
-
-```typescript
-import { ViteMCP, GoogleProvider } from "@vitemcp/server";
-
-const server = new ViteMCP({
-  auth: new GoogleProvider({
-    baseUrl: "https://your-server.com",
-    clientId: "xxx.apps.googleusercontent.com",
-    clientSecret: "your-secret",
-  }),
-  name: "My Server",
-  version: "1.0.0",
-});
-```
-
-**Setup:** [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-
-#### GitHub
-
-```typescript
-import { ViteMCP, GitHubProvider } from "@vitemcp/server";
-
-const server = new ViteMCP({
-  auth: new GitHubProvider({
-    baseUrl: "https://your-server.com",
-    clientId: "your-github-app-id",
-    clientSecret: "your-github-app-secret",
-  }),
-  name: "My Server",
-  version: "1.0.0",
-});
-```
-
-**Setup:** [GitHub Developer Settings](https://github.com/settings/developers)
-
-#### Azure/Entra ID
-
-```typescript
-import { ViteMCP, AzureProvider } from "@vitemcp/server";
-
-const server = new ViteMCP({
-  auth: new AzureProvider({
-    baseUrl: "https://your-server.com",
-    clientId: "your-azure-app-id",
-    clientSecret: "your-azure-app-secret",
-    tenantId: "common",
-  }),
-  name: "My Server",
-  version: "1.0.0",
-});
-```
-
-**Setup:** [Azure Portal](https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
-
-### Custom Provider
-
-For any OAuth 2.0 provider (SAP, Auth0, Okta, etc.):
-
-```typescript
-import { ViteMCP, OAuthProvider } from "@vitemcp/server";
-
-const server = new ViteMCP({
-  auth: new OAuthProvider({
-    authorizationEndpoint: "https://provider.com/oauth/authorize",
-    baseUrl: "https://your-server.com",
-    clientId: process.env.OAUTH_CLIENT_ID!,
-    clientSecret: process.env.OAUTH_CLIENT_SECRET!,
-    scopes: ["openid", "profile"],
-    tokenEndpoint: "https://provider.com/oauth/token",
-  }),
-  name: "My Server",
-  version: "1.0.0",
-});
-```
-
-## How It Works
+## How it works
 
 ```
-1. Client → Proxy: DCR registration request
-   Proxy responds with fixed credentials
-
-2. Client → Proxy: Authorization request with PKCE
-   Proxy generates own PKCE for upstream
-
-3. Proxy → User: Consent screen (prevents confused deputy)
-   User approves authorization
-
-4. Proxy → Upstream: Authorization with proxy PKCE
-   User authenticates with provider
-
-5. Upstream → Proxy: Authorization code
-   Proxy exchanges for tokens
-
-6. Proxy → Client: Client authorization code
-   Client exchanges for tokens
-
-7. Client → Proxy: Token exchange with PKCE verifier
-   Proxy validates and returns tokens
+1. Client → Proxy      DCR registration; proxy returns its own credentials
+2. Client → Proxy      Authorization request with the client's PKCE challenge
+3. Proxy  → User       Consent screen (prevents confused-deputy)
+4. Proxy  → Upstream   Authorization with the proxy's own PKCE challenge
+5. Upstream → Proxy    Authorization code, exchanged for upstream tokens
+6. Proxy  → Client     Proxy-issued authorization code
+7. Client → Proxy      Token exchange with the client's PKCE verifier
 ```
 
-## Key Features
+Two PKCE pairs are in play: one between client and proxy, one between proxy and
+upstream. Neither party ever sees the other's verifier.
 
-- ✅ **Dynamic Client Registration (DCR)** - RFC 7591 compliant
-- ✅ **Two-Tier PKCE** - Client-to-proxy and proxy-to-upstream
-- ✅ **User Consent Flow** - Prevents confused deputy attacks
-- ✅ **Token Swap Pattern** - Enhanced security mode
-- ✅ **Custom Claims Passthrough** - RBAC & authorization support (enabled by default)
-- ✅ **Flexible Storage** - Memory, disk, encrypted, custom
-- ✅ **OAuth 2.1 Compliance** - Modern security standards
-- ✅ **Automatic Cleanup** - TTL-based expiration
-- ✅ **Pre-configured Providers** - Google, GitHub, Azure
-- ✅ **Refresh Token Support** - Full token lifecycle
-- ✅ **ViteMCP Integration** - Seamless automatic setup
+## Client registration
 
-## Protecting Tools with OAuth
+Dynamic Client Registration still works, but is **deprecated** as of protocol
+revision 2026-07-28. Prefer
+[Client ID Metadata Documents](../README.md#client-id-metadata-documents): the
+client identifies itself with an HTTPS URL serving its own metadata, so no
+registration step is needed.
 
-Use the built-in authorization helpers:
+## Production checklist
 
-```typescript
-import {
-  requireAuth,
-  requireScopes,
-  requireRole,
-  requireAll,
-  requireAny,
-  getAuthSession,
-} from "@vitemcp/server";
-
-// Require any authenticated user
-server.addTool({
-  canAccess: requireAuth,
-  description: "Get authenticated user data",
-  execute: async (_args, { auth }) => {
-    const { accessToken } = getAuthSession(auth);
-    const response = await fetch("https://api.provider.com/user", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    return JSON.stringify(await response.json(), null, 2);
-  },
-  name: "get-user-data",
-});
-
-// Require specific scopes
-server.addTool({
-  canAccess: requireScopes("read:data", "write:data"),
-  description: "Access data with required scopes",
-  execute: async () => "Scoped access granted!",
-  name: "scoped-data",
-});
-
-// Require specific role
-server.addTool({
-  canAccess: requireRole("admin"),
-  description: "Admin-only tool",
-  execute: async () => "Admin access granted!",
-  name: "admin-tool",
-});
-
-// Combine with AND/OR logic
-server.addTool({
-  canAccess: requireAll(
-    requireAuth,
-    requireAny(requireRole("admin"), requireRole("moderator")),
-  ),
-  description: "Staff-only tool",
-  execute: async () => "Staff access granted!",
-  name: "staff-tool",
-});
-
-// Note: getAuthSession throws if session is not authenticated,
-// so it's safe to use when canAccess: requireAuth is set
-```
-
-## Security Features
-
-### Two-Tier PKCE
-
-- Client-to-proxy PKCE validation
-- Proxy-to-upstream PKCE protection
-- Prevents authorization code interception
-
-### User Consent Flow
-
-- Prevents confused deputy attacks
-- Shows clear scope permissions
-- Signed consent cookies (5-minute TTL)
-- Can be disabled for trusted environments
-
-### Token Security
-
-- Optional encryption at rest (AES-256-GCM)
-- Automatic expiration and cleanup
-- Secure random ID generation
-- One-time authorization codes
-
-### OAuth 2.1 Compliance
-
-- PKCE required by default
-- State parameter validation
-- Redirect URI validation
-- Standard error responses
-
-## Production Checklist
-
-- [ ] Use HTTPS for all endpoints
-- [ ] Enable consent screen (`consentRequired: true`)
-- [ ] Use persistent storage (DiskStore)
-- [ ] Enable encrypted storage
-- [ ] Derive signing keys from secrets
-- [ ] Configure allowed redirect URI patterns
-- [ ] Use strong secrets (minimum 32 bytes)
-- [ ] Set appropriate TTL values
-- [ ] Configure custom claims passthrough (enabled by default)
-- [ ] Implement rate limiting
-- [ ] Monitor cleanup operations
-
-## Testing
-
-```bash
-# All tests
-npm test
-
-# OAuth tests only
-npm test -- auth/
-
-# Build
-npm run build
-```
+- [ ] HTTPS on all endpoints
+- [ ] Consent screen enabled (`consentRequired: true`)
+- [ ] Persistent storage (`DiskStore` or your own `TokenStorage`)
+- [ ] `TokenStorage.take()` implemented — single-use enforcement depends on it
+- [ ] Encryption key supplied rather than auto-generated (it changes per restart)
+- [ ] Signing keys derived from secrets, minimum 32 bytes
+- [ ] `allowedRedirectUriPatterns` configured
+- [ ] `httpStream.allowedOrigins` set if bound to a routable interface
+- [ ] `clientIdMetadata.allowedDomains` set, or CIMD disabled, if you do not
+      want the server fetching arbitrary client URLs
+- [ ] `upstreamIssuer` set if the provider's issuer differs from its
+      authorization endpoint's origin (tenant-scoped providers)
+- [ ] Rate limiting in front of `/oauth/*`
 
 ## Troubleshooting
 
-### "Invalid redirect URI" error
+**"Invalid redirect URI"** — the URI registered with your provider must be
+exactly `{baseUrl}/oauth/callback`.
 
-Ensure the redirect URI registered with your OAuth provider matches:
+**"Invalid state"** — the transaction expired (10 minutes by default), the
+server restarted without persistent storage, or clocks are skewed.
 
-```
-{baseUrl}/oauth/callback
-```
+**"PKCE validation failed"** — the client's `code_verifier` does not match the
+`code_challenge` it sent.
 
-### "Invalid state" error
+**"Authorization response issuer does not match"** — the provider returned an
+`iss` that is not the one this transaction started against (RFC 9207). If the
+provider's issuer legitimately differs from its endpoint origin, set
+`upstreamIssuer`.
 
-- Transaction expired (default 10 minutes)
-- Server restarted (use persistent storage)
-- Clock skew between client and server
-
-### "PKCE validation failed"
-
-Ensure client is sending the correct `code_verifier` that matches the `code_challenge`.
-
-See [Implementation Guide](oauth-proxy-guide.md#troubleshooting) for more solutions.
+More in the [Implementation Guide](oauth-proxy-guide.md#troubleshooting).
 
 ## References
 
-- [RFC 6749: OAuth 2.0](https://tools.ietf.org/html/rfc6749)
-- [RFC 7591: OAuth 2.0 Dynamic Client Registration](https://tools.ietf.org/html/rfc7591)
-- [RFC 7636: PKCE](https://tools.ietf.org/html/rfc7636)
-- [RFC 8414: OAuth 2.0 Authorization Server Metadata](https://tools.ietf.org/html/rfc8414)
-- [OAuth 2.1](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-07)
-
-## Support
-
-For issues, questions, or contributions:
-
-- Report bugs in the [issue tracker](https://github.com/your-org/vitemcp/issues)
-- Check [examples](../src/examples/) for working code
-- Review [documentation](oauth-proxy-guide.md) for detailed guidance
+- [RFC 6749](https://tools.ietf.org/html/rfc6749) — OAuth 2.0
+- [RFC 7591](https://tools.ietf.org/html/rfc7591) — Dynamic Client Registration
+- [RFC 7636](https://tools.ietf.org/html/rfc7636) — PKCE
+- [RFC 8414](https://tools.ietf.org/html/rfc8414) — Authorization Server Metadata
+- [RFC 9207](https://datatracker.ietf.org/doc/html/rfc9207) — Issuer Identification
+- [OAuth 2.1](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-13)

@@ -4,18 +4,11 @@ import { createServer, type Server } from "node:http";
 /**
  * A real OAuth 2.1 authorization server, for tests.
  *
- * The rest of the auth suite stubs `fetch`, which means the proxy's upstream
- * leg is never actually exercised: no real HTTP, no real redirects, no real
- * form encoding, and — most importantly — nothing on the other end that
- * *verifies* what the proxy sent. A stub that returns a token no matter what
- * cannot tell you the proxy computed its PKCE verifier correctly.
+ * Elsewhere the upstream leg is a `fetch` stub, which returns a token whatever
+ * the proxy sent — it cannot catch a wrong PKCE verifier. This one verifies:
+ * PKCE, single-use codes, refresh rotation, and `iss`.
  *
- * This server does verify. It checks PKCE, enforces single-use authorization
- * codes, rotates refresh tokens, and returns `iss` on the authorization
- * response, so a proxy that gets any of that wrong fails here.
- *
- * It is not Google or GitHub — provider-specific quirks are out of scope — but
- * it is a conforming counterparty, which is what the mocks were missing.
+ * A conforming counterparty, not a specific provider.
  */
 
 export interface FakeAuthorizationServer {
