@@ -13,8 +13,12 @@
     "vitemcp": "dist/bin/vitemcp.js"
   },
   "keywords": [
-    "MCP",
-    "SSE"
+    "mcp",
+    "model-context-protocol",
+    "llm",
+    "ai",
+    "server",
+    "typescript"
   ],
   "type": "module",
   "author": "Frank Fiegel <frank@glama.ai>",
@@ -75,7 +79,10 @@
   "repository": {
     "url": "https://github.com/vitemcp/vitemcp"
   },
-  "homepage": "https://glama.ai/mcp",
+  "homepage": "https://github.com/vitemcp/vitemcp",
+  "publishConfig": {
+    "access": "public"
+  },
   "release": {
     "branches": [
       "main"
@@ -127,8 +134,7 @@
       "src/ViteMCP.ts",
       "src/bin/vitemcp.ts",
       "src/auth/index.ts",
-      "src/edge/index.ts",
-      "src/examples/custom-routes.ts"
+      "src/edge/index.ts"
     ],
     "format": [
       "esm",
@@ -138,5 +144,9 @@
     "splitting": true,
     "sourcemap": true,
     "clean": true
-  }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.19.0"
 }

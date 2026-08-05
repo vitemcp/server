@@ -39,15 +39,15 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers.
 
 ViteMCP is built on top of the official SDK.
 
-The official SDK provides foundational blocks for building MCPs, but leaves many implementation details to you:
+The official SDK provides foundational blocks for building MCPs, but leaves many implementation details to you — all of which [`src/ViteMCP.ts`](src/ViteMCP.ts) handles on your behalf:
 
-- [Initiating and configuring](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L664-L744) all the server components
-- [Handling of connections](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L760-L850)
-- [Handling of tools](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1303-L1498)
-- [Handling of responses](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L989-L1060)
-- [Handling of resources](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1151-L1242)
-- Adding [prompts](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L760-L850), [resources](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L960-L962), [resource templates](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L964-L987)
-- Embedding [resources](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1569-L1643), [image](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L51-L111) and [audio](https://github.com/vitemcp/vitemcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L113-L173) content blocks
+- Initiating and configuring all the server components
+- Handling of connections
+- Handling of tools
+- Handling of responses
+- Handling of resources
+- Adding prompts, resources and resource templates
+- Embedding resource, image and audio content blocks
 
 ViteMCP eliminates this complexity by providing an opinionated framework that:
 
@@ -115,7 +115,7 @@ npx @vitemcp/server dev src/examples/addition.ts
 npx @vitemcp/server inspect src/examples/addition.ts
 ```
 
-If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
+If you are looking for something to start from, [`src/examples/`](src/examples/) has runnable servers covering tools, authentication, custom routes and edge deployment.
 
 ### Remote Server Options
 
@@ -1488,7 +1488,7 @@ server.addPrompt({
 
 ### Authentication
 
-ViteMCP supports OAuth 2.1 authentication with pre-configured providers, allowing you to secure your server with minimal setup.
+ViteMCP supports OAuth 2.1 authentication with pre-configured providers, allowing you to secure your server with minimal setup. This section covers the common cases; the [OAuth guide](docs/oauth.md) is the full reference.
 
 #### OAuth with Pre-configured Providers
 
@@ -1750,8 +1750,7 @@ const server = new ViteMCP({
 
 **Documentation:**
 
-- [OAuth Proxy Features](docs/oauth-proxy-features.md) - Complete feature list and capabilities
-- [OAuth Proxy Implementation Guide](docs/oauth-proxy-guide.md) - Setup and configuration
+The [OAuth guide](docs/oauth.md) is the complete reference — provider setup, configuration, token swap, storage backends, running multiple instances, JWKS verification, the production checklist and troubleshooting.
 
 #### OAuth Discovery Endpoints
 
