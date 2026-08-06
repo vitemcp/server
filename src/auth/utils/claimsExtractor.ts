@@ -17,6 +17,8 @@ export class ClaimsExtractor {
     "iss",
     "jti",
     "nbf",
+    // The proxy's own grant decision — an upstream `scope` must never replace it.
+    "scope",
   ]);
 
   constructor(config: boolean | CustomClaimsPassthroughConfig) {

@@ -115,6 +115,11 @@ export class JWTIssuer {
     const jti = this.generateJti();
 
     const claims: JWTClaims = {
+      // Upstream claims come first so the proxy-owned entries below always win.
+      // Spreading them last would let an upstream token overwrite `scope` with
+      // its own space-delimited string, misrepresenting the grant this proxy
+      // actually made. See the same ordering in jwks.ts.
+      ...(additionalClaims || {}),
       aud: this.audience,
       client_id: clientId,
       exp: now + (expiresIn ?? this.accessTokenTtl),
@@ -122,8 +127,6 @@ export class JWTIssuer {
       iss: this.issuer,
       jti,
       scope,
-      // Merge additional claims (custom claims from upstream)
-      ...(additionalClaims || {}),
     };
 
     return this.signToken(claims);
@@ -142,6 +145,8 @@ export class JWTIssuer {
     const jti = this.generateJti();
 
     const claims: JWTClaims = {
+      // Upstream claims first — see issueAccessToken for why.
+      ...(additionalClaims || {}),
       aud: this.audience,
       client_id: clientId,
       exp: now + (expiresIn ?? this.refreshTokenTtl),
@@ -149,8 +154,6 @@ export class JWTIssuer {
       iss: this.issuer,
       jti,
       scope,
-      // Merge additional claims (custom claims from upstream)
-      ...(additionalClaims || {}),
     };
 
     return this.signToken(claims);
