@@ -143,8 +143,8 @@ _That's it!_ You have a working MCP server.
 You can test the server in terminal with:
 
 ```bash
-git clone https://github.com/vitemcp/vitemcp.git
-cd vitemcp
+git clone https://github.com/vitemcp/server.git
+cd server
 
 pnpm install
 pnpm build
@@ -1986,11 +1986,11 @@ Follow the guide https://modelcontextprotocol.io/quickstart/user and add the fol
 
 ### How to run ViteMCP behind a proxy?
 
-Refer to this [issue](https://github.com/vitemcp/vitemcp/issues/25#issuecomment-3004568732) for an example of using ViteMCP with `express` and `http-proxy-middleware`.
+Refer to this [issue](https://github.com/vitemcp/server/issues/25#issuecomment-3004568732) for an example of using ViteMCP with `express` and `http-proxy-middleware`.
 
 ## Showcase
 
-Built something with ViteMCP? [Open a PR](https://github.com/vitemcp/vitemcp) to
+Built something with ViteMCP? [Open a PR](https://github.com/vitemcp/server) to
 list it here.
 
 ## Acknowledgements

@@ -92,9 +92,10 @@
     }
   },
   "repository": {
-    "url": "https://github.com/vitemcp/vitemcp"
+    "type": "git",
+    "url": "git+https://github.com/vitemcp/server.git"
   },
-  "homepage": "https://github.com/vitemcp/vitemcp",
+  "homepage": "https://github.com/vitemcp/server",
   "publishConfig": {
     "access": "public"
   },
@@ -163,5 +164,8 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@10.19.0"
+  "packageManager": "pnpm@10.19.0",
+  "bugs": {
+    "url": "https://github.com/vitemcp/server/issues"
+  }
 }

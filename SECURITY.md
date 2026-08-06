@@ -5,7 +5,7 @@
 **Please do not open a public issue for security reports.**
 
 Report privately through
-[GitHub Security Advisories](https://github.com/vitemcp/vitemcp/security/advisories/new),
+[GitHub Security Advisories](https://github.com/vitemcp/server/security/advisories/new),
 which creates a private thread with the maintainers and can be converted into a
 published advisory with credit to you.
 
