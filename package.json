@@ -28,19 +28,34 @@
   "types": "dist/ViteMCP.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/ViteMCP.js",
-      "types": "./dist/ViteMCP.d.ts",
-      "require": "./dist/ViteMCP.cjs"
+      "import": {
+        "types": "./dist/ViteMCP.d.ts",
+        "default": "./dist/ViteMCP.js"
+      },
+      "require": {
+        "types": "./dist/ViteMCP.d.cts",
+        "default": "./dist/ViteMCP.cjs"
+      }
     },
     "./auth": {
-      "import": "./dist/auth/index.js",
-      "types": "./dist/auth/index.d.ts",
-      "require": "./dist/auth/index.cjs"
+      "import": {
+        "types": "./dist/auth/index.d.ts",
+        "default": "./dist/auth/index.js"
+      },
+      "require": {
+        "types": "./dist/auth/index.d.cts",
+        "default": "./dist/auth/index.cjs"
+      }
     },
     "./edge": {
-      "import": "./dist/edge/index.js",
-      "types": "./dist/edge/index.d.ts",
-      "require": "./dist/edge/index.cjs"
+      "import": {
+        "types": "./dist/edge/index.d.ts",
+        "default": "./dist/edge/index.js"
+      },
+      "require": {
+        "types": "./dist/edge/index.d.cts",
+        "default": "./dist/edge/index.cjs"
+      }
     }
   },
   "dependencies": {
