@@ -3,7 +3,11 @@
  * OAuth 2.1 Proxy for Dynamic Client Registration
  */
 
+// OAuth Proxy
+export type { ClientIdMetadataOptions } from "./clientIdMetadata.js";
 // Helper functions for canAccess and session extraction
+export type { SessionAuth } from "./helpers.js";
+
 export {
   getAuthSession,
   requireAll,
@@ -12,8 +16,6 @@ export {
   requireRole,
   requireScopes,
 } from "./helpers.js";
-
-// OAuth Proxy
 export { OAuthProxy, OAuthProxyError } from "./OAuthProxy.js";
 
 // Auth Providers
@@ -33,6 +35,7 @@ export type {
   AuthorizationParams,
   ClientCode,
   ConsentData,
+  CustomClaimsPassthroughConfig,
   DCRClientMetadata,
   DCRRequest,
   DCRResponse,

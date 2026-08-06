@@ -48,7 +48,7 @@ export interface Logger {
 
 export const MEDIA_FETCH_TIMEOUT_MS = 30000;
 
-type MediaSource = { timeoutMs?: number } & (
+export type MediaSource = { timeoutMs?: number } & (
   | { buffer: Buffer }
   | { path: string }
   | { url: string }
@@ -161,6 +161,8 @@ export type AudioContent = {
   type: "audio";
 };
 
+export type Authenticate<T> = (request: Request) => Promise<T>;
+
 /**
  * Freshness hint attached to cacheable results (`tools/list`, `prompts/list`,
  * `resources/list`, `resources/templates/list`, `resources/read`). Required by
@@ -264,6 +266,11 @@ export type ImageContent = {
   type: "image";
 };
 
+export type LoadContext<T extends ViteMCPAuth> = Omit<
+  Context<T>,
+  "reportProgress"
+>;
+
 /**
  * A single loaded resource body. `uri` is optional: when omitted the server
  * fills it in from the resource (or the expanded template) that produced it.
@@ -273,6 +280,12 @@ export type LoadedResource = {
   mimeType?: string;
   text?: string;
   uri?: string;
+};
+
+export type Progress = {
+  message?: string;
+  progress: number;
+  total?: number;
 };
 
 export type Prompt<T extends ViteMCPAuth> = {
@@ -307,6 +320,24 @@ export type Resource<T extends ViteMCPAuth> = {
   uri: string;
 };
 
+export type ResourceContent = {
+  resource: {
+    blob?: string;
+    mimeType?: string;
+    text?: string;
+    uri: string;
+  };
+  type: "resource";
+};
+
+export type ResourceLink = {
+  description?: string;
+  mimeType?: string;
+  name: string;
+  type: "resource_link";
+  uri: string;
+};
+
 export type ResourceTemplate<T extends ViteMCPAuth> = {
   arguments?: ResourceTemplateArgument[];
   cache?: CacheHint;
@@ -329,6 +360,11 @@ export type ResourceTemplateArgument = {
   name: string;
   required?: boolean;
 };
+
+export type SerializableValue =
+  | { [key: string]: SerializableValue }
+  | Literal
+  | SerializableValue[];
 
 export type ServerOptions<T extends ViteMCPAuth> = {
   auth?: AuthProvider<T extends OAuthSession ? T : OAuthSession>;
@@ -386,44 +422,11 @@ export type Tool<
   timeoutMs?: number;
 };
 
+export type ToolParameters = StandardSchemaV1;
+
 export type ViteMCPAuth = Record<string, unknown> | undefined;
 
-type Authenticate<T> = (request: Request) => Promise<T>;
-
 type Literal = boolean | null | number | string | undefined;
-
-type LoadContext<T extends ViteMCPAuth> = Omit<Context<T>, "reportProgress">;
-
-type Progress = {
-  message?: string;
-  progress: number;
-  total?: number;
-};
-
-type ResourceContent = {
-  resource: {
-    blob?: string;
-    mimeType?: string;
-    text?: string;
-    uri: string;
-  };
-  type: "resource";
-};
-
-type ResourceLink = {
-  description?: string;
-  mimeType?: string;
-  name: string;
-  type: "resource_link";
-  uri: string;
-};
-
-type SerializableValue =
-  | { [key: string]: SerializableValue }
-  | Literal
-  | SerializableValue[];
-
-type ToolParameters = StandardSchemaV1;
 
 export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   /**
@@ -1440,6 +1443,9 @@ export type {
   OAuthSession,
 } from "./auth/index.js";
 
+// `ServerOptions.oauth.proxy` is typed as this, so it must be nameable here.
+export { OAuthProxy, OAuthProxyError } from "./auth/OAuthProxy.js";
+
 export { DiscoveryDocumentCache } from "./DiscoveryDocumentCache.js";
 
 export {
@@ -1447,3 +1453,12 @@ export {
   type JsonSchemaObject,
   type JsonSchemaStandardSchema,
 } from "./jsonSchemaAdapter.js";
+
+// Re-exported because they appear in this package's public signatures and
+// `@modelcontextprotocol/server` is only a transitive dependency for consumers.
+export type {
+  CacheScope,
+  InputRequest,
+  InputRequiredResult,
+  ToolAnnotations,
+} from "@modelcontextprotocol/server";

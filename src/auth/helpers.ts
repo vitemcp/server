@@ -5,7 +5,7 @@
 
 import type { OAuthSession } from "./providers/AuthProvider.js";
 
-type SessionAuth = Record<string, unknown> | undefined;
+export type SessionAuth = Record<string, unknown> | undefined;
 
 /**
  * Extract and type-cast OAuth session from canAccess context.
