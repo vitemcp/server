@@ -277,7 +277,7 @@ export type LoadedResource = {
 
 export type Prompt<T extends ViteMCPAuth> = {
   arguments?: PromptArgument[];
-  canAccess?: (auth: T) => boolean;
+  canAccess?: (auth: T | undefined) => boolean;
   /** Completes any argument. Per-argument `complete` wins over this. */
   complete?: (name: string, value: string) => Promise<Completion>;
   description?: string;
@@ -299,7 +299,7 @@ export type PromptArgument = {
 
 export type Resource<T extends ViteMCPAuth> = {
   cache?: CacheHint;
-  canAccess?: (auth: T) => boolean;
+  canAccess?: (auth: T | undefined) => boolean;
   description?: string;
   load: (context: LoadContext<T>) => Promise<LoadedResource | LoadedResource[]>;
   mimeType?: string;
@@ -310,7 +310,7 @@ export type Resource<T extends ViteMCPAuth> = {
 export type ResourceTemplate<T extends ViteMCPAuth> = {
   arguments?: ResourceTemplateArgument[];
   cache?: CacheHint;
-  canAccess?: (auth: T) => boolean;
+  canAccess?: (auth: T | undefined) => boolean;
   /** Completes any template variable. Per-argument `complete` wins over this. */
   complete?: (name: string, value: string) => Promise<Completion>;
   description?: string;
@@ -363,7 +363,7 @@ export type Tool<
 > = {
   _meta?: Record<string, unknown>;
   annotations?: SDKToolAnnotations;
-  canAccess?: (auth: T) => boolean;
+  canAccess?: (auth: T | undefined) => boolean;
   description?: string;
   execute: (
     args: StandardSchemaV1.InferOutput<Params>,
@@ -696,7 +696,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     );
 
     for (const tool of this.#tools) {
-      if (tool.canAccess && !tool.canAccess(auth as T)) {
+      if (tool.canAccess && !tool.canAccess(auth)) {
         continue;
       }
 
@@ -742,7 +742,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     }
 
     for (const resource of this.#resources) {
-      if (resource.canAccess && !resource.canAccess(auth as T)) {
+      if (resource.canAccess && !resource.canAccess(auth)) {
         continue;
       }
 
@@ -770,7 +770,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     }
 
     for (const template of this.#resourceTemplates) {
-      if (template.canAccess && !template.canAccess(auth as T)) {
+      if (template.canAccess && !template.canAccess(auth)) {
         continue;
       }
 
@@ -815,7 +815,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     }
 
     for (const prompt of this.#prompts) {
-      if (prompt.canAccess && !prompt.canAccess(auth as T)) {
+      if (prompt.canAccess && !prompt.canAccess(auth)) {
         continue;
       }
 
