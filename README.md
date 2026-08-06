@@ -14,14 +14,43 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers.
 
 ## Contents
 
-- [Features](#features) · [When to use ViteMCP](#when-to-use-vitemcp-over-the-official-sdk) · [Installation](#installation) · [Quickstart](#quickstart)
-- **[Core Concepts](#core-concepts)** — [Tools](#tools) · [Resources](#resources) · [Resource templates](#resource-templates) · [Embedded Resources](#embedded-resources) · [Prompts](#prompts) · [Authentication](#authentication) · [Multi round-trip requests](#multi-round-trip-requests) · [Cacheable results](#cacheable-results) · [Client ID Metadata Documents](#client-id-metadata-documents) · [Migrating from the session-based API](#migrating-from-the-session-based-api)
-- **[Server Features](#server-features)** — [Logging](#logging) · [Custom Logger](#custom-logger) · [Errors](#errors) · [Progress](#progress) · [Health-check Endpoint](#health-check-endpoint)
-- **[Deployment](#deployment)** — [HTTP Streaming](#http-streaming) · [HTTPS Support](#https-support) · [CORS](#cors-configuration) · [Custom HTTP Routes](#custom-http-routes) · [Edge Runtime Support](#edge-runtime-support)
-- **[Testing and Debugging](#testing-and-debugging)** — [In-memory transport](#unit-testing-with-an-in-memory-transport) · [mcp-cli](#test-with-mcp-cli) · [MCP Inspector](#inspect-with-mcp-inspector)
-- [FAQ](#faq) · [Showcase](#showcase) · [Acknowledgements](#acknowledgements)
+- [Features](#features)
+- [When to use ViteMCP over the official SDK?](#when-to-use-vitemcp-over-the-official-sdk)
+- [Installation](#installation)
+- [Quickstart](#quickstart)
+- [Core Concepts](#core-concepts)
+  - [Tools](#tools)
+  - [Resources](#resources)
+  - [Resource templates](#resource-templates)
+  - [Embedded Resources](#embedded-resources)
+  - [Prompts](#prompts)
+  - [Authentication](#authentication)
+  - [Providing Instructions](#providing-instructions)
+  - [Multi round-trip requests](#multi-round-trip-requests)
+  - [Cacheable results](#cacheable-results)
+  - [Client ID Metadata Documents](#client-id-metadata-documents)
+  - [Migrating from the session-based API](#migrating-from-the-session-based-api)
+- [Server Features](#server-features)
+  - [Logging](#logging)
+  - [Custom Logger](#custom-logger)
+  - [Errors](#errors)
+  - [Progress](#progress)
+  - [Health-check Endpoint](#health-check-endpoint)
+- [Deployment](#deployment)
+  - [HTTP Streaming](#http-streaming)
+  - [Custom HTTP Routes](#custom-http-routes)
+  - [Edge Runtime Support](#edge-runtime-support)
+- [Testing and Debugging](#testing-and-debugging)
+  - [Unit testing with an in-memory transport](#unit-testing-with-an-in-memory-transport)
+  - [Test with `mcp-cli`](#test-with-mcp-cli)
+  - [Inspect with `MCP Inspector`](#inspect-with-mcp-inspector)
+- [FAQ](#faq)
+  - [How to use with Claude Desktop?](#how-to-use-with-claude-desktop)
+  - [How to run ViteMCP behind a proxy?](#how-to-run-vitemcp-behind-a-proxy)
+- [Showcase](#showcase)
+- [Acknowledgements](#acknowledgements)
 
-Authentication has a dedicated reference: the **[OAuth guide](docs/oauth.md)**.
+Authentication has a dedicated reference — see the [OAuth guide](docs/oauth.md).
 
 ## Features
 
