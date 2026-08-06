@@ -23,7 +23,7 @@
   "type": "module",
   "author": "Frank Fiegel <frank@glama.ai>",
   "license": "MIT",
-  "description": "A TypeScript framework for building MCP servers.",
+  "description": "A TypeScript framework for building stateless MCP servers.",
   "module": "dist/ViteMCP.js",
   "types": "dist/ViteMCP.d.ts",
   "exports": {

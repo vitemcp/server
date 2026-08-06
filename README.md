@@ -1,6 +1,6 @@
 # ViteMCP
 
-A TypeScript framework for building [MCP](https://glama.ai/mcp) servers.
+A TypeScript framework for building stateless [MCP](https://glama.ai/mcp) servers.
 
 > [!IMPORTANT]
 >
