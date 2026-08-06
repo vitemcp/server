@@ -1529,77 +1529,48 @@ server.addTool({
 });
 ```
 
-**Available Providers:**
+**Available providers**, all exported from `@vitemcp/server`:
 
-| Provider         | Import    | Use Case               |
-| :--------------- | :-------- | :--------------------- |
-| `GoogleProvider` | `vitemcp` | Google OAuth           |
-| `GitHubProvider` | `vitemcp` | GitHub OAuth           |
-| `AzureProvider`  | `vitemcp` | Azure/Entra ID         |
-| `OAuthProvider`  | `vitemcp` | Any OAuth 2.0 provider |
+| Provider         | Use case                                     |
+| :--------------- | :------------------------------------------- |
+| `GoogleProvider` | Google OAuth                                 |
+| `GitHubProvider` | GitHub OAuth                                 |
+| `AzureProvider`  | Azure / Entra ID                             |
+| `OAuthProvider`  | Any OAuth 2.0 provider (Auth0, Okta, SAP, …) |
 
-**Generic OAuth Provider** (for SAP, Auth0, Okta, etc.):
-
-```ts
-import { ViteMCP, OAuthProvider } from "@vitemcp/server";
-
-const server = new ViteMCP({
-  auth: new OAuthProvider({
-    authorizationEndpoint: process.env.OAUTH_AUTH_ENDPOINT!,
-    baseUrl: "https://your-server.com",
-    clientId: process.env.OAUTH_CLIENT_ID!,
-    clientSecret: process.env.OAUTH_CLIENT_SECRET!,
-    scopes: ["openid", "profile"],
-    tokenEndpoint: process.env.OAUTH_TOKEN_ENDPOINT!,
-  }),
-  name: "My Server",
-  version: "1.0.0",
-});
-```
+`OAuthProvider` takes `authorizationEndpoint` and `tokenEndpoint` in place of a
+provider name. See [Provider setup](docs/oauth.md#provider-setup) for
+registration steps, redirect URIs and scopes for each.
 
 #### Tool Authorization
 
-Control tool access using the `canAccess` property with built-in helper functions:
+`canAccess` decides whether a caller may use a tool; tools it rejects are
+filtered out of `tools/list` entirely. Built-in helpers cover the common cases:
 
 ```ts
 import {
-  requireAuth,
-  requireScopes,
-  requireRole,
+  getAuthSession,
   requireAll,
   requireAny,
-  getAuthSession,
+  requireAuth,
+  requireRole,
+  requireScopes,
 } from "@vitemcp/server";
 
-// Require any authenticated user
+server.addTool({ canAccess: requireAuth, name: "user-tool" /* ... */ });
 server.addTool({
-  canAccess: requireAuth,
-  name: "user-tool",
-  // ...
+  canAccess: requireScopes("read:user"),
+  name: "scoped" /* ... */,
 });
-
-// Require specific OAuth scopes
-server.addTool({
-  canAccess: requireScopes("read:user", "write:data"),
-  name: "scoped-tool",
-  // ...
-});
-
-// Require specific role
 server.addTool({
   canAccess: requireRole("admin"),
-  name: "admin-tool",
-  // ...
+  name: "admin-tool" /* ... */,
 });
-
-// Combine with AND logic
 server.addTool({
   canAccess: requireAll(requireAuth, requireRole("admin")),
   name: "admin-only",
   // ...
 });
-
-// Combine with OR logic
 server.addTool({
   canAccess: requireAny(requireRole("admin"), requireRole("moderator")),
   name: "staff-tool",
@@ -1607,36 +1578,19 @@ server.addTool({
 });
 ```
 
-**Custom Authorization:**
+For anything these do not cover, pass a function — it receives whatever your
+`authenticate` hook returned. Inside `execute`, `getAuthSession` gives
+type-safe access to the session and throws a clear error if the request was
+never authenticated:
 
-For custom logic, pass a function directly:
-
-```typescript
-server.addTool({
-  name: "custom-auth-tool",
-  canAccess: (auth) =>
-    auth?.role === "admin" && auth?.department === "engineering",
-  execute: async () => "Access granted!",
-});
-```
-
-**Extracting Session Data:**
-
-Use `getAuthSession` for type-safe access to the OAuth session, which arrives on `context.auth`:
-
-```typescript
-import { getAuthSession, GoogleSession } from "@vitemcp/server";
-
+```ts
 server.addTool({
   canAccess: requireAuth,
   name: "get-profile",
   execute: async (_args, { auth }) => {
-    // Type-safe destructuring (throws if not authenticated)
     const { accessToken } = getAuthSession(auth);
-
-    // Or with provider-specific typing:
+    // Or, with provider-specific typing:
     // const { accessToken } = getAuthSession<GoogleSession>(auth);
-
     const response = await fetch("https://api.example.com/user", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -1645,7 +1599,8 @@ server.addTool({
 });
 ```
 
-> **Note:** You can also access `session.accessToken` directly, but you must handle the case where `session` is undefined. The `getAuthSession` helper throws a clear error if the session is not authenticated, making it safer when used with `canAccess: requireAuth`.
+Reading `auth.accessToken` directly works too, but then handling `undefined` is
+yours. Full detail in [Protecting tools](docs/oauth.md#protecting-tools).
 
 #### Custom Authentication
 
@@ -1672,85 +1627,28 @@ const server = new ViteMCP({
 server.addTool({
   name: "sayHello",
   execute: async (args, { auth }) => {
-    return `Hello, ${session.id}!`;
+    return `Hello, ${auth.id}!`;
   },
 });
 ```
 
 #### OAuth Proxy
 
-The `auth` option uses ViteMCP's built-in **OAuth Proxy** that acts as a secure intermediary between MCP clients and upstream OAuth providers. The proxy handles the complete OAuth 2.1 authorization flow, including Dynamic Client Registration (DCR), PKCE, consent management, and token management with encryption and token swap patterns enabled by default.
+The `auth` option is backed by ViteMCP's OAuth Proxy, which sits between MCP
+clients and upstream providers. It presents a DCR-compliant face to the client
+while using your pre-registered credentials upstream, and handles the whole
+OAuth 2.1 flow: two-tier PKCE, the consent screen, token exchange and refresh,
+and encrypted storage with token swap.
 
-**Key Features:**
+- **Secure by default** — AES-256-GCM storage encryption and the token swap pattern, both on unless you turn them off
+- **Zero configuration** — keys are generated and every `/oauth/*` endpoint is registered for you
+- **Pre-configured providers** — Google, GitHub and Azure, or bring your own
+- **RFC compliant** — DCR (7591), PKCE (7636), Authorization Server Metadata (8414), Issuer Identification (9207), OAuth 2.1
+- **Optional JWKS** — RS256/ES256 verification via the optional `jose` dependency
 
-- 🔐 **Secure by Default**: Automatic encryption (AES-256-GCM) and token swap pattern
-- 🚀 **Zero Configuration**: Auto-generates keys and handles OAuth flows automatically
-- 🔌 **Pre-configured Providers**: Built-in support for Google, GitHub, and Azure
-- 🎯 **RFC Compliant**: Implements DCR (RFC 7591), PKCE, and OAuth 2.1
-- 🔑 **Optional JWKS**: Support for RS256/ES256 token verification (via optional `jose` dependency)
-
-**Quick Start:**
-
-```ts
-import {
-  ViteMCP,
-  getAuthSession,
-  GoogleProvider,
-  requireAuth,
-} from "@vitemcp/server";
-
-const server = new ViteMCP({
-  auth: new GoogleProvider({
-    baseUrl: "https://your-server.com",
-    clientId: process.env.GOOGLE_CLIENT_ID!,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-  }),
-  name: "My Server",
-  version: "1.0.0",
-});
-
-server.addTool({
-  canAccess: requireAuth,
-  name: "protected-tool",
-  execute: async (_args, { auth }) => {
-    const { accessToken } = getAuthSession(auth);
-    // Use accessToken to call upstream APIs
-    return "Authenticated!";
-  },
-});
-```
-
-**Advanced Configuration:**
-
-For more control over OAuth behavior, you can use the `oauth` option directly:
-
-```ts
-import { ViteMCP } from "@vitemcp/server";
-import { GoogleProvider } from "@vitemcp/server/auth";
-
-const authProvider = new GoogleProvider({
-  baseUrl: "https://your-server.com",
-  clientId: process.env.GOOGLE_CLIENT_ID!,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-  scopes: ["openid", "profile", "email"],
-});
-
-const server = new ViteMCP({
-  name: "My Server",
-  oauth: {
-    authorizationServer: authProvider
-      .getProxy()
-      .getAuthorizationServerMetadata(),
-    enabled: true,
-    proxy: authProvider.getProxy(),
-  },
-  version: "1.0.0",
-});
-```
-
-**Documentation:**
-
-The [OAuth guide](docs/oauth.md) is the complete reference — provider setup, configuration, token swap, storage backends, running multiple instances, JWKS verification, the production checklist and troubleshooting.
+The [OAuth guide](docs/oauth.md) is the complete reference: provider setup,
+configuration, token swap, storage backends, running multiple instances, JWKS
+verification, the production checklist and troubleshooting.
 
 #### OAuth Discovery Endpoints
 
