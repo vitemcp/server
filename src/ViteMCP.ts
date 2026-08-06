@@ -545,6 +545,13 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     if (direct) {
       const loaded = await direct.load(this.#makeContext(undefined, undefined));
       const first = Array.isArray(loaded) ? loaded[0] : loaded;
+
+      if (!first) {
+        throw new UnexpectedStateError(`Resource loaded no content: ${uri}`, {
+          uri,
+        });
+      }
+
       return { ...first, mimeType: first.mimeType ?? direct.mimeType, uri };
     }
 
@@ -560,6 +567,14 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         this.#makeContext(undefined, undefined),
       );
       const first = Array.isArray(loaded) ? loaded[0] : loaded;
+
+      if (!first) {
+        throw new UnexpectedStateError(
+          `Resource template loaded no content: ${uri}`,
+          { uri },
+        );
+      }
+
       return { ...first, mimeType: first.mimeType ?? template.mimeType, uri };
     }
 
