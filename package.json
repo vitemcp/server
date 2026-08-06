@@ -4,7 +4,7 @@
   "main": "./dist/ViteMCP.cjs",
   "scripts": {
     "build": "tsup",
-    "lint": "prettier --check . && eslint . && tsc --noEmit && jsr publish --dry-run",
+    "lint": "prettier --check . && eslint . && tsc --noEmit && knip && jsr publish --dry-run",
     "test": "vitest run",
     "format": "prettier --write . && eslint --fix .",
     "test:coverage": "vitest run --coverage"
@@ -60,15 +60,11 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/core": "^2.0.0",
-    "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "@standard-schema/spec": "^1.0.0",
     "execa": "^9.6.1",
     "file-type": "^21.1.1",
-    "fuse.js": "^7.1.0",
     "hono": "^4.11.5",
-    "strict-event-emitter-types": "^2.0.0",
     "undici": "^7.16.0",
     "uri-templates": "^0.2.0",
     "xsschema": "^0.4.3",
@@ -133,11 +129,10 @@
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-perfectionist": "^4.15.1",
-    "eslint-plugin-prettier": "^5.5.4",
-    "eventsource-client": "^1.2.0",
     "get-port-please": "^3.2.0",
     "jiti": "^2.6.1",
     "jsr": "^0.13.5",
+    "knip": "^6.31.0",
     "prettier": "^3.7.4",
     "semantic-release": "^25.0.2",
     "tsup": "^8.5.1",

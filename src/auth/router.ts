@@ -25,9 +25,7 @@ const errorResponse = (error: unknown) => {
  *
  * Returns `null` when the body is too large, aborted, or unreadable.
  */
-export const readCappedBody = async (
-  request: Request,
-): Promise<null | string> => {
+const readCappedBody = async (request: Request): Promise<null | string> => {
   const declared = request.headers.get("content-length");
 
   if (declared && Number(declared) > OAUTH_PROXY_MAX_BODY_SIZE) {

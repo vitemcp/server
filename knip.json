@@ -1,0 +1,9 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["src/examples/*.ts", "src/**/*.test.ts"],
+  "project": ["src/**/*.ts"],
+  "ignoreDependencies": ["@modelcontextprotocol/inspector", "@wong2/mcp-cli"],
+  "rules": {
+    "optionalPeerDependencies": "off"
+  }
+}
