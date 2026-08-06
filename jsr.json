@@ -4,8 +4,17 @@
     "./auth": "./src/auth/index.ts",
     "./edge": "./src/edge/index.ts"
   },
-  "include": ["src/**/*.ts", "!src/**/*.test.ts", "!src/examples/**"],
   "license": "MIT",
   "name": "@vitemcp/server",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "publish": {
+    "include": ["src", "README.md", "LICENSE", "jsr.json"],
+    "exclude": [
+      "src/**/*.test.ts",
+      "src/examples",
+      "src/fixtures",
+      "src/testHarness.ts",
+      "src/auth/fakeAuthorizationServer.ts"
+    ]
+  }
 }
