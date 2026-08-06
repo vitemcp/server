@@ -426,6 +426,17 @@ type SerializableValue =
 type ToolParameters = StandardSchemaV1;
 
 export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
+  /**
+   * The port the HTTP server is actually listening on, or `null` when it is
+   * not running over HTTP. Pass `httpStream.port: 0` to let the OS assign a
+   * free port and read it back here — this avoids the race inherent in
+   * picking a port first and binding it afterwards.
+   */
+  public get port(): null | number {
+    const address = this.#httpServer?.address();
+    return address && typeof address === "object" ? address.port : null;
+  }
+
   public get serverState(): ServerState {
     return this.#serverState;
   }
@@ -1161,7 +1172,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     this.#logger.info(
       `[ViteMCP info] server is running on ${useTls ? "HTTPS" : "HTTP"} at ${
         useTls ? "https" : "http"
-      }://${config.host ?? "127.0.0.1"}:${config.port}${endpoint}`,
+      }://${config.host ?? "127.0.0.1"}:${this.port ?? config.port}${endpoint}`,
     );
   }
 

@@ -8,7 +8,6 @@ import {
   Client,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-import { getRandomPort } from "get-port-please";
 
 import { ViteMCP } from "./ViteMCP.js";
 
@@ -29,17 +28,20 @@ export const runWithTestServer = async ({
   /** Either a ready-made server or a factory that builds one. */
   server?: (() => Promise<ViteMCP<any>> | ViteMCP<any>) | ViteMCP<any>;
 }): Promise<number> => {
-  const port = await getRandomPort();
-
   const server =
     typeof createServer === "function"
       ? await createServer()
       : (createServer ?? new ViteMCP({ name: "Test", version: "1.0.0" }));
 
+  // Bind port 0 so the OS assigns a free port at bind time. Choosing a port
+  // up front and binding it later leaves a window for another process — or a
+  // parallel test worker — to take it, which surfaces as flaky EADDRINUSE.
   await server.start({
-    httpStream: { port },
+    httpStream: { port: 0 },
     transportType: "httpStream",
   });
+
+  const port = server.port!;
 
   try {
     const client =
