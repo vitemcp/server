@@ -1,5 +1,4 @@
 import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
-import { getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "timers/promises";
 import { fetch } from "undici";
 import { expect, test, vi } from "vitest";
@@ -100,8 +99,6 @@ test("adds tools with Zod v4 schema", async () => {
 });
 
 test("health endpoint returns ok", async () => {
-  const port = await getRandomPort();
-
   const server = new ViteMCP({
     health: { message: "healthy", path: "/healthz" },
     name: "Test",
@@ -109,9 +106,10 @@ test("health endpoint returns ok", async () => {
   });
 
   await server.start({
-    httpStream: { port },
+    httpStream: { port: 0 },
     transportType: "httpStream",
   });
+  const port = server.port!;
 
   try {
     const response = await fetch(`http://localhost:${port}/healthz`);

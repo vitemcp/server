@@ -2,7 +2,6 @@ import {
   Client,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-import { getRandomPort } from "get-port-please";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -52,11 +51,14 @@ describe("protocol envelope", () => {
   });
 
   it("marks ordinary results complete on the wire", async () => {
-    const port = await getRandomPort();
     const server = withTool();
 
-    await server.start({ httpStream: { port }, transportType: "httpStream" });
+    await server.start({
+      httpStream: { port: 0 },
+      transportType: "httpStream",
+    });
 
+    const port = server.port!;
     try {
       // Asserted on the wire rather than through the client: the SDK client
       // consumes `resultType` as its complete/input_required discriminator and
@@ -213,11 +215,14 @@ describe("protocol envelope", () => {
   });
 
   it("serves a 2025-era client by default", async () => {
-    const port = await getRandomPort();
     const server = withTool();
 
-    await server.start({ httpStream: { port }, transportType: "httpStream" });
+    await server.start({
+      httpStream: { port: 0 },
+      transportType: "httpStream",
+    });
 
+    const port = server.port!;
     try {
       // The SDK client negotiates the 2025 era unless told otherwise, so the
       // default has to accept it or most existing clients cannot connect.
@@ -239,13 +244,13 @@ describe("protocol envelope", () => {
   });
 
   it("rejects a 2025-era request when legacy is 'reject'", async () => {
-    const port = await getRandomPort();
     const server = withTool();
 
     await server.start({
-      httpStream: { legacy: "reject", port },
+      httpStream: { legacy: "reject", port: 0 },
       transportType: "httpStream",
     });
+    const port = server.port!;
 
     try {
       // Strict mode: the endpoint serves exactly what `server/discover`
@@ -272,11 +277,14 @@ describe("protocol envelope", () => {
   });
 
   it("rejects a request whose Origin is not allowed", async () => {
-    const port = await getRandomPort();
     const server = withTool();
 
-    await server.start({ httpStream: { port }, transportType: "httpStream" });
+    await server.start({
+      httpStream: { port: 0 },
+      transportType: "httpStream",
+    });
 
+    const port = server.port!;
     try {
       // Transport security MUST: a present-but-unrecognised Origin is what a
       // DNS-rebinding attack looks like against a loopback-bound server.
@@ -309,11 +317,14 @@ describe("protocol envelope", () => {
   });
 
   it("allows a loopback Origin by default", async () => {
-    const port = await getRandomPort();
     const server = withTool();
 
-    await server.start({ httpStream: { port }, transportType: "httpStream" });
+    await server.start({
+      httpStream: { port: 0 },
+      transportType: "httpStream",
+    });
 
+    const port = server.port!;
     try {
       const response = await fetch(`http://localhost:${port}/mcp`, {
         body: JSON.stringify({

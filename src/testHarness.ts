@@ -8,8 +8,47 @@ import {
   Client,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
+import { getPort } from "get-port-please";
 
 import { ViteMCP } from "./ViteMCP.js";
+
+/**
+ * Starts something that must know its port *before* binding — an OAuth
+ * `baseUrl`, for instance. Such callers cannot use port 0, so instead of
+ * narrowing the find-then-bind window we simply retry when another process
+ * wins the race.
+ */
+/**
+ * Allocates a port for callers that must know it *before* binding. Drawn from
+ * below the kernel's ephemeral range so a concurrent `port: 0` bind can never
+ * be handed the same number.
+ */
+export const allocateTestPort = (): Promise<number> => {
+  // Seed a random candidate: get-port-please otherwise walks the range from
+  // its start, handing every parallel worker the same number.
+  const candidate = 20_000 + Math.floor(Math.random() * 20_000);
+
+  return getPort({ port: candidate, portRange: [20_000, 39_999] });
+};
+
+export const startOnFreePort = async <T>(
+  start: (port: number) => Promise<T>,
+  attempts = 8,
+): Promise<{ port: number; value: T }> => {
+  for (let attempt = 1; ; attempt++) {
+    const port = await allocateTestPort();
+
+    try {
+      return { port, value: await start(port) };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+
+      if (code !== "EADDRINUSE" || attempt >= attempts) {
+        throw error;
+      }
+    }
+  }
+};
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export type TestRunArgs = {

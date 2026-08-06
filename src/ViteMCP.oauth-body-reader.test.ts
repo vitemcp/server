@@ -4,12 +4,12 @@
  * bodies that are aborted mid-stream or exceed the accepted size limit.
  */
 
-import { getRandomPort } from "get-port-please";
 import { OutgoingMessage } from "node:http";
 import { connect, type Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 
 import { OAuthProxy } from "./auth/OAuthProxy.js";
+import { startOnFreePort } from "./testHarness.js";
 import { ViteMCP } from "./ViteMCP.js";
 
 /**
@@ -53,42 +53,47 @@ function requestHead(
   ].join("\r\n");
 }
 
-async function startOAuthProxyServer(port: number) {
-  const authProxy = new OAuthProxy({
-    allowedRedirectUriPatterns: ["https://client.example.com/*"],
-    baseUrl: `http://localhost:${port}`,
-    scopes: ["openid", "profile"],
-    upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
-    upstreamClientId: "test-client-id",
-    upstreamClientSecret: "test-client-secret",
-    upstreamTokenEndpoint: "https://example.com/oauth/token",
-  });
+/**
+ * The OAuth proxy needs its `baseUrl` — and therefore its port — before the
+ * server binds, so port 0 is not an option here. Retry instead.
+ */
+async function startOAuthProxyServer() {
+  return startOnFreePort(async (port) => {
+    const authProxy = new OAuthProxy({
+      allowedRedirectUriPatterns: ["https://client.example.com/*"],
+      baseUrl: `http://localhost:${port}`,
+      scopes: ["openid", "profile"],
+      upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
+      upstreamClientId: "test-client-id",
+      upstreamClientSecret: "test-client-secret",
+      upstreamTokenEndpoint: "https://example.com/oauth/token",
+    });
 
-  const server = new ViteMCP({
-    name: "Test Server",
-    oauth: {
-      authorizationServer: authProxy.getAuthorizationServerMetadata(),
-      enabled: true,
-      proxy: authProxy,
-    },
-    version: "1.0.0",
-  });
+    const server = new ViteMCP({
+      name: "Test Server",
+      oauth: {
+        authorizationServer: authProxy.getAuthorizationServerMetadata(),
+        enabled: true,
+        proxy: authProxy,
+      },
+      version: "1.0.0",
+    });
 
-  await server.start({
-    // Raw-socket clients need a concrete address family
-    httpStream: { host: "127.0.0.1", port },
-    transportType: "httpStream",
-  });
+    await server.start({
+      // Raw-socket clients need a concrete address family
+      httpStream: { host: "127.0.0.1", port },
+      transportType: "httpStream",
+    });
 
-  return server;
+    return server;
+  });
 }
 
 describe("OAuth proxy body readers", () => {
   it.each(["/oauth/register", "/oauth/consent", "/oauth/token"])(
     "settles with 400 invalid_request when the client aborts mid-body (%s)",
     async (path) => {
-      const port = await getRandomPort();
-      const server = await startOAuthProxyServer(port);
+      const { port, value: server } = await startOAuthProxyServer();
       const endSpy = vi.spyOn(OutgoingMessage.prototype, "end");
 
       try {
@@ -133,8 +138,7 @@ describe("OAuth proxy body readers", () => {
   it(
     "rejects an over-limit body before it is fully received",
     async () => {
-      const port = await getRandomPort();
-      const server = await startOAuthProxyServer(port);
+      const { port, value: server } = await startOAuthProxyServer();
 
       try {
         const socket = await openSocket(port);
@@ -184,8 +188,7 @@ describe("OAuth proxy body readers", () => {
   it(
     "closes a keep-alive request after rejecting an over-limit body",
     async () => {
-      const port = await getRandomPort();
-      const server = await startOAuthProxyServer(port);
+      const { port, value: server } = await startOAuthProxyServer();
 
       try {
         const socket = await openSocket(port);
@@ -234,8 +237,7 @@ describe("OAuth proxy body readers", () => {
   it(
     "still accepts a valid body delivered in slow chunks",
     async () => {
-      const port = await getRandomPort();
-      const server = await startOAuthProxyServer(port);
+      const { port, value: server } = await startOAuthProxyServer();
 
       try {
         const body = JSON.stringify({
@@ -267,8 +269,7 @@ describe("OAuth proxy body readers", () => {
   );
 
   it("preserves a UTF-8 character split across request chunks", async () => {
-    const port = await getRandomPort();
-    const server = await startOAuthProxyServer(port);
+    const { port, value: server } = await startOAuthProxyServer();
 
     try {
       const clientName = "Café 日本語 клиент";
@@ -321,8 +322,7 @@ describe("OAuth proxy body readers", () => {
   it(
     "rejects an oversize chunked body (no Content-Length)",
     async () => {
-      const port = await getRandomPort();
-      const server = await startOAuthProxyServer(port);
+      const { port, value: server } = await startOAuthProxyServer();
 
       try {
         const socket = await openSocket(port);
@@ -376,8 +376,7 @@ describe("OAuth proxy body readers", () => {
   it(
     "preserves UTF-8 characters split across chunked wire boundaries",
     async () => {
-      const port = await getRandomPort();
-      const server = await startOAuthProxyServer(port);
+      const { port, value: server } = await startOAuthProxyServer();
 
       try {
         const socket = await openSocket(port);
@@ -432,8 +431,7 @@ describe("OAuth proxy body readers", () => {
   );
 
   it("handles chunked request aborted before terminating chunk", async () => {
-    const port = await getRandomPort();
-    const server = await startOAuthProxyServer(port);
+    const { port, value: server } = await startOAuthProxyServer();
 
     try {
       const socket = await openSocket(port);

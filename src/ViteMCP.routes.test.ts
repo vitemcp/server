@@ -1,6 +1,5 @@
 import type { Context } from "hono";
 
-import { getRandomPort } from "get-port-please";
 import { fetch } from "undici";
 import { expect, test } from "vitest";
 import { z } from "zod";
@@ -426,7 +425,6 @@ test("custom routes with authentication", { timeout: 10000 }, async () => {
     userId: string;
   }
 
-  const port = await getRandomPort();
   const server = new ViteMCP<TestAuth>({
     authenticate: async (req) => {
       const authHeader = req.headers.get("authorization");
@@ -462,9 +460,10 @@ test("custom routes with authentication", { timeout: 10000 }, async () => {
   });
 
   await server.start({
-    httpStream: { port },
+    httpStream: { port: 0 },
     transportType: "httpStream",
   });
+  const port = server.port!;
 
   try {
     // Test without auth
@@ -591,7 +590,6 @@ test("public routes bypass authentication", async () => {
     userId: string;
   }
 
-  const port = await getRandomPort();
   const server = new ViteMCP<TestAuth>({
     authenticate: async (req) => {
       const authHeader = req.headers.get("authorization");
@@ -640,9 +638,10 @@ test("public routes bypass authentication", async () => {
   });
 
   await server.start({
-    httpStream: { port },
+    httpStream: { port: 0 },
     transportType: "httpStream",
   });
+  const port = server.port!;
 
   try {
     // Test public route without auth - should work
@@ -689,7 +688,6 @@ test("public routes bypass authentication", async () => {
 });
 
 test("public routes work with OAuth discovery endpoints", async () => {
-  const port = await getRandomPort();
   const server = new ViteMCP({
     authenticate: async () => {
       // Always reject auth to verify public routes bypass this
@@ -719,9 +717,10 @@ test("public routes work with OAuth discovery endpoints", async () => {
   });
 
   await server.start({
-    httpStream: { port },
+    httpStream: { port: 0 },
     transportType: "httpStream",
   });
+  const port = server.port!;
 
   try {
     // Test OpenID configuration endpoint
@@ -752,7 +751,6 @@ test("public routes work with OAuth discovery endpoints", async () => {
 });
 
 test("public routes work with wildcards", async () => {
-  const port = await getRandomPort();
   const server = new ViteMCP({
     authenticate: async () => {
       throw new Error("Auth should be bypassed");
@@ -772,9 +770,10 @@ test("public routes work with wildcards", async () => {
   });
 
   await server.start({
-    httpStream: { port },
+    httpStream: { port: 0 },
     transportType: "httpStream",
   });
+  const port = server.port!;
 
   try {
     const response = await fetch(
@@ -798,7 +797,6 @@ test("mixed public and private routes with same path pattern", async () => {
     role: string;
   }
 
-  const port = await getRandomPort();
   const server = new ViteMCP<TestAuth>({
     authenticate: async (req) => {
       const authHeader = req.headers.get("authorization");
@@ -842,9 +840,10 @@ test("mixed public and private routes with same path pattern", async () => {
   });
 
   await server.start({
-    httpStream: { port },
+    httpStream: { port: 0 },
     transportType: "httpStream",
   });
+  const port = server.port!;
 
   try {
     // Test public GET - should work without auth

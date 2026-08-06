@@ -1,4 +1,3 @@
-import { getRandomPort } from "get-port-please";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -51,10 +50,12 @@ describe("regressions", () => {
   });
 
   it("exposes the SDK's real change-notification methods", async () => {
-    const port = await getRandomPort();
     const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
-    await server.start({ httpStream: { port }, transportType: "httpStream" });
+    await server.start({
+      httpStream: { port: 0 },
+      transportType: "httpStream",
+    });
 
     try {
       // The notifier is typed now, so a wrong name is a compile error rather
@@ -82,19 +83,17 @@ describe("regressions", () => {
   it("can be restarted after stop()", async () => {
     const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
-    const first = await getRandomPort();
     await server.start({
-      httpStream: { port: first },
+      httpStream: { port: 0 },
       transportType: "httpStream",
     });
     await server.stop();
 
     // Hono seals its matcher after first use; reusing the app made the second
     // start throw "Can not add a route since the matcher is already built."
-    const second = await getRandomPort();
     await expect(
       server.start({
-        httpStream: { port: second },
+        httpStream: { port: 0 },
         transportType: "httpStream",
       }),
     ).resolves.toBeUndefined();
@@ -161,7 +160,6 @@ describe("regressions", () => {
   });
 
   it("does not corrupt binary request bodies on custom routes", async () => {
-    const port = await getRandomPort();
     const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.getApp().post("/echo", async (c) => {
@@ -169,8 +167,12 @@ describe("regressions", () => {
       return c.json({ bytes: Array.from(bytes) });
     });
 
-    await server.start({ httpStream: { port }, transportType: "httpStream" });
+    await server.start({
+      httpStream: { port: 0 },
+      transportType: "httpStream",
+    });
 
+    const port = server.port!;
     try {
       // Reading the body as a utf8 string and re-encoding turned every
       // non-ASCII byte into U+FFFD.

@@ -1,6 +1,5 @@
 import { Client } from "@modelcontextprotocol/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { getRandomPort } from "get-port-please";
 import { expect, test, vi } from "vitest";
 import { toJsonSchema } from "xsschema";
 
@@ -163,7 +162,6 @@ test("converts to JSON Schema without a vendor-specific converter", async () => 
 const withGreetServer = async (
   run: (client: Client) => Promise<void>,
 ): Promise<void> => {
-  const port = await getRandomPort();
   const server = new ViteMCP({ name: "Test server", version: "1.0.0" });
 
   server.addTool({
@@ -182,8 +180,9 @@ const withGreetServer = async (
     parameters: jsonSchemaAdapter({ ...personSchema }),
   });
 
-  await server.start({ httpStream: { port }, transportType: "httpStream" });
+  await server.start({ httpStream: { port: 0 }, transportType: "httpStream" });
 
+  const port = server.port!;
   const client = new Client(
     { name: "Test client", version: "1.0.0" },
     // Without this the SDK client negotiates the 2025 era, which this
