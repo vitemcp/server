@@ -32,7 +32,7 @@ describe("tool schema registration", () => {
 
     expect(() =>
       server.addTool({
-        execute: async () => ({ answer: "ok" }),
+        execute: async () => "ok",
         name: "legacy-zod-output",
         outputSchema: {} as never,
       }),

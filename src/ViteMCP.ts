@@ -499,14 +499,20 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     this.#notifyListChanged("resources");
   }
 
-  public addTool<Params extends ToolParameters>(tool: Tool<T, Params>) {
+  public addTool<
+    Params extends ToolParameters,
+    OutputParams extends ToolParameters = ToolParameters,
+  >(tool: Tool<T, Params, OutputParams>) {
     assertStandardSchema(tool.parameters, tool.name, "parameters");
     assertStandardSchema(tool.outputSchema, tool.name, "outputSchema");
     this.#tools.push(tool as unknown as Tool<T>);
     this.#notifyListChanged("tools");
   }
 
-  public addTools<Params extends ToolParameters>(tools: Tool<T, Params>[]) {
+  public addTools<
+    Params extends ToolParameters,
+    OutputParams extends ToolParameters = ToolParameters,
+  >(tools: Tool<T, Params, OutputParams>[]) {
     for (const tool of tools) {
       assertStandardSchema(tool.parameters, tool.name, "parameters");
       assertStandardSchema(tool.outputSchema, tool.name, "outputSchema");
