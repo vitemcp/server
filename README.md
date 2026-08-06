@@ -1995,6 +1995,7 @@ list it here.
 
 ## Acknowledgements
 
+- ViteMCP continues [FastMCP](https://github.com/punkpeye/fastmcp), whose commit history this repository carries.
 - Parts of codebase were adopted from [LiteMCP](https://github.com/wong2/litemcp).
 - Parts of codebase were adopted from [Model Context protocolでSSEをやってみる](https://dev.classmethod.jp/articles/mcp-sse/).
 
