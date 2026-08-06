@@ -12,13 +12,24 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers.
 > If you are coming from a session-based version, see
 > [Migrating from the session-based API](#migrating-from-the-session-based-api).
 
+## Contents
+
+- [Features](#features) · [When to use ViteMCP](#when-to-use-vitemcp-over-the-official-sdk) · [Installation](#installation) · [Quickstart](#quickstart)
+- **[Core Concepts](#core-concepts)** — [Tools](#tools) · [Resources](#resources) · [Resource templates](#resource-templates) · [Embedded Resources](#embedded-resources) · [Prompts](#prompts) · [Authentication](#authentication) · [Multi round-trip requests](#multi-round-trip-requests) · [Cacheable results](#cacheable-results) · [Client ID Metadata Documents](#client-id-metadata-documents) · [Migrating from the session-based API](#migrating-from-the-session-based-api)
+- **[Server Features](#server-features)** — [Logging](#logging) · [Custom Logger](#custom-logger) · [Errors](#errors) · [Progress](#progress) · [Health-check Endpoint](#health-check-endpoint)
+- **[Deployment](#deployment)** — [HTTP Streaming](#http-streaming) · [HTTPS Support](#https-support) · [CORS](#cors-configuration) · [Custom HTTP Routes](#custom-http-routes) · [Edge Runtime Support](#edge-runtime-support)
+- **[Testing and Debugging](#testing-and-debugging)** — [In-memory transport](#unit-testing-with-an-in-memory-transport) · [mcp-cli](#test-with-mcp-cli) · [MCP Inspector](#inspect-with-mcp-inspector)
+- [FAQ](#faq) · [Showcase](#showcase) · [Acknowledgements](#acknowledgements)
+
+Authentication has a dedicated reference: the **[OAuth guide](docs/oauth.md)**.
+
 ## Features
 
 - Simple Tool, Resource, Prompt definition
 - [Authentication](#authentication)
 - [Per-request auth context](#authentication)
-- [Image content](#returning-an-image)
-- [Audio content](#returning-an-audio)
+- [Image content](#return-types)
+- [Audio content](#return-types)
 - [Embedded](#embedded-resources)
 - [Error handling](#errors)
 - [HTTP Streaming](#http-streaming)
@@ -116,352 +127,6 @@ npx @vitemcp/server inspect src/examples/addition.ts
 ```
 
 If you are looking for something to start from, [`src/examples/`](src/examples/) has runnable servers covering tools, authentication, custom routes and edge deployment.
-
-### Remote Server Options
-
-ViteMCP can serve over HTTP, so a server on a remote machine is reachable over the network.
-
-#### HTTP Streaming
-
-[HTTP streaming](https://www.cloudflare.com/learning/video/what-is-http-live-streaming/) provides a more efficient alternative to SSE in environments that support it, with potentially better performance for larger payloads.
-
-You can run the server with HTTP streaming support:
-
-```ts
-server.start({
-  transportType: "httpStream",
-  httpStream: {
-    port: 8080,
-  },
-});
-```
-
-The server then listens on `http://localhost:8080/mcp`.
-
-> **Note:** You can also customize the endpoint path using the `httpStream.endpoint` option (default is `/mcp`).
-
-> **Note:** To serve HTTP streaming and built-in OAuth routes under an issuer path, set `httpStream.basePath` (for example, `/issuer1`). This exposes authorization server metadata at `/.well-known/oauth-authorization-server/issuer1` per RFC 8414.
-
-Connect with a client transport:
-
-For HTTP streaming connections:
-
-```ts
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-
-const client = new Client(
-  {
-    name: "example-client",
-    version: "1.0.0",
-  },
-  {
-    // Required: the SDK client negotiates the 2025 protocol era unless told
-    // otherwise, and this server serves only 2026-07-28.
-    versionNegotiation: { mode: "auto" },
-  },
-);
-
-const transport = new StreamableHTTPClientTransport(
-  new URL(`http://localhost:8080/mcp`),
-);
-
-await client.connect(transport);
-```
-
-##### HTTPS Support
-
-Pass SSL certificates to terminate TLS directly:
-
-```ts
-server.start({
-  transportType: "httpStream",
-  httpStream: {
-    port: 8443,
-    sslCert: "./path/to/cert.pem",
-    sslKey: "./path/to/key.pem",
-    sslCa: "./path/to/ca.pem", // Optional: for client certificate authentication
-  },
-});
-```
-
-The server then listens on `https://localhost:8443/mcp`.
-
-**SSL Options:**
-
-- `sslCert` - Path to SSL certificate file
-- `sslKey` - Path to SSL private key file
-- `sslCa` - (Optional) Path to CA certificate for mutual TLS authentication
-
-**For testing**, you can generate self-signed certificates:
-
-```bash
-openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
-```
-
-**For production**, obtain certificates from a trusted CA like Let's Encrypt.
-
-See the [https-server example](src/examples/https-server.ts) for a complete demonstration.
-
-##### CORS Configuration
-
-By default, ViteMCP enables CORS with a standard set of allowed headers. You can customize the CORS behavior by passing a `cors` option:
-
-```ts
-server.start({
-  transportType: "httpStream",
-  httpStream: {
-    port: 8080,
-    cors: {
-      origin: "http://localhost:3000",
-      allowedHeaders: [
-        "Content-Type",
-        "Authorization",
-        "Accept",
-        "Mcp-Protocol-Version",
-        "X-Custom-Header",
-      ],
-      credentials: true,
-    },
-  },
-});
-```
-
-The `cors` option accepts:
-
-- `true` (default) - enable CORS with default settings
-- `false` - disable CORS entirely
-- An object with these fields:
-  - `origin` - a string, array of strings, or a function `(origin: string) => boolean`
-  - `allowedHeaders` - a string or array of strings
-  - `methods` - array of allowed HTTP methods
-  - `exposedHeaders` - array of headers to expose
-  - `credentials` - boolean to allow credentials
-  - `maxAge` - preflight cache duration in seconds
-
-The `CorsOptions` type is exported from `vitemcp` for convenience.
-
-#### Custom HTTP Routes
-
-Custom HTTP routes live alongside the MCP endpoint in the same process — REST APIs, webhooks, admin interfaces.
-
-```ts
-const app = server.getApp();
-
-// Add REST API endpoints with Hono's native API
-app.get("/api/users", async (c) => {
-  return c.json({ users: [] });
-});
-
-// Handle path parameters
-app.get("/api/users/:id", async (c) => {
-  return c.json({
-    userId: c.req.param("id"),
-    query: c.req.query(), // Access query parameters
-  });
-});
-
-// Handle POST requests with body parsing
-app.post("/api/users", async (c) => {
-  const body = await c.req.json();
-  return c.json({ created: body }, 201);
-});
-
-// Serve HTML content
-app.get("/admin", async (c) => {
-  return c.html("<html><body><h1>Admin Panel</h1></body></html>");
-});
-
-// Handle webhooks
-app.post("/webhook/github", async (c) => {
-  const payload = await c.req.json();
-  const event = c.req.header("x-github-event");
-
-  // Process webhook...
-  return c.json({ received: true });
-});
-```
-
-Custom routes use the underlying [Hono](https://hono.dev/) app returned by `server.getApp()` and support:
-
-- Hono's HTTP methods: `get`, `post`, `put`, `delete`, `patch`, `options`, and more
-- Path parameters (`:param`) and wildcards (`*`)
-- Query string parsing
-- JSON, text, form, and other body helpers from `c.req`
-- Custom status codes and headers
-- Middleware and route groups through Hono
-
-Routes are matched in the order they are registered, allowing you to define specific routes before catch-all patterns.
-
-##### Public and Protected Routes
-
-Custom Hono routes are public unless you add your own route middleware or authentication checks. For protected custom routes, put your auth logic in a reusable helper and call it from both ViteMCP's `authenticate` option and your Hono route handlers:
-
-```ts
-import type { Context } from "hono";
-import { ViteMCP } from "@vitemcp/server";
-
-async function authenticateRequest(request: Request) {
-  const apiKey = request.headers.get("x-api-key");
-  return apiKey === "123" ? { userId: "123" } : undefined;
-}
-
-const server = new ViteMCP({
-  name: "My Server",
-  version: "1.0.0",
-  authenticate: authenticateRequest,
-});
-
-const app = server.getApp();
-
-async function requireAuth(c: Context) {
-  const auth = await authenticateRequest(c.env.incoming);
-
-  if (!auth) {
-    return c.json({ error: "Authentication required" }, 401);
-  }
-
-  return auth;
-}
-
-// Public route - no authentication required
-app.get("/.well-known/openid-configuration", async (c) => {
-  return c.json({
-    issuer: "https://example.com",
-    authorization_endpoint: "https://example.com/auth",
-    token_endpoint: "https://example.com/token",
-  });
-});
-
-// Private route - requires authentication
-app.get("/api/users", async (c) => {
-  const auth = await requireAuth(c);
-  if (auth instanceof Response) {
-    return auth;
-  }
-
-  return c.json({ users: [] });
-});
-
-// Public static files
-app.get("/public/*", async (c) => {
-  return c.text(`File: ${c.req.path}`);
-});
-```
-
-Public routes are perfect for:
-
-- OAuth discovery endpoints (`.well-known/*`)
-- Health checks and status pages
-- Static assets and documentation
-- Webhook endpoints from external services
-- Public APIs that don't require user authentication
-
-See the [custom-routes example](src/examples/custom-routes.ts) for a complete demonstration.
-
-#### Edge Runtime Support
-
-ViteMCP runs on edge runtimes such as Cloudflare Workers.
-
-##### Choosing Between ViteMCP and EdgeViteMCP
-
-| Use Case                        | Class         | Import                                               |
-| ------------------------------- | ------------- | ---------------------------------------------------- |
-| Node.js, Express, Bun           | `ViteMCP`     | `import { ViteMCP } from "@vitemcp/server"`          |
-| Cloudflare Workers, Deno Deploy | `EdgeViteMCP` | `import { EdgeViteMCP } from "@vitemcp/server/edge"` |
-
-| Feature              | ViteMCP                        | EdgeViteMCP                            |
-| -------------------- | ------------------------------ | -------------------------------------- |
-| Runtime              | Node.js                        | Edge (V8 isolates)                     |
-| Start method         | `server.start({ port })`       | `export default server`                |
-| Transport            | stdio, httpStream              | HTTP Streamable only                   |
-| File system          | Yes                            | No                                     |
-| OAuth/Authentication | Built-in `authenticate` option | Use Hono middleware (built-in planned) |
-| Custom routes        | `server.getApp()`              | `server.getApp()`                      |
-
-> **Note:** Built-in authentication for EdgeViteMCP is planned for a future release. Both ViteMCP and EdgeViteMCP use Hono internally, so there's no technical barrier. `ViteMCP`'s `authenticate` already takes a web-standard `Request`, so the same hook shape works on both.
->
-> In the meantime, use Hono middleware:
->
-> ```ts
-> const app = server.getApp();
-> app.use("/api/*", async (c, next) => {
->   if (c.req.header("authorization") !== "Bearer secret") {
->     return c.json({ error: "Unauthorized" }, 401);
->   }
->   await next();
-> });
-> ```
-
-##### Cloudflare Workers
-
-To deploy ViteMCP to Cloudflare Workers, use the `EdgeViteMCP` class from the `/edge` subpath:
-
-```ts
-import { EdgeViteMCP } from "@vitemcp/server/edge";
-import { z } from "zod";
-
-const server = new EdgeViteMCP({
-  name: "My Edge Server",
-  version: "1.0.0",
-  description: "MCP server running on Cloudflare Workers",
-});
-
-// Add tools, resources, prompts as usual
-server.addTool({
-  name: "greet",
-  description: "Greet someone",
-  parameters: z.object({
-    name: z.string(),
-  }),
-  execute: async ({ name }) => {
-    return `Hello, ${name}! Served from the edge.`;
-  },
-});
-
-// Export the server as the default (required for Cloudflare Workers)
-export default server;
-```
-
-##### Edge Runtime Differences
-
-When running on edge runtimes:
-
-- **No shared state**: Each request is handled independently — which is simply how the protocol works now
-- **No filesystem access**: Use fetch APIs for external data
-- **V8 Isolates**: Fast cold starts and efficient resource usage
-- **Global deployment**: Automatic distribution to edge locations
-
-##### Custom Routes on Edge
-
-You can access the underlying Hono app to add custom HTTP routes:
-
-```ts
-const app = server.getApp();
-
-// Add a landing page
-app.get("/", (c) => c.html("<h1>Welcome to my MCP server</h1>"));
-
-// Add REST API endpoints
-app.get("/api/status", (c) => c.json({ status: "ok" }));
-```
-
-##### Deployment
-
-Configure your `wrangler.toml`:
-
-```toml
-name = "my-mcp-server"
-main = "src/index.ts"
-compatibility_date = "2024-01-01"
-```
-
-Deploy with:
-
-```bash
-wrangler deploy
-```
-
-See the [edge-cloudflare-worker example](src/examples/edge-cloudflare-worker.ts) for a complete demonstration.
 
 ## Core Concepts
 
@@ -664,7 +329,7 @@ server.addTool({
 
 When `outputSchema` is provided, ViteMCP validates `structuredContent` before sending the tool result. Invalid structured output is returned to the client as a tool error instead of silently violating the advertised schema.
 
-#### Tool Authorization
+#### Restricting who can call a tool
 
 A tool's optional `canAccess` receives the request's auth context and returns whether the caller may use it. Tools it rejects are filtered out of `tools/list` entirely.
 
@@ -677,406 +342,66 @@ server.addTool({
 });
 ```
 
-#### Returning a string
+Built-in helpers — `requireAuth`, `requireScopes`, `requireRole`, `requireAll`, `requireAny` — cover the usual cases; see [Tool Authorization](#tool-authorization).
 
-`execute` can return a string:
+#### Return types
+
+`execute` may return a plain string, a content object, or an array of content
+blocks. A bare string is shorthand for a single `text` block — these two are
+equivalent:
 
 ```js
-server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args) => {
-    return "Hello, world!";
-  },
-});
+execute: async () => "Hello, world!";
+execute: async () => ({ content: [{ type: "text", text: "Hello, world!" }] });
 ```
 
-The latter is equivalent to:
+| Return value            | Produces                                                |
+| ----------------------- | ------------------------------------------------------- |
+| `"some string"`         | one `text` block                                        |
+| `{ content: [...] }`    | any mix of `text`, `image`, `audio` and resource blocks |
+| `imageContent({ ... })` | one `image` block                                       |
+| `audioContent({ ... })` | one `audio` block                                       |
+
+`imageContent` and `audioContent` build a block from a `url`, a `path`, or a
+`buffer` — exactly one of the three. Both accept `timeoutMs` to bound a URL
+download (30 seconds by default).
 
 ```js
-server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args) => {
-    return {
-      content: [
-        {
-          type: "text",
-          text: "Hello, world!",
-        },
-      ],
-    };
-  },
-});
-```
-
-#### Returning a list
-
-If you want to return a list of messages, you can return an object with a `content` property:
-
-```js
-server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args) => {
-    return {
-      content: [
-        { type: "text", text: "First message" },
-        { type: "text", text: "Second message" },
-      ],
-    };
-  },
-});
-```
-
-#### Returning an image
-
-Use the `imageContent` to create a content object for an image:
-
-```js
-import { imageContent } from "@vitemcp/server";
+import { audioContent, imageContent } from "@vitemcp/server";
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args) => {
-    return imageContent({
-      url: "https://example.com/image.png",
-    });
-
-    // or...
-    // return imageContent({
-    //   path: "/path/to/image.png",
-    // });
-
-    // or...
-    // return imageContent({
-    //   buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64"),
-    // });
-
-    // or...
-    // return {
-    //   content: [
-    //     await imageContent(...)
-    //   ],
-    // };
-  },
+  name: "fetch-image",
+  description: "Fetch an image",
+  parameters: z.object({ url: z.string() }),
+  execute: async (args) => imageContent({ url: args.url }),
+  // ...or imageContent({ path: "/path/to/image.png" })
+  // ...or imageContent({ buffer: Buffer.from(base64Png, "base64") })
 });
 ```
 
-The `imageContent` function takes the following options:
-
-- `url`: The URL of the image.
-- `timeoutMs`: Optional timeout for a URL download in milliseconds (defaults to 30 seconds).
-- `path`: The path to the image file.
-- `buffer`: The image data as a buffer.
-
-Only one of `url`, `path`, or `buffer` must be specified.
-
-The above example is equivalent to:
+Each helper returns a single block, so combine them under `content` to send
+more than one:
 
 ```js
-server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args) => {
-    return {
-      content: [
-        {
-          type: "image",
-          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-          mimeType: "image/png",
-        },
-      ],
-    };
-  },
+execute: async () => ({
+  content: [
+    { type: "text", text: "Here is what I found:" },
+    await imageContent({ url: "https://example.com/image.png" }),
+    await audioContent({ url: "https://example.com/audio.mp3" }),
+  ],
 });
 ```
 
-#### Returning an audio
-
-Use the `audioContent` to create a content object for an audio:
+Raw blocks work too when you already hold base64 data:
 
 ```js
-import { audioContent } from "@vitemcp/server";
-
-server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args) => {
-    return audioContent({
-      url: "https://example.com/audio.mp3",
-    });
-
-    // or...
-    // return audioContent({
-    //   path: "/path/to/audio.mp3",
-    // });
-
-    // or...
-    // return audioContent({
-    //   buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64"),
-    // });
-
-    // or...
-    // return {
-    //   content: [
-    //     await audioContent(...)
-    //   ],
-    // };
-  },
+execute: async () => ({
+  content: [
+    { type: "image", data: base64Png, mimeType: "image/png" },
+    { type: "audio", data: base64Mp3, mimeType: "audio/mpeg" },
+  ],
 });
 ```
-
-The `audioContent` function takes the following options:
-
-- `url`: The URL of the audio.
-- `timeoutMs`: Optional timeout for a URL download in milliseconds (defaults to 30 seconds).
-- `path`: The path to the audio file.
-- `buffer`: The audio data as a buffer.
-
-Only one of `url`, `path`, or `buffer` must be specified.
-
-The above example is equivalent to:
-
-```js
-server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args) => {
-    return {
-      content: [
-        {
-          type: "audio",
-          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-          mimeType: "audio/mpeg",
-        },
-      ],
-    };
-  },
-});
-```
-
-#### Return combination type
-
-Content types can be combined in one result:
-
-```js
-server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args) => {
-    return {
-      content: [
-        {
-          type: "text",
-          text: "Hello, world!",
-        },
-        {
-          type: "image",
-          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-          mimeType: "image/png",
-        },
-        {
-          type: "audio",
-          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-          mimeType: "audio/mpeg",
-        },
-      ],
-    };
-  },
-
-  // or...
-  // execute: async (args) => {
-  //   const imgContent = await imageContent({
-  //     url: "https://example.com/image.png",
-  //   });
-  //   const audContent = await audioContent({
-  //     url: "https://example.com/audio.mp3",
-  //   });
-  //   return {
-  //     content: [
-  //       {
-  //         type: "text",
-  //         text: "Hello, world!",
-  //       },
-  //       imgContent,
-  //       audContent,
-  //     ],
-  //   };
-  // },
-});
-```
-
-#### Custom Logger
-
-Provide a `logger` to route server logs into your own infrastructure.
-
-```ts
-import { ViteMCP, Logger } from "@vitemcp/server";
-
-class CustomLogger implements Logger {
-  debug(...args: unknown[]): void {
-    console.log("[DEBUG]", new Date().toISOString(), ...args);
-  }
-
-  error(...args: unknown[]): void {
-    console.error("[ERROR]", new Date().toISOString(), ...args);
-  }
-
-  info(...args: unknown[]): void {
-    console.info("[INFO]", new Date().toISOString(), ...args);
-  }
-
-  log(...args: unknown[]): void {
-    console.log("[LOG]", new Date().toISOString(), ...args);
-  }
-
-  warn(...args: unknown[]): void {
-    console.warn("[WARN]", new Date().toISOString(), ...args);
-  }
-}
-
-const server = new ViteMCP({
-  name: "My Server",
-  version: "1.0.0",
-  logger: new CustomLogger(),
-});
-```
-
-See `src/examples/custom-logger.ts` for examples with Winston, Pino, and file-based logging.
-
-#### Logging
-
-Tools can log messages to the client using the `log` object in the context object.
-
-> [!IMPORTANT]
->
-> Log notifications are **only emitted when the client asks for them**, by
-> setting `io.modelcontextprotocol/logLevel` in the request's `_meta`. The
-> revision forbids servers from sending `notifications/message` for a request
-> that did not opt in, so `log.*` is a no-op otherwise — that is expected
-> behaviour, not a bug.
->
-> Logging is also deprecated as of 2026-07-28. For diagnostics that always
-> reach you, write to `stderr` (stdio servers) or use OpenTelemetry; for
-> user-visible progress, prefer [`reportProgress`](#progress).
-
-```js
-server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, { log }) => {
-    log.info("Downloading file...", {
-      url,
-    });
-
-    // ...
-
-    log.info("Downloaded file");
-
-    return "done";
-  },
-});
-```
-
-The `log` object has the following methods:
-
-- `debug(message: string, data?: SerializableValue)`
-- `error(message: string, data?: SerializableValue)`
-- `info(message: string, data?: SerializableValue)`
-- `warn(message: string, data?: SerializableValue)`
-
-#### Errors
-
-The errors that are meant to be shown to the user should be thrown as `UserError` instances:
-
-```js
-import { UserError } from "@vitemcp/server";
-
-server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args) => {
-    if (args.url.startsWith("https://example.com")) {
-      throw new UserError("This URL is not allowed");
-    }
-
-    return "done";
-  },
-});
-```
-
-#### Progress
-
-Tools can report progress by calling `reportProgress` in the context object:
-
-```js
-server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, { reportProgress }) => {
-    await reportProgress({
-      progress: 0,
-      total: 100,
-    });
-
-    // ...
-
-    await reportProgress({
-      progress: 100,
-      total: 100,
-    });
-
-    return "done";
-  },
-});
-```
-
-`reportProgress` accepts an optional human-readable `message` alongside the numeric fields, which clients can display next to the progress indicator:
-
-```js
-await reportProgress({
-  progress: 40,
-  total: 100,
-  message: "Downloading chunk 4 of 10…",
-});
-```
-
-Progress notifications are only emitted when the client opts in by supplying a `progressToken` on the tool call; otherwise `reportProgress` is a no-op. `notifications/progress` is part of the specification, so this is the portable way to send incremental updates during a long-running tool call.
 
 #### Tool Annotations
 
@@ -1111,47 +436,6 @@ The available annotations are:
 | `openWorldHint`   | boolean | `true`  | If true, the tool may interact with an "open world" of external entities                                                             |
 
 These annotations help clients and LLMs better understand how to use the tools and what to expect when calling them.
-
-### Health-check Endpoint
-
-When you run ViteMCP with the `httpStream` transport you can optionally expose a
-simple HTTP endpoint that returns a plain-text response useful for load-balancer
-or container orchestration liveness checks.
-
-Enable (or customise) the endpoint via the `health` key in the server options:
-
-```ts
-const server = new ViteMCP({
-  name: "My Server",
-  version: "1.0.0",
-  health: {
-    // Enable / disable (default: true)
-    enabled: true,
-    // Body returned by the endpoint (default: 'ok')
-    message: "healthy",
-    // Path that should respond (default: '/health')
-    path: "/healthz",
-    // HTTP status code to return (default: 200)
-    status: 200,
-  },
-});
-
-await server.start({
-  transportType: "httpStream",
-  httpStream: { port: 8080 },
-});
-```
-
-Now a request to `http://localhost:8080/healthz` will return:
-
-```
-HTTP/1.1 200 OK
-content-type: text/plain
-
-healthy
-```
-
-The endpoint is ignored when the server is started with the `stdio` transport.
 
 ### Resources
 
@@ -2040,7 +1324,545 @@ SDK import in your own code moves.
 transition, pass `httpStream: { legacy: "stateless" }` — but note the server
 then answers requests it does not advertise support for.
 
-## Running Your Server
+## Server Features
+
+Behaviour the server provides around your tools, resources and prompts.
+
+### Logging
+
+Tools can log messages to the client using the `log` object in the context object.
+
+> [!IMPORTANT]
+>
+> Log notifications are **only emitted when the client asks for them**, by
+> setting `io.modelcontextprotocol/logLevel` in the request's `_meta`. The
+> revision forbids servers from sending `notifications/message` for a request
+> that did not opt in, so `log.*` is a no-op otherwise — that is expected
+> behaviour, not a bug.
+>
+> Logging is also deprecated as of 2026-07-28. For diagnostics that always
+> reach you, write to `stderr` (stdio servers) or use OpenTelemetry; for
+> user-visible progress, prefer [`reportProgress`](#progress).
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args, { log }) => {
+    log.info("Downloading file...", {
+      url,
+    });
+
+    // ...
+
+    log.info("Downloaded file");
+
+    return "done";
+  },
+});
+```
+
+The `log` object has the following methods:
+
+- `debug(message: string, data?: SerializableValue)`
+- `error(message: string, data?: SerializableValue)`
+- `info(message: string, data?: SerializableValue)`
+- `warn(message: string, data?: SerializableValue)`
+
+### Custom Logger
+
+Provide a `logger` to route server logs into your own infrastructure.
+
+```ts
+import { ViteMCP, Logger } from "@vitemcp/server";
+
+class CustomLogger implements Logger {
+  debug(...args: unknown[]): void {
+    console.log("[DEBUG]", new Date().toISOString(), ...args);
+  }
+
+  error(...args: unknown[]): void {
+    console.error("[ERROR]", new Date().toISOString(), ...args);
+  }
+
+  info(...args: unknown[]): void {
+    console.info("[INFO]", new Date().toISOString(), ...args);
+  }
+
+  log(...args: unknown[]): void {
+    console.log("[LOG]", new Date().toISOString(), ...args);
+  }
+
+  warn(...args: unknown[]): void {
+    console.warn("[WARN]", new Date().toISOString(), ...args);
+  }
+}
+
+const server = new ViteMCP({
+  name: "My Server",
+  version: "1.0.0",
+  logger: new CustomLogger(),
+});
+```
+
+See `src/examples/custom-logger.ts` for examples with Winston, Pino, and file-based logging.
+
+### Errors
+
+The errors that are meant to be shown to the user should be thrown as `UserError` instances:
+
+```js
+import { UserError } from "@vitemcp/server";
+
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    if (args.url.startsWith("https://example.com")) {
+      throw new UserError("This URL is not allowed");
+    }
+
+    return "done";
+  },
+});
+```
+
+### Progress
+
+Tools can report progress by calling `reportProgress` in the context object:
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args, { reportProgress }) => {
+    await reportProgress({
+      progress: 0,
+      total: 100,
+    });
+
+    // ...
+
+    await reportProgress({
+      progress: 100,
+      total: 100,
+    });
+
+    return "done";
+  },
+});
+```
+
+`reportProgress` accepts an optional human-readable `message` alongside the numeric fields, which clients can display next to the progress indicator:
+
+```js
+await reportProgress({
+  progress: 40,
+  total: 100,
+  message: "Downloading chunk 4 of 10…",
+});
+```
+
+Progress notifications are only emitted when the client opts in by supplying a `progressToken` on the tool call; otherwise `reportProgress` is a no-op. `notifications/progress` is part of the specification, so this is the portable way to send incremental updates during a long-running tool call.
+
+### Health-check Endpoint
+
+When you run ViteMCP with the `httpStream` transport you can optionally expose a
+simple HTTP endpoint that returns a plain-text response useful for load-balancer
+or container orchestration liveness checks.
+
+Enable (or customise) the endpoint via the `health` key in the server options:
+
+```ts
+const server = new ViteMCP({
+  name: "My Server",
+  version: "1.0.0",
+  health: {
+    // Enable / disable (default: true)
+    enabled: true,
+    // Body returned by the endpoint (default: 'ok')
+    message: "healthy",
+    // Path that should respond (default: '/health')
+    path: "/healthz",
+    // HTTP status code to return (default: 200)
+    status: 200,
+  },
+});
+
+await server.start({
+  transportType: "httpStream",
+  httpStream: { port: 8080 },
+});
+```
+
+Now a request to `http://localhost:8080/healthz` will return:
+
+```
+HTTP/1.1 200 OK
+content-type: text/plain
+
+healthy
+```
+
+The endpoint is ignored when the server is started with the `stdio` transport.
+
+## Deployment
+
+ViteMCP can serve over HTTP, so a server on a remote machine is reachable over
+the network.
+
+### HTTP Streaming
+
+[HTTP streaming](https://www.cloudflare.com/learning/video/what-is-http-live-streaming/) provides a more efficient alternative to SSE in environments that support it, with potentially better performance for larger payloads.
+
+You can run the server with HTTP streaming support:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8080,
+  },
+});
+```
+
+The server then listens on `http://localhost:8080/mcp`.
+
+> **Note:** You can also customize the endpoint path using the `httpStream.endpoint` option (default is `/mcp`).
+
+> **Note:** To serve HTTP streaming and built-in OAuth routes under an issuer path, set `httpStream.basePath` (for example, `/issuer1`). This exposes authorization server metadata at `/.well-known/oauth-authorization-server/issuer1` per RFC 8414.
+
+Connect with a client transport:
+
+For HTTP streaming connections:
+
+```ts
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+
+const client = new Client(
+  {
+    name: "example-client",
+    version: "1.0.0",
+  },
+  {
+    // Required: the SDK client negotiates the 2025 protocol era unless told
+    // otherwise, and this server serves only 2026-07-28.
+    versionNegotiation: { mode: "auto" },
+  },
+);
+
+const transport = new StreamableHTTPClientTransport(
+  new URL(`http://localhost:8080/mcp`),
+);
+
+await client.connect(transport);
+```
+
+#### HTTPS Support
+
+Pass SSL certificates to terminate TLS directly:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8443,
+    sslCert: "./path/to/cert.pem",
+    sslKey: "./path/to/key.pem",
+    sslCa: "./path/to/ca.pem", // Optional: for client certificate authentication
+  },
+});
+```
+
+The server then listens on `https://localhost:8443/mcp`.
+
+**SSL Options:**
+
+- `sslCert` - Path to SSL certificate file
+- `sslKey` - Path to SSL private key file
+- `sslCa` - (Optional) Path to CA certificate for mutual TLS authentication
+
+**For testing**, you can generate self-signed certificates:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
+```
+
+**For production**, obtain certificates from a trusted CA like Let's Encrypt.
+
+See the [https-server example](src/examples/https-server.ts) for a complete demonstration.
+
+#### CORS Configuration
+
+By default, ViteMCP enables CORS with a standard set of allowed headers. You can customize the CORS behavior by passing a `cors` option:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8080,
+    cors: {
+      origin: "http://localhost:3000",
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Mcp-Protocol-Version",
+        "X-Custom-Header",
+      ],
+      credentials: true,
+    },
+  },
+});
+```
+
+The `cors` option accepts:
+
+- `true` (default) - enable CORS with default settings
+- `false` - disable CORS entirely
+- An object with these fields:
+  - `origin` - a string, array of strings, or a function `(origin: string) => boolean`
+  - `allowedHeaders` - a string or array of strings
+  - `methods` - array of allowed HTTP methods
+  - `exposedHeaders` - array of headers to expose
+  - `credentials` - boolean to allow credentials
+  - `maxAge` - preflight cache duration in seconds
+
+The `CorsOptions` type is exported from `vitemcp` for convenience.
+
+### Custom HTTP Routes
+
+Custom HTTP routes live alongside the MCP endpoint in the same process — REST APIs, webhooks, admin interfaces.
+
+```ts
+const app = server.getApp();
+
+// Add REST API endpoints with Hono's native API
+app.get("/api/users", async (c) => {
+  return c.json({ users: [] });
+});
+
+// Handle path parameters
+app.get("/api/users/:id", async (c) => {
+  return c.json({
+    userId: c.req.param("id"),
+    query: c.req.query(), // Access query parameters
+  });
+});
+
+// Handle POST requests with body parsing
+app.post("/api/users", async (c) => {
+  const body = await c.req.json();
+  return c.json({ created: body }, 201);
+});
+
+// Serve HTML content
+app.get("/admin", async (c) => {
+  return c.html("<html><body><h1>Admin Panel</h1></body></html>");
+});
+
+// Handle webhooks
+app.post("/webhook/github", async (c) => {
+  const payload = await c.req.json();
+  const event = c.req.header("x-github-event");
+
+  // Process webhook...
+  return c.json({ received: true });
+});
+```
+
+Custom routes use the underlying [Hono](https://hono.dev/) app returned by `server.getApp()` and support:
+
+- Hono's HTTP methods: `get`, `post`, `put`, `delete`, `patch`, `options`, and more
+- Path parameters (`:param`) and wildcards (`*`)
+- Query string parsing
+- JSON, text, form, and other body helpers from `c.req`
+- Custom status codes and headers
+- Middleware and route groups through Hono
+
+Routes are matched in the order they are registered, allowing you to define specific routes before catch-all patterns.
+
+#### Public and Protected Routes
+
+Custom Hono routes are public unless you add your own route middleware or authentication checks. For protected custom routes, put your auth logic in a reusable helper and call it from both ViteMCP's `authenticate` option and your Hono route handlers:
+
+```ts
+import type { Context } from "hono";
+import { ViteMCP } from "@vitemcp/server";
+
+async function authenticateRequest(request: Request) {
+  const apiKey = request.headers.get("x-api-key");
+  return apiKey === "123" ? { userId: "123" } : undefined;
+}
+
+const server = new ViteMCP({
+  name: "My Server",
+  version: "1.0.0",
+  authenticate: authenticateRequest,
+});
+
+const app = server.getApp();
+
+async function requireAuth(c: Context) {
+  const auth = await authenticateRequest(c.env.incoming);
+
+  if (!auth) {
+    return c.json({ error: "Authentication required" }, 401);
+  }
+
+  return auth;
+}
+
+// Public route - no authentication required
+app.get("/.well-known/openid-configuration", async (c) => {
+  return c.json({
+    issuer: "https://example.com",
+    authorization_endpoint: "https://example.com/auth",
+    token_endpoint: "https://example.com/token",
+  });
+});
+
+// Private route - requires authentication
+app.get("/api/users", async (c) => {
+  const auth = await requireAuth(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  return c.json({ users: [] });
+});
+
+// Public static files
+app.get("/public/*", async (c) => {
+  return c.text(`File: ${c.req.path}`);
+});
+```
+
+Public routes are perfect for:
+
+- OAuth discovery endpoints (`.well-known/*`)
+- Health checks and status pages
+- Static assets and documentation
+- Webhook endpoints from external services
+- Public APIs that don't require user authentication
+
+See the [custom-routes example](src/examples/custom-routes.ts) for a complete demonstration.
+
+### Edge Runtime Support
+
+ViteMCP runs on edge runtimes such as Cloudflare Workers.
+
+#### Choosing Between ViteMCP and EdgeViteMCP
+
+| Use Case                        | Class         | Import                                               |
+| ------------------------------- | ------------- | ---------------------------------------------------- |
+| Node.js, Express, Bun           | `ViteMCP`     | `import { ViteMCP } from "@vitemcp/server"`          |
+| Cloudflare Workers, Deno Deploy | `EdgeViteMCP` | `import { EdgeViteMCP } from "@vitemcp/server/edge"` |
+
+| Feature              | ViteMCP                        | EdgeViteMCP                            |
+| -------------------- | ------------------------------ | -------------------------------------- |
+| Runtime              | Node.js                        | Edge (V8 isolates)                     |
+| Start method         | `server.start({ port })`       | `export default server`                |
+| Transport            | stdio, httpStream              | HTTP Streamable only                   |
+| File system          | Yes                            | No                                     |
+| OAuth/Authentication | Built-in `authenticate` option | Use Hono middleware (built-in planned) |
+| Custom routes        | `server.getApp()`              | `server.getApp()`                      |
+
+> **Note:** Built-in authentication for EdgeViteMCP is planned for a future release. Both ViteMCP and EdgeViteMCP use Hono internally, so there's no technical barrier. `ViteMCP`'s `authenticate` already takes a web-standard `Request`, so the same hook shape works on both.
+>
+> In the meantime, use Hono middleware:
+>
+> ```ts
+> const app = server.getApp();
+> app.use("/api/*", async (c, next) => {
+>   if (c.req.header("authorization") !== "Bearer secret") {
+>     return c.json({ error: "Unauthorized" }, 401);
+>   }
+>   await next();
+> });
+> ```
+
+#### Cloudflare Workers
+
+To deploy ViteMCP to Cloudflare Workers, use the `EdgeViteMCP` class from the `/edge` subpath:
+
+```ts
+import { EdgeViteMCP } from "@vitemcp/server/edge";
+import { z } from "zod";
+
+const server = new EdgeViteMCP({
+  name: "My Edge Server",
+  version: "1.0.0",
+  description: "MCP server running on Cloudflare Workers",
+});
+
+// Add tools, resources, prompts as usual
+server.addTool({
+  name: "greet",
+  description: "Greet someone",
+  parameters: z.object({
+    name: z.string(),
+  }),
+  execute: async ({ name }) => {
+    return `Hello, ${name}! Served from the edge.`;
+  },
+});
+
+// Export the server as the default (required for Cloudflare Workers)
+export default server;
+```
+
+#### Edge Runtime Differences
+
+When running on edge runtimes:
+
+- **No shared state**: Each request is handled independently — which is simply how the protocol works now
+- **No filesystem access**: Use fetch APIs for external data
+- **V8 Isolates**: Fast cold starts and efficient resource usage
+- **Global deployment**: Automatic distribution to edge locations
+
+#### Custom Routes on Edge
+
+You can access the underlying Hono app to add custom HTTP routes:
+
+```ts
+const app = server.getApp();
+
+// Add a landing page
+app.get("/", (c) => c.html("<h1>Welcome to my MCP server</h1>"));
+
+// Add REST API endpoints
+app.get("/api/status", (c) => c.json({ status: "ok" }));
+```
+
+#### Deploying to the edge
+
+Configure your `wrangler.toml`:
+
+```toml
+name = "my-mcp-server"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+```
+
+Deploy with:
+
+```bash
+wrangler deploy
+```
+
+See the [edge-cloudflare-worker example](src/examples/edge-cloudflare-worker.ts) for a complete demonstration.
+
+## Testing and Debugging
 
 ### Unit testing with an in-memory transport
 
