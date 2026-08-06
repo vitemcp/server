@@ -1,7 +1,7 @@
 {
   "name": "@vitemcp/server",
   "version": "1.0.0",
-  "main": "dist/ViteMCP.js",
+  "main": "./dist/ViteMCP.cjs",
   "scripts": {
     "build": "tsup",
     "lint": "prettier --check . && eslint . && tsc --noEmit && jsr publish --dry-run",
@@ -56,7 +56,8 @@
         "types": "./dist/edge/index.d.cts",
         "default": "./dist/edge/index.cjs"
       }
-    }
+    },
+    "./package.json": "./package.json"
   },
   "dependencies": {
     "@modelcontextprotocol/core": "^2.0.0",
