@@ -127,6 +127,26 @@ export abstract class AuthProvider<
   }
 
   /**
+   * Release the resources held by the proxy this provider built for itself.
+   *
+   * That proxy runs two cleanup timers — its own sweep and its token
+   * storage's — and both keep the Node event loop alive, so a process that has
+   * stopped serving does not exit until this runs. `getProxy().destroy()`
+   * reaches the same teardown; this exists so a caller holding only the
+   * provider does not have to know that.
+   *
+   * The reference is dropped rather than kept, because `destroy()` clears the
+   * proxy's client registrations and stops its sweep: reusing that instance
+   * would be quietly broken. A later `authenticate()` lazily builds a fresh
+   * one instead. Safe to call more than once, and a no-op if the lazy proxy
+   * was never created.
+   */
+  destroy(): void {
+    this._proxy?.destroy();
+    this._proxy = undefined;
+  }
+
+  /**
    * Get the OAuth configuration object for ViteMCP ServerOptions.
    */
   getOAuthConfig(): {

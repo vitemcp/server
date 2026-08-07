@@ -439,6 +439,28 @@ const authProxy = new GoogleProvider({
 });
 ```
 
+### Shutting down
+
+Both the proxy and its default in-memory storage run a 60-second cleanup sweep,
+and an uncleared `setInterval` keeps the Node event loop alive — a process that
+has stopped serving will not exit on its own. Call `destroy()` when you are done
+with it:
+
+```typescript
+const provider = new GoogleProvider({
+  /* … */
+});
+
+// Releases the proxy the provider created, and its storage timer.
+provider.destroy();
+```
+
+Driving the proxy directly, call `authProxy.destroy()` instead. A storage
+backend you constructed yourself is left running — its lifetime is yours, so
+destroy it separately. `ViteMCP.stop()` deliberately does not do any of this:
+the proxy is supplied through configuration rather than owned by the server, and
+tearing it down would clear the client registrations a later `start()` needs.
+
 ## Token handling
 
 ### Token swap (default)

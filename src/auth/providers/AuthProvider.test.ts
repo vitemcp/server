@@ -323,4 +323,69 @@ describe("AuthProvider common behavior", () => {
       expect(typeof proxy.loadUpstreamTokens).toBe("function");
     }
   });
+
+  // The lazily-created proxy runs two cleanup timers, and an uncleared
+  // setInterval keeps the Node event loop alive — a server that has stopped
+  // serving would never exit on its own.
+  describe("destroy", () => {
+    /** How many timers are currently keeping the event loop alive. */
+    const activeTimers = () =>
+      process.getActiveResourcesInfo().filter((type) => type === "Timeout")
+        .length;
+
+    const config = {
+      baseUrl: "http://localhost:8000",
+      clientId: "test",
+      clientSecret: "test",
+    };
+
+    it("releases the timers of the proxy it created", () => {
+      const before = activeTimers();
+
+      const provider = new GitHubProvider(config);
+      // The proxy is lazy, so force it into existence before measuring.
+      provider.getProxy();
+      expect(activeTimers()).toBeGreaterThan(before);
+
+      provider.destroy();
+
+      expect(activeTimers()).toBe(before);
+    });
+
+    it("is a no-op when the proxy was never created", () => {
+      const before = activeTimers();
+
+      new GitHubProvider(config).destroy();
+
+      expect(activeTimers()).toBe(before);
+    });
+
+    it("can be called twice", () => {
+      const before = activeTimers();
+
+      const provider = new GitHubProvider(config);
+      provider.getProxy();
+      provider.destroy();
+      provider.destroy();
+
+      expect(activeTimers()).toBe(before);
+    });
+
+    // Reusing a destroyed proxy would mean a stopped sweep and cleared client
+    // registrations, so the provider drops it and builds a fresh one.
+    it("builds a fresh proxy if the provider is used again", () => {
+      const before = activeTimers();
+
+      const provider = new GitHubProvider(config);
+      const first = provider.getProxy();
+      provider.destroy();
+
+      const second = provider.getProxy();
+      expect(second).not.toBe(first);
+      expect(activeTimers()).toBeGreaterThan(before);
+
+      provider.destroy();
+      expect(activeTimers()).toBe(before);
+    });
+  });
 });
