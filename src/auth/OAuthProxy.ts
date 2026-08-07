@@ -198,6 +198,24 @@ export class OAuthProxy {
       );
     }
 
+    // Reject an unsupported method here rather than at /oauth/token. The token
+    // endpoint treats an unknown method as a failed verifier check, which
+    // surfaces as an `invalid_grant` after the user has already gone through
+    // the upstream login — a confusing way to learn the method was never
+    // supported. `plain` is unsupported unless `allowPlainPkce` is set.
+    if (
+      params.code_challenge &&
+      params.code_challenge_method &&
+      !this.supportedCodeChallengeMethods().includes(
+        params.code_challenge_method,
+      )
+    ) {
+      throw new OAuthProxyError(
+        "invalid_request",
+        `Unsupported code_challenge_method: ${params.code_challenge_method}`,
+      );
+    }
+
     // Create transaction
     const transaction = await this.createTransaction(params);
 
@@ -383,7 +401,7 @@ export class OAuthProxy {
       authorizationResponseIssParameterSupported: true,
       // Clients prefer CIMD over DCR when both are offered.
       clientIdMetadataDocumentSupported: this.clientIdMetadata.enabled,
-      codeChallengeMethodsSupported: ["S256", "plain"],
+      codeChallengeMethodsSupported: this.supportedCodeChallengeMethods(),
       grantTypesSupported: ["authorization_code", "refresh_token"],
       issuer: this.config.baseUrl,
       registrationEndpoint: `${this.config.baseUrl}/oauth/register`,
@@ -1585,6 +1603,20 @@ export class OAuthProxy {
     this.cleanupInterval = setInterval(() => {
       this.cleanup();
     }, 60000); // Run every minute
+  }
+
+  /**
+   * PKCE challenge methods this proxy accepts, advertised in the authorization
+   * server metadata and enforced at /oauth/authorize.
+   *
+   * S256 only by default. `plain` makes the challenge and the verifier the same
+   * value, so the secret needed to redeem an authorization code is exposed
+   * everywhere the authorization request is: browser history, referrer headers,
+   * proxy logs. RFC 7636 §4.2 requires S256 of any client that can hash, and
+   * OAuth 2.1 removes `plain` entirely.
+   */
+  private supportedCodeChallengeMethods(): string[] {
+    return this.config.allowPlainPkce ? ["S256", "plain"] : ["S256"];
   }
 
   /**

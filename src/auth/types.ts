@@ -230,6 +230,21 @@ export interface OAuthProxyConfig {
    * https URLs enables CWE-601 open-redirect / authorization-code theft.
    */
   allowedRedirectUriPatterns?: string[];
+  /**
+   * Accept `code_challenge_method=plain` at the authorization endpoint
+   * (default: false).
+   *
+   * RFC 7636 §4.2 requires S256 of any client that can compute a SHA-256
+   * digest, and OAuth 2.1 — which the MCP authorization spec builds on — drops
+   * `plain` altogether. With `plain` the challenge *is* the verifier, so the
+   * value sits in the authorization request, in browser history, and in every
+   * proxy log along the way; anyone who reads it there can redeem a stolen
+   * authorization code. S256 leaks only a hash.
+   *
+   * Left as an escape hatch for the rare client that genuinely cannot hash.
+   * Enabling it re-advertises `plain` in the authorization server metadata.
+   */
+  allowPlainPkce?: boolean;
   /** Authorization code TTL in seconds (default: 300) */
   authorizationCodeTtl?: number;
   /** Base URL of this proxy server */

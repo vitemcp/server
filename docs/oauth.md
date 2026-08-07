@@ -43,6 +43,13 @@ This is the complete OAuth reference. For the abbreviated version, see
 Two PKCE pairs are in play: one between client and proxy, one between proxy and
 upstream. Neither party ever sees the other's verifier.
 
+Only `S256` is accepted. `plain` makes the challenge and the verifier the same
+value, so the secret that redeems an authorization code ends up in browser
+history, referrer headers and proxy logs — RFC 7636 §4.2 requires S256 of any
+client that can hash, and OAuth 2.1 removes `plain` outright. Set
+`allowPlainPkce: true` for the rare client that genuinely cannot compute a
+SHA-256 digest; it re-advertises `plain` in the metadata as well.
+
 These endpoints are registered automatically:
 
 | Endpoint                                  | Method   | Purpose                              |
@@ -338,6 +345,7 @@ interface OAuthProxyConfig {
 
   // Flow behaviour
   allowedRedirectUriPatterns?: string[];
+  allowPlainPkce?: boolean; // default: false
   authorizationCodeTtl?: number; // seconds, default: 300
   consentRequired?: boolean; // default: true
   consentSigningKey?: string; // auto-generated if absent
@@ -811,7 +819,7 @@ Keep secrets in the environment, never in source.
 | Attack              | Mitigation                            |
 | ------------------- | ------------------------------------- |
 | Confused deputy     | User consent screen                   |
-| Code interception   | Two-tier PKCE                         |
+| Code interception   | Two-tier PKCE, S256 only              |
 | Token theft         | Short-lived JWTs, encryption at rest  |
 | XSS                 | HTML escaping in the consent screen   |
 | CSRF                | State parameter validation            |
@@ -846,6 +854,10 @@ instances, or clocks are skewed.
 **"PKCE validation failed"** — the client's `code_verifier` does not match the
 `code_challenge` it sent. Confirm the client stores the verifier across the
 redirect and sends the same one it derived the challenge from.
+
+**"Unsupported code_challenge_method"** — the client asked for `plain` or an
+unrecognised method. Have it use `S256`; if it truly cannot, set
+`allowPlainPkce: true` and read the warning above first.
 
 **"Authorization response issuer does not match"** — the provider returned an
 `iss` that is not the one this transaction started against (RFC 9207). If the
