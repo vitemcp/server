@@ -84,13 +84,29 @@ export abstract class AuthProvider<
   protected config: AuthProviderConfig;
   /**
    * Get the proxy, creating it lazily if needed.
+   *
+   * Refuses to rebuild after `destroy()`. Lazily replacing a torn-down proxy
+   * would be silently wrong twice over: the replacement starts the very timers
+   * `destroy()` released, and `ViteMCP` captured the original by reference when
+   * it mounted the OAuth routes, so the token endpoint would keep answering
+   * from the old instance while `authenticate()` verified against the new one —
+   * with different auto-generated signing keys, every token minted by one is
+   * invalid to the other.
    */
   protected get proxy(): OAuthProxy {
+    if (this._destroyed) {
+      throw new Error(
+        "AuthProvider has been destroyed. Create a new provider rather than reusing this one.",
+      );
+    }
+
     if (!this._proxy) {
       this._proxy = this.createProxy();
     }
     return this._proxy;
   }
+
+  private _destroyed = false;
 
   private _proxy: OAuthProxy | undefined;
 
@@ -135,13 +151,16 @@ export abstract class AuthProvider<
    * reaches the same teardown; this exists so a caller holding only the
    * provider does not have to know that.
    *
-   * The reference is dropped rather than kept, because `destroy()` clears the
-   * proxy's client registrations and stops its sweep: reusing that instance
-   * would be quietly broken. A later `authenticate()` lazily builds a fresh
-   * one instead. Safe to call more than once, and a no-op if the lazy proxy
-   * was never created.
+   * Terminal: the provider will not serve again afterwards, and any later use
+   * throws rather than quietly building a replacement. Call it when the process
+   * is shutting down, after the HTTP server has finished draining — a request
+   * still in flight would otherwise resurrect what this just released.
+   *
+   * Safe to call more than once, and a no-op if the lazy proxy was never
+   * created.
    */
   destroy(): void {
+    this._destroyed = true;
     this._proxy?.destroy();
     this._proxy = undefined;
   }

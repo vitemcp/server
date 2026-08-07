@@ -446,20 +446,33 @@ and an uncleared `setInterval` keeps the Node event loop alive — a process tha
 has stopped serving will not exit on its own. Call `destroy()` when you are done
 with it:
 
+This means keeping a reference to the provider rather than inlining it into the
+`ViteMCP` options the way the examples above do — the server holds it privately
+and exposes no accessor:
+
 ```typescript
 const provider = new GoogleProvider({
   /* … */
 });
+const server = new ViteMCP({ auth: provider /* … */ });
 
-// Releases the proxy the provider created, and its storage timer.
+// Order matters: stop() drains in-flight requests, and destroy() is terminal.
+await server.stop();
 provider.destroy();
 ```
 
+`destroy()` does not leave a provider you can restart. Any later use throws,
+deliberately: rebuilding the proxy would start fresh timers, and `start()`
+mounted the OAuth routes against the _original_ proxy reference, so the token
+endpoint would answer from one instance while `authenticate()` verified against
+another — with independently generated signing keys, no token issued by one
+verifies against the other. To restart, build a new provider.
+
 Driving the proxy directly, call `authProxy.destroy()` instead. A storage
 backend you constructed yourself is left running — its lifetime is yours, so
-destroy it separately. `ViteMCP.stop()` deliberately does not do any of this:
-the proxy is supplied through configuration rather than owned by the server, and
-tearing it down would clear the client registrations a later `start()` needs.
+destroy it separately. `ViteMCP.stop()` deliberately does none of this, so a
+`stop()` → `start()` cycle keeps working: tearing the proxy down would clear the
+client registrations the next `start()` needs.
 
 ## Token handling
 

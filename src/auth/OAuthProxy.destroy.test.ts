@@ -49,15 +49,20 @@ describe("OAuthProxy destroy", () => {
     const tokenStorage = new MemoryTokenStorage();
     const withCallerStorage = activeTimers();
 
+    // Written before the proxy exists, so it is an entry the proxy has no
+    // business touching. MemoryTokenStorage.destroy() clears the map as well as
+    // the timer, so a proxy that wrongly tore this storage down would lose it —
+    // writing *after* destroy() would prove nothing, since a destroyed store
+    // still accepts writes.
+    await tokenStorage.save("caller-owned", "value");
+
     const proxy = new OAuthProxy({ ...baseConfig, tokenStorage });
     proxy.destroy();
 
     // The proxy tears down what it created, not what it was handed: the caller
     // may share one storage between proxies, or keep using it afterwards.
     expect(activeTimers()).toBe(withCallerStorage);
-
-    await tokenStorage.save("still-usable", "value");
-    expect(await tokenStorage.get("still-usable")).toBe("value");
+    expect(await tokenStorage.get("caller-owned")).toBe("value");
 
     tokenStorage.destroy();
     expect(activeTimers()).toBe(before);

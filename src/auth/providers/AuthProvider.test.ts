@@ -371,20 +371,37 @@ describe("AuthProvider common behavior", () => {
       expect(activeTimers()).toBe(before);
     });
 
-    // Reusing a destroyed proxy would mean a stopped sweep and cleared client
-    // registrations, so the provider drops it and builds a fresh one.
-    it("builds a fresh proxy if the provider is used again", () => {
+    // The dangerous alternative: lazily rebuilding would restart the timers
+    // destroy() just released, and ViteMCP mounts its OAuth routes against the
+    // proxy reference it captured at start(), so /oauth/token would answer from
+    // the old instance while authenticate() verified against the new one. Their
+    // signing keys are independently auto-generated, so no token minted by one
+    // would verify against the other.
+    it("refuses to rebuild the proxy after destroy", () => {
       const before = activeTimers();
 
       const provider = new GitHubProvider(config);
-      const first = provider.getProxy();
+      provider.getProxy();
       provider.destroy();
 
-      const second = provider.getProxy();
-      expect(second).not.toBe(first);
-      expect(activeTimers()).toBeGreaterThan(before);
+      expect(() => provider.getProxy()).toThrow(/destroyed/i);
+      expect(activeTimers()).toBe(before);
+    });
 
+    it("rejects authenticate() after destroy rather than serving a new proxy", async () => {
+      const before = activeTimers();
+
+      const provider = new GitHubProvider(config);
+      provider.getProxy();
       provider.destroy();
+
+      await expect(
+        provider.authenticate(
+          new Request("https://example.com/mcp", {
+            headers: { authorization: "Bearer some-token" },
+          }),
+        ),
+      ).rejects.toThrow(/destroyed/i);
       expect(activeTimers()).toBe(before);
     });
   });
