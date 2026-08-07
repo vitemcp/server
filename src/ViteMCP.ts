@@ -430,6 +430,30 @@ type Literal = boolean | null | number | string | undefined;
 
 export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   /**
+   * The `auth` provider this server was constructed with, or `undefined` when
+   * OAuth was configured through the `oauth` option instead (or not at all).
+   *
+   * Exposed so a caller who inlined the provider into the options — the way
+   * every example does — can still reach it at shutdown. The provider holds an
+   * `OAuthProxy` with two cleanup timers, and `stop()` deliberately leaves them
+   * running: the server does not own the provider, and a stopped server can be
+   * started again. Terminal teardown is therefore the caller's call:
+   *
+   * ```ts
+   * await server.stop();
+   * server.authProvider?.destroy();
+   * ```
+   *
+   * In that order — `destroy()` is terminal, and a request still draining would
+   * throw against a destroyed provider.
+   */
+  public get authProvider():
+    | AuthProvider<T extends OAuthSession ? T : OAuthSession>
+    | undefined {
+    return this.#options.auth;
+  }
+
+  /**
    * The port the HTTP server is actually listening on, or `null` when it is
    * not running over HTTP. Pass `httpStream.port: 0` to let the OS assign a
    * free port and read it back here — this avoids the race inherent in

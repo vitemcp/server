@@ -446,10 +446,6 @@ and an uncleared `setInterval` keeps the Node event loop alive — a process tha
 has stopped serving will not exit on its own. Call `destroy()` when you are done
 with it:
 
-This means keeping a reference to the provider rather than inlining it into the
-`ViteMCP` options the way the examples above do — the server holds it privately
-and exposes no accessor:
-
 ```typescript
 const provider = new GoogleProvider({
   /* … */
@@ -460,6 +456,18 @@ const server = new ViteMCP({ auth: provider /* … */ });
 await server.stop();
 provider.destroy();
 ```
+
+Naming the provider like this is the clearest form. When the server is built
+somewhere you cannot reach — a factory returning a bare `ViteMCP`, say — read it
+back off the server instead:
+
+```typescript
+await server.stop();
+server.authProvider?.destroy();
+```
+
+It is `undefined` when OAuth was configured through the `oauth` option rather
+than `auth`; there, hold your own `OAuthProxy` reference and destroy that.
 
 `destroy()` does not leave a provider you can restart. Any later use throws,
 deliberately: rebuilding the proxy would start fresh timers, and `start()`
@@ -637,7 +645,9 @@ network-distributed store.
 **Storage is encrypted by default.** The proxy wraps whatever `tokenStorage` you
 give it in `EncryptedTokenStorage` (AES-256-GCM, scrypt-derived key,
 authentication tag verified on read) unless it already is one. You do not need
-to wrap it yourself.
+to wrap it yourself — and if you do anyway, keep a reference to the backend you
+wrapped: `EncryptedTokenStorage` does not forward `destroy()`, because a wrapper
+handed a backend cannot know whether it is the last user of it.
 
 ```typescript
 const authProxy = new OAuthProxy({

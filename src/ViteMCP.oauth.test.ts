@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { GitHubProvider } from "./auth/providers/GitHubProvider.js";
 import { ViteMCP } from "./ViteMCP.js";
 
 describe("ViteMCP OAuth Support", () => {
@@ -415,5 +416,53 @@ describe("ViteMCP OAuth Support", () => {
     } finally {
       await server.stop();
     }
+  });
+
+  // The provider owns an OAuthProxy with two cleanup timers, and `stop()`
+  // deliberately leaves them running so a stopped server can be restarted.
+  // Without this accessor a caller who inlined the provider — which is what
+  // every example does — has no reference to tear it down with.
+  describe("authProvider accessor", () => {
+    it("returns the very provider it was constructed with", () => {
+      const provider = new GitHubProvider({
+        baseUrl: "http://localhost:8000",
+        clientId: "test",
+        clientSecret: "test",
+      });
+      const server = new ViteMCP({
+        auth: provider,
+        name: "Test Server",
+        version: "1.0.0",
+      });
+
+      // Identity, not shape: teardown has to reach the same object, and the
+      // provider refuses to rebuild its proxy once destroyed.
+      expect(server.authProvider).toBe(provider);
+
+      server.authProvider?.destroy();
+      expect(() => provider.getProxy()).toThrow(/destroyed/i);
+    });
+
+    it("is undefined when OAuth came through the oauth option instead", () => {
+      const server = new ViteMCP({
+        name: "Test Server",
+        oauth: {
+          enabled: true,
+          protectedResource: {
+            authorizationServers: ["https://auth.example.com"],
+            resource: "http://localhost:3000/mcp",
+          },
+        },
+        version: "1.0.0",
+      });
+
+      expect(server.authProvider).toBeUndefined();
+    });
+
+    it("is undefined when no auth is configured at all", () => {
+      const server = new ViteMCP({ name: "Test Server", version: "1.0.0" });
+
+      expect(server.authProvider).toBeUndefined();
+    });
   });
 });
