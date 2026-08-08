@@ -250,8 +250,18 @@ or the RFC 9207 check will reject the callback.
 
 ## Protecting tools
 
-`canAccess` decides whether a tool is available. Tools it rejects are filtered
-out of `tools/list` entirely, so unauthorized clients never see them.
+Configuring `auth` already closes the endpoint: a request that arrives without a
+valid bearer token is refused at the transport with `401` and an RFC 6750
+`WWW-Authenticate` challenge, which is what tells the client where to log in.
+Nothing behind the gate is reachable anonymously — `canAccess` decides what an
+_authenticated_ caller may use, not whether authentication happened.
+
+If you want part of the server to stay public, set `allowAnonymous: true` and
+guard everything else with `canAccess`. Unauthenticated requests are then served
+with `auth` set to `undefined`.
+
+`canAccess` filters rejected tools out of `tools/list` entirely, so clients never
+see the ones they may not call.
 
 ```typescript
 import {

@@ -1,15 +1,19 @@
 import {
   acceptedContent,
+  bearerAuthChallengeResponse,
   type CacheScope,
   completable,
   createMcpHandler,
   fromJsonSchema,
+  getOAuthProtectedResourceMetadataUrl,
   type InputRequest,
   inputRequired,
   type InputRequiredResult,
   localhostAllowedOrigins,
   type McpHttpHandler,
   McpServer,
+  OAuthError,
+  OAuthErrorCode,
   originValidationResponse,
   ResourceTemplate as SDKResourceTemplate,
   type ToolAnnotations as SDKToolAnnotations,
@@ -19,6 +23,7 @@ import {
   type StdioServerHandle,
 } from "@modelcontextprotocol/server/stdio";
 import { StandardSchemaV1 } from "@standard-schema/spec";
+import { AsyncLocalStorage } from "async_hooks";
 import { readFile } from "fs/promises";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -161,7 +166,22 @@ export type AudioContent = {
   type: "audio";
 };
 
-export type Authenticate<T> = (request: Request) => Promise<T>;
+/**
+ * Per-request authentication hook for the HTTP transport.
+ *
+ * Resolve with the session to attach to `context.auth`. Resolving with `null`
+ * or `undefined` **refuses** the request — the transport answers 401 and no
+ * handler runs — because a hook that cannot identify the caller has not
+ * authenticated them. Set `allowAnonymous` to have a nullish result mean
+ * "anonymous caller" instead, for servers that deliberately mix public and
+ * protected primitives.
+ *
+ * Throw a `Response` to refuse with an exact status and body of your choosing;
+ * it is returned to the client verbatim.
+ */
+export type Authenticate<T> = (
+  request: Request,
+) => Promise<null | T | undefined>;
 
 /**
  * Freshness hint attached to cacheable results (`tools/list`, `prompts/list`,
@@ -367,6 +387,17 @@ export type SerializableValue =
   | SerializableValue[];
 
 export type ServerOptions<T extends ViteMCPAuth> = {
+  /**
+   * Serve requests whose `authenticate` hook resolved with `null`/`undefined`
+   * as anonymous — `context.auth` is `undefined` and `canAccess` is the only
+   * gate — instead of refusing them with a 401.
+   *
+   * Off by default: a server that configures authentication and then answers
+   * callers it could not identify exposes every tool, resource and prompt that
+   * has no `canAccess` guard. Turn it on only for a server that is genuinely
+   * public in part, and guard the rest with `canAccess`.
+   */
+  allowAnonymous?: boolean;
   auth?: AuthProvider<T extends OAuthSession ? T : OAuthSession>;
   authenticate?: Authenticate<T>;
   health?: {
@@ -468,6 +499,13 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     return this.#serverState;
   }
   #authenticate: Authenticate<T> | undefined;
+  /**
+   * Carries the `authenticate` result from the HTTP route into the per-request
+   * server factory. The SDK invokes that factory from within `handler.fetch`,
+   * so the running store is always the one this request established — whereas
+   * a field on `this` would be shared by every concurrent request.
+   */
+  #authStore = new AsyncLocalStorage<{ auth: T | undefined }>();
   #connectedServers: McpServer[] = [];
   #corsMiddleware: null | ReturnType<typeof cors> = null;
   #handler: McpHttpHandler | null = null;
@@ -479,6 +517,13 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   #resources: Resource<T>[] = [];
   #resourceTemplates: ResourceTemplate<T>[] = [];
   #serverState: ServerState = ServerState.Stopped;
+  /**
+   * Whether this server publishes an RFC 9728 protected-resource document, and
+   * so whether a 401 can point a client at it. Latched when the routes are
+   * mounted rather than read back from `auth` per rejection: the provider's
+   * config getter builds its proxy on demand and refuses once destroyed.
+   */
+  #servesProtectedResourceMetadata = false;
   #stdioHandle: null | StdioServerHandle = null;
 
   #tools: Tool<T>[] = [];
@@ -746,6 +791,63 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     }
 
     this.#serverState = ServerState.Stopped;
+  }
+
+  /**
+   * Runs the `authenticate` hook and decides whether the exchange may proceed,
+   * returning either the store to run it under or the `Response` refusing it.
+   *
+   * Deliberately *not* done inside the per-request server factory: that
+   * factory's only return channel is an `McpServer`, so a refusal raised there
+   * is indistinguishable from a crash and reaches the client as a 500 with no
+   * `WWW-Authenticate` — the one header that tells an MCP client where to log
+   * in. Doing it here also covers the legacy fallback, which shares the same
+   * route, so no transport can be reached without passing this.
+   */
+  async #authenticateRequest(
+    request: Request,
+  ): Promise<{ auth: T | undefined } | Response> {
+    if (!this.#authenticate) {
+      return { auth: undefined };
+    }
+
+    let auth: null | T | undefined;
+
+    try {
+      auth = await this.#authenticate(request);
+    } catch (error) {
+      // A hook may throw the exact response it wants sent — the documented way
+      // to refuse with a specific status, body or challenge.
+      if (error instanceof Response) {
+        return error;
+      }
+
+      // Anything else is a fault in the hook. Fail closed: a hook that threw
+      // did not authorise anyone, so this must never fall through to the
+      // handler. Reported here because the throw no longer reaches the SDK's
+      // `onerror`, which used to be what logged it.
+      this.#logger.error("[ViteMCP error]", error);
+
+      return bearerAuthChallengeResponse(
+        new OAuthError(OAuthErrorCode.ServerError, "Internal Server Error"),
+      );
+    }
+
+    // A falsy result means the hook could not identify the caller, which is a
+    // refusal and not an anonymous session: `AuthProvider.authenticate`
+    // returns `undefined` for a missing, malformed or revoked bearer token.
+    // Serving those requests anyway would hand every primitive that has no
+    // `canAccess` guard to callers who presented no credentials at all.
+    // Tested for falsiness rather than nullishness because a session is always
+    // an object here, so nothing legitimate is caught — but an untyped hook
+    // returning `false` is caught, and it plainly means "no".
+    if (!auth) {
+      return this.#options.allowAnonymous
+        ? { auth: undefined }
+        : this.#unauthorized(request);
+    }
+
+    return { auth };
   }
 
   async #buildServer(auth: T | undefined): Promise<McpServer> {
@@ -1028,18 +1130,10 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     sslKey?: string;
   }): Promise<void> {
     this.#handler = createMcpHandler(
-      async (ctx) => {
-        // `ctx.requestInfo` is the real field; a previous cast invented `req`
-        // and silently handed every hook `undefined`.
-        const request = ctx.requestInfo;
-
-        const auth =
-          this.#authenticate && request
-            ? await this.#authenticate(request)
-            : undefined;
-
-        return this.#buildServer(auth);
-      },
+      // Authentication has already run in the route below, which is the only
+      // place that can turn a refusal into an HTTP status. What reaches here
+      // is either an authenticated session or a deliberately anonymous one.
+      async () => this.#buildServer(this.#authStore.getStore()?.auth),
       {
         // Tradeoff: `server/discover` advertises only 2026-07-28, so legacy
         // requests are answered unadvertised and skip Mcp-* validation.
@@ -1067,6 +1161,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
           proxy: oauth.proxy,
         }),
       );
+
+      this.#servesProtectedResourceMetadata = Boolean(oauth.protectedResource);
     }
 
     const health = this.#options.health;
@@ -1104,7 +1200,13 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         return rejected;
       }
 
-      return handler.fetch(c.req.raw);
+      const authenticated = await this.#authenticateRequest(c.req.raw);
+
+      if (authenticated instanceof Response) {
+        return authenticated;
+      }
+
+      return this.#authStore.run(authenticated, () => handler.fetch(c.req.raw));
     });
 
     const app = this.#honoApp;
@@ -1231,6 +1333,29 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         { label },
       );
     }
+  }
+
+  /**
+   * The RFC 6750 §3 challenge sent when `authenticate` refuses a request.
+   *
+   * `resource_metadata` (RFC 9728 §5.1) is the parameter that turns a bare
+   * rejection into a login: it points the client at this server's
+   * protected-resource document, from which it discovers the authorization
+   * server and starts the flow. It is derived from the URL the request
+   * arrived on, which is exactly where `createOAuthRouter` mounts that
+   * document, and is omitted when this server publishes no such document.
+   */
+  #unauthorized(request: Request): Response {
+    return bearerAuthChallengeResponse(
+      new OAuthError(OAuthErrorCode.InvalidToken, "Authentication required"),
+      this.#servesProtectedResourceMetadata
+        ? {
+            resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(
+              new URL(request.url),
+            ),
+          }
+        : {},
+    );
   }
 }
 

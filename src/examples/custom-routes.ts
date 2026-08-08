@@ -58,7 +58,9 @@ const server = new ViteMCP<UserAuth>({
     } else if (authHeader === "Bearer user-token") {
       return { role: "user", userId: "user1" };
     }
-    throw new Error("Invalid or missing authentication");
+    // Returning nothing refuses the request with a 401 challenge. Throw a
+    // Response instead when you want to dictate the exact reply.
+    return undefined;
   },
   name: "custom-routes-example",
   version: "1.0.0",

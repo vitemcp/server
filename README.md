@@ -857,8 +857,13 @@ registration steps, redirect URIs and scopes for each.
 
 #### Tool Authorization
 
-`canAccess` decides whether a caller may use a tool; tools it rejects are
-filtered out of `tools/list` entirely. Built-in helpers cover the common cases:
+Configuring `auth` (or `authenticate`) closes the endpoint on its own: a request
+that does not authenticate is refused with `401` and an RFC 6750
+`WWW-Authenticate` challenge before any handler runs, so nothing is reachable
+anonymously. `canAccess` then decides what an _authenticated_ caller may use.
+
+`canAccess` filters rejected tools out of `tools/list` entirely. Built-in helpers
+cover the common cases:
 
 ```ts
 import {
@@ -943,6 +948,34 @@ server.addTool({
     return `Hello, ${auth.id}!`;
   },
 });
+```
+
+The hook has two ways to refuse:
+
+- **Return `null` or `undefined`.** ViteMCP answers `401` with a
+  `WWW-Authenticate` challenge, pointing at the protected-resource document when
+  the server publishes one. `execute` never runs.
+- **Throw a `Response`.** It is sent to the client verbatim, for when you want an
+  exact status, body or header — as in the example above.
+
+Anything else the hook throws is a fault in your code: it is logged and answered
+with `500`, never served.
+
+Because a hook that cannot identify the caller has not authenticated them,
+returning nothing is a refusal and not an anonymous session. If your server is
+public in part, opt in explicitly and guard the rest with `canAccess`:
+
+```ts
+const server = new ViteMCP({
+  name: "My Server",
+  version: "1.0.0",
+  // Callers the hook could not identify are served with `auth: undefined`.
+  allowAnonymous: true,
+  authenticate: async (request) => lookUpApiKey(request) ?? undefined,
+});
+
+server.addTool({ name: "public-tool" /* ... */ });
+server.addTool({ canAccess: requireAuth, name: "private-tool" /* ... */ });
 ```
 
 #### OAuth Proxy
