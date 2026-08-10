@@ -418,6 +418,21 @@ export type ServerOptions<T extends ViteMCPAuth> = {
   version: `${number}.${number}.${number}`;
 };
 
+/**
+ * The structured payload on its own, without the content fallback.
+ *
+ * Returning this is how a tool states outright that an object is its structured
+ * result, for the cases where the shape alone cannot say so — a payload whose
+ * own `content` field is an array reads as a list of content blocks otherwise.
+ * ViteMCP writes the JSON text fallback, exactly as it does for a plain
+ * structured return.
+ */
+export type StructuredResult<T = unknown> = {
+  _meta?: Record<string, unknown>;
+  isError?: boolean;
+  structuredContent: T;
+};
+
 export type TextContent = {
   text: string;
   type: "text";
@@ -444,6 +459,7 @@ export type Tool<
     | ResourceLink
     | StandardSchemaV1.InferOutput<OutputParams>
     | string
+    | StructuredResult<StandardSchemaV1.InferOutput<OutputParams>>
     | TextContent
     | void
   >;
@@ -887,7 +903,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
                   tool.name,
                 )
               : tool.execute(args, context));
-            return normalizeToolResult(result);
+            return normalizeToolResult(result, tool.outputSchema !== undefined);
           } catch (error) {
             if (error instanceof UserError) {
               return {
@@ -1525,8 +1541,62 @@ const promptArgsSchema = <T extends ViteMCPAuth>(prompt: Prompt<T>) => {
   return z.object(shape);
 };
 
-/** Normalizes the several shapes `execute` may return into a CallToolResult. */
-const normalizeToolResult = (result: unknown): unknown => {
+/** The `StructuredResult` wrapper and nothing else — see `normalizeToolResult`. */
+const isStructuredResult = (
+  value: Record<string, unknown>,
+): value is StructuredResult => {
+  // Own properties only: an inherited `structuredContent` — a getter on a model
+  // or ORM prototype, say — is not a nomination.
+  if (
+    !Object.hasOwn(value, "structuredContent") ||
+    value.structuredContent === undefined
+  ) {
+    return false;
+  }
+
+  // The companions are copied into the result envelope as they stand, so a
+  // wrongly typed one would put an unserializable value on the wire and fail
+  // the call itself. Declining the wrapper leaves the whole object to be read
+  // as a payload, which costs a tool error at worst.
+  if (value.isError !== undefined && typeof value.isError !== "boolean") {
+    return false;
+  }
+
+  if (
+    value._meta !== undefined &&
+    (typeof value._meta !== "object" ||
+      value._meta === null ||
+      Array.isArray(value._meta))
+  ) {
+    return false;
+  }
+
+  // A key with no value cannot be what makes this a payload rather than a
+  // wrapper — it never reaches the wire either way, so `{ structuredContent,
+  // trace: debug ? id : undefined }` is still a wrapper.
+  return Object.keys(value).every(
+    (key) =>
+      key === "structuredContent" ||
+      key === "isError" ||
+      key === "_meta" ||
+      value[key] === undefined,
+  );
+};
+
+/**
+ * Normalizes the several shapes `execute` may return into a CallToolResult.
+ *
+ * Most of these shapes are told apart by inspecting the returned value, which
+ * is a guess: a structured payload is an arbitrary object and can carry the
+ * same keys the shorthands are recognized by. `hasOutputSchema` narrows that
+ * guess — a tool that declared an output schema returns its structured payload
+ * directly — and `structuredContent` settles what remains, since the one
+ * genuinely ambiguous shape cannot be resolved by inspection at all.
+ */
+const normalizeToolResult = (
+  result: unknown,
+  hasOutputSchema: boolean,
+): unknown => {
   if (result === undefined || result === null) {
     return { content: [] };
   }
@@ -1539,16 +1609,52 @@ const normalizeToolResult = (result: unknown): unknown => {
     const value = result as Record<string, unknown>;
 
     // Already an input_required (MRTR) or a full content result — pass through.
+    //
+    // A structured payload with its own array-valued `content` field is
+    // indistinguishable from content blocks here, and loses: inspecting the
+    // elements would only move the guess, and an empty array carries nothing to
+    // inspect. Such a tool returns `{ structuredContent }` instead.
     if (value.resultType === "input_required" || Array.isArray(value.content)) {
       return value;
     }
 
+    // Stated outright, so no guessing: the payload is whatever `execute`
+    // nominated, and the fallback below is written for it as usual. Passing the
+    // value through unread would nest it under a second `structuredContent`.
+    //
+    // Only the bare wrapper counts. Anything carrying keys of its own is a
+    // payload that happens to have a `structuredContent` field, and unwrapping
+    // it would both drop those keys and put them on the wire, where a field
+    // `execute` meant for itself does not belong.
+    if (isStructuredResult(value)) {
+      return {
+        content: [
+          {
+            // `undefined` is excluded already; this covers what else JSON
+            // declines to represent, so a broken payload stays a tool error
+            // rather than an unserializable content block.
+            text: JSON.stringify(value.structuredContent) ?? "null",
+            type: "text",
+          },
+        ],
+        structuredContent: value.structuredContent,
+        ...(value.isError === undefined ? {} : { isError: value.isError }),
+        ...(value._meta === undefined ? {} : { _meta: value._meta }),
+      };
+    }
+
+    // The single-content-block shorthand, off once an output schema is declared:
+    // a structured payload discriminated on `type` is the ordinary way to write
+    // a union, and reading one as a content block would drop the payload the
+    // schema promised. Such a tool cannot be after the shorthand anyway — a
+    // declared schema makes `structuredContent` mandatory.
     if (
-      value.type === "text" ||
-      value.type === "image" ||
-      value.type === "audio" ||
-      value.type === "resource" ||
-      value.type === "resource_link"
+      !hasOutputSchema &&
+      (value.type === "text" ||
+        value.type === "image" ||
+        value.type === "audio" ||
+        value.type === "resource" ||
+        value.type === "resource_link")
     ) {
       return { content: [value] };
     }

@@ -358,6 +358,30 @@ server.addTool({
 
 When `outputSchema` is provided, ViteMCP validates `structuredContent` before sending the tool result. Invalid structured output is returned to the client as a tool error instead of silently violating the advertised schema.
 
+ViteMCP tells a structured payload apart from MCP content blocks by shape, so a payload that looks like one of the other shapes needs saying outright. Return it under `structuredContent` and there is nothing left to infer — the JSON text fallback is still written for you:
+
+```typescript
+server.addTool({
+  name: "get-document",
+  parameters: z.object({ id: z.string() }),
+  outputSchema: z.object({
+    title: z.string(),
+    content: z.array(z.string()),
+  }),
+  execute: async ({ id }) => {
+    const doc = await getDocument(id);
+
+    return {
+      structuredContent: { title: doc.title, content: doc.paragraphs },
+    };
+  },
+});
+```
+
+Three payload shapes need it: an array-valued `content` field (as above), a `resultType` of `"input_required"`, and a lone `structuredContent` field of your own. Everything else is inferred correctly — including a payload that has a `structuredContent` field among others. In particular a top-level `type` field is safe — including `type: "text"` and the other content-block kinds — because a declared `outputSchema` turns off the single-content-block shorthand.
+
+The wrapper must stand alone: `{ structuredContent }`, optionally with `isError` or `_meta`. An object carrying anything else is read as a payload in its own right, so keys `execute` meant to keep never reach the client.
+
 #### Restricting who can call a tool
 
 A tool's optional `canAccess` receives the request's auth context and returns whether the caller may use it. Tools it rejects are filtered out of `tools/list` entirely.
