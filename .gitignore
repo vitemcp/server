@@ -1,6 +1,7 @@
 coverage
 dist
 node_modules
+CLAUDE.local.md
 
 # Dotfiles are ignored by default; re-admit only what the project needs.
 .*
