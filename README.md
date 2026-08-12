@@ -26,6 +26,7 @@ A TypeScript framework for building stateless [MCP](https://glama.ai/mcp) server
   - [Prompts](#prompts)
   - [Authentication](#authentication)
   - [Providing Instructions](#providing-instructions)
+  - [Server metadata and icons](#server-metadata-and-icons)
   - [Multi round-trip requests](#multi-round-trip-requests)
   - [Cacheable results](#cacheable-results)
   - [Client ID Metadata Documents](#client-id-metadata-documents)
@@ -1260,6 +1261,36 @@ const server = new ViteMCP({
     'Instructions describing how to use the server and its features.\n\nThis can be used by clients to improve the LLM\'s understanding of available tools, resources, etc. It can be thought of like a "hint" to the model. For example, this information MAY be added to the system prompt.',
 });
 ```
+
+### Server metadata and icons
+
+`icons`, `title`, `description` and `websiteUrl` are returned in `serverInfo`
+on `initialize`, so clients can list the server with a logo and a display name
+instead of the bare `name`:
+
+```ts
+const server = new ViteMCP({
+  name: "my-server",
+  title: "My Server",
+  description: "Weather forecasts and alerts.",
+  version: "1.0.0",
+  websiteUrl: "https://example.com",
+  icons: [
+    {
+      src: "https://example.com/icon.png",
+      mimeType: "image/png",
+      sizes: ["48x48"],
+    },
+  ],
+});
+```
+
+`src` is fetched by the client, so it has to be reachable from wherever the
+client runs — not just from the server. Every field is optional, and clients
+that do not support them ignore them.
+
+`description` is for the person picking a server; `instructions` is for the
+model using it.
 
 ### Multi round-trip requests
 

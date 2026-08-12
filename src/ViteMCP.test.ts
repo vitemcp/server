@@ -98,6 +98,53 @@ test("adds tools with Zod v4 schema", async () => {
   });
 });
 
+test("advertises implementation metadata on initialize", async () => {
+  const icons = [
+    {
+      mimeType: "image/png",
+      sizes: ["48x48"],
+      src: "https://example.com/i.png",
+    },
+  ];
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(client.getServerVersion()).toEqual({
+        description: "A test server",
+        icons,
+        name: "Test",
+        title: "Test Server",
+        version: "1.0.0",
+        websiteUrl: "https://example.com",
+      });
+    },
+    server: async () =>
+      new ViteMCP({
+        description: "A test server",
+        icons,
+        name: "Test",
+        title: "Test Server",
+        version: "1.0.0",
+        websiteUrl: "https://example.com",
+      }),
+  });
+});
+
+test("omits implementation metadata that was never set", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      // Not `toEqual` with the two fields: that passes on a `serverInfo`
+      // carrying `title: undefined`, which is what passing the options
+      // straight through would produce.
+      expect(Object.keys(client.getServerVersion() ?? {}).sort()).toEqual([
+        "name",
+        "version",
+      ]);
+    },
+    server: async () => new ViteMCP({ name: "Test", version: "1.0.0" }),
+  });
+});
+
 test("health endpoint returns ok", async () => {
   const server = new ViteMCP({
     health: { message: "healthy", path: "/healthz" },

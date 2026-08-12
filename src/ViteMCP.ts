@@ -6,6 +6,7 @@ import {
   createMcpHandler,
   fromJsonSchema,
   getOAuthProtectedResourceMetadataUrl,
+  type Icon,
   type InputRequest,
   inputRequired,
   type InputRequiredResult,
@@ -400,12 +401,26 @@ export type ServerOptions<T extends ViteMCPAuth> = {
   allowAnonymous?: boolean;
   auth?: AuthProvider<T extends OAuthSession ? T : OAuthSession>;
   authenticate?: Authenticate<T>;
+  /**
+   * What this server is, for a human reading a client's server list.
+   *
+   * Distinct from `instructions`, which is addressed to the model and tells it
+   * how to use what this server exposes.
+   */
+  description?: string;
   health?: {
     enabled?: boolean;
     message?: string;
     path?: string;
     status?: number;
   };
+  /**
+   * Icons a client may show next to this server, most specific first.
+   *
+   * `src` is a URL the client fetches, so it must be reachable from wherever
+   * the client runs — not only from the server.
+   */
+  icons?: Icon[];
   instructions?: string;
   logger?: Logger;
   name: string;
@@ -415,7 +430,11 @@ export type ServerOptions<T extends ViteMCPAuth> = {
     protectedResource?: Record<string, unknown>;
     proxy?: OAuthProxy;
   };
+  /** Display name, for clients that prefer one over the identifier `name`. */
+  title?: string;
   version: `${number}.${number}.${number}`;
+  /** Homepage for this server, for clients that link to one. */
+  websiteUrl?: string;
 };
 
 /**
@@ -868,7 +887,14 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
 
   async #buildServer(auth: T | undefined): Promise<McpServer> {
     const server = new McpServer(
-      { name: this.#options.name, version: this.#options.version },
+      {
+        description: this.#options.description,
+        icons: this.#options.icons,
+        name: this.#options.name,
+        title: this.#options.title,
+        version: this.#options.version,
+        websiteUrl: this.#options.websiteUrl,
+      },
       { instructions: this.#options.instructions },
     );
 
@@ -1713,6 +1739,7 @@ export {
 // `@modelcontextprotocol/server` is only a transitive dependency for consumers.
 export type {
   CacheScope,
+  Icon,
   InputRequest,
   InputRequiredResult,
   ToolAnnotations,
