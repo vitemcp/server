@@ -1288,7 +1288,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
           // Node req/res go through as Hono's env so custom routes can still
           // reach `c.env.incoming`.
           const response = await app.fetch(
-            nodeToWebRequest(req, body, useTls),
+            nodeToWebRequest(req, body, useTls, clientDisconnectSignal(res)),
             {
               incoming: req,
               outgoing: res,
@@ -1410,6 +1410,7 @@ const nodeToWebRequest = (
   req: http.IncomingMessage,
   body: Buffer,
   secure: boolean,
+  signal: AbortSignal,
 ): Request => {
   const host = req.headers.host ?? "localhost";
   // Scheme has to follow the listener, or absolute URLs derived from
@@ -1437,8 +1438,43 @@ const nodeToWebRequest = (
   return new Request(url, {
     headers,
     method,
+    signal,
     ...(hasBody ? { body } : {}),
   });
+};
+
+/**
+ * Aborts when the client goes away before the response is written.
+ *
+ * The SDK reads `Request.signal` to tear the exchange down and abort in-flight
+ * handlers, and a hand-built `Request` otherwise carries one that never fires
+ * — so on Node this has to be wired to the socket. Edge runtimes supply their
+ * own and need none of this.
+ *
+ * Keyed off `res`, not `req`: the request stream is fully drained before this
+ * runs, so its `close` has already fired and says nothing about the client.
+ */
+const clientDisconnectSignal = (res: http.ServerResponse): AbortSignal => {
+  const controller = new AbortController();
+
+  // A completed response emits `close` too; only a premature one is a
+  // disconnect.
+  const abortIfPremature = () => {
+    if (!res.writableEnded) {
+      controller.abort(new Error("Client disconnected"));
+    }
+  };
+
+  // Subscribing to an already-closed response would never fire, leaving the
+  // handler unaware the caller is gone. Not reachable today — nothing awaits
+  // between the body read and here — but one `await` away from being so.
+  if (res.closed) {
+    abortIfPremature();
+  } else {
+    res.once("close", abortIfPremature);
+  }
+
+  return controller.signal;
 };
 
 /**
