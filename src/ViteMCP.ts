@@ -279,6 +279,28 @@ export type Context<T extends ViteMCPAuth> = {
 
   /** The `requestState` echoed back by the client on an MRTR retry. */
   requestState?: string;
+
+  /**
+   * Aborts when this call is cancelled: the client disconnected, a
+   * `notifications/cancelled` arrived, or — for a tool with `timeoutMs` — the
+   * deadline passed. Forward it to whatever the handler starts (a `fetch`, a
+   * subprocess, a query) so that work stops with the request rather than
+   * running on unobserved.
+   *
+   * Scoped to the handler: returning normally leaves it unaborted, so
+   * `addEventListener("abort", …)` is safe to use for rollback.
+   *
+   * Two caveats. `notifications/cancelled` is a no-op on the stateless HTTP
+   * transport — a server is minted per request, so a cancellation for a call
+   * already in flight has nothing to reach; disconnecting is what cancels
+   * there. And `signal.reason` for a `timeoutMs` breach is the `UserError` the
+   * caller receives, not a `DOMException`, so code branching on
+   * `reason.name === "AbortError"` will not match.
+   *
+   * Always present: a context built outside a request (`embedded()`) carries
+   * one that never fires, so callers never have to guard.
+   */
+  signal: AbortSignal;
 };
 
 export type ImageContent = {
@@ -661,7 +683,11 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     const direct = this.#resources.find((resource) => resource.uri === uri);
 
     if (direct) {
-      const loaded = await direct.load(this.#makeContext(undefined, undefined));
+      // No `release()` here or below: a context built outside a request has no
+      // source signals to stop mirroring.
+      const loaded = await direct.load(
+        this.#makeContext(undefined, undefined).context,
+      );
       const first = Array.isArray(loaded) ? loaded[0] : loaded;
 
       if (!first) {
@@ -682,7 +708,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
 
       const loaded = await template.load(
         params as Record<string, string>,
-        this.#makeContext(undefined, undefined),
+        this.#makeContext(undefined, undefined).context,
       );
       const first = Array.isArray(loaded) ? loaded[0] : loaded;
 
@@ -919,15 +945,21 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
           )) as never,
         },
         (async (args: unknown, ctx: unknown) => {
-          const context = this.#makeContext(auth, ctx);
+          // Paired so the deadline reaches `execute` through `context.signal`
+          // as well as rejecting the caller — a timeout the tool cannot see
+          // leaves its work running behind an already-settled promise.
+          const timeout = tool.timeoutMs
+            ? { controller: new AbortController(), ms: tool.timeoutMs }
+            : undefined;
+          const { context, release } = this.#makeContext(
+            auth,
+            ctx,
+            timeout?.controller.signal,
+          );
 
           try {
-            const result = await (tool.timeoutMs
-              ? withTimeout(
-                  tool.execute(args, context),
-                  tool.timeoutMs,
-                  tool.name,
-                )
+            const result = await (timeout
+              ? withTimeout(tool.execute(args, context), timeout, tool.name)
               : tool.execute(args, context));
             return normalizeToolResult(result, tool.outputSchema !== undefined);
           } catch (error) {
@@ -939,6 +971,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
               };
             }
             throw error;
+          } finally {
+            release();
           }
         }) as never,
       );
@@ -958,16 +992,21 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
           mimeType: resource.mimeType,
         },
         (async (uri: URL, ctx: unknown) => {
-          const context = this.#makeContext(auth, ctx);
-          const loaded = await resource.load(context);
-          const bodies = Array.isArray(loaded) ? loaded : [loaded];
-          return {
-            contents: bodies.map((body) => ({
-              ...body,
-              mimeType: body.mimeType ?? resource.mimeType,
-              uri: body.uri ?? uri.toString(),
-            })),
-          };
+          const { context, release } = this.#makeContext(auth, ctx);
+
+          try {
+            const loaded = await resource.load(context);
+            const bodies = Array.isArray(loaded) ? loaded : [loaded];
+            return {
+              contents: bodies.map((body) => ({
+                ...body,
+                mimeType: body.mimeType ?? resource.mimeType,
+                uri: body.uri ?? uri.toString(),
+              })),
+            };
+          } finally {
+            release();
+          }
         }) as never,
       );
     }
@@ -1003,16 +1042,21 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
           mimeType: template.mimeType,
         },
         (async (uri: URL, args: Record<string, string>, ctx: unknown) => {
-          const context = this.#makeContext(auth, ctx);
-          const loaded = await template.load(args ?? {}, context);
-          const bodies = Array.isArray(loaded) ? loaded : [loaded];
-          return {
-            contents: bodies.map((body) => ({
-              ...body,
-              mimeType: body.mimeType ?? template.mimeType,
-              uri: body.uri ?? uri.toString(),
-            })),
-          };
+          const { context, release } = this.#makeContext(auth, ctx);
+
+          try {
+            const loaded = await template.load(args ?? {}, context);
+            const bodies = Array.isArray(loaded) ? loaded : [loaded];
+            return {
+              contents: bodies.map((body) => ({
+                ...body,
+                mimeType: body.mimeType ?? template.mimeType,
+                uri: body.uri ?? uri.toString(),
+              })),
+            };
+          } finally {
+            release();
+          }
         }) as never,
       );
     }
@@ -1029,21 +1073,26 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
           description: prompt.description,
         } as never,
         (async (args: Record<string, string>, ctx: unknown) => {
-          const context = this.#makeContext(auth, ctx);
-          const loaded = await prompt.load(args ?? {}, context);
+          const { context, release } = this.#makeContext(auth, ctx);
 
-          if (typeof loaded !== "string") {
-            return loaded;
+          try {
+            const loaded = await prompt.load(args ?? {}, context);
+
+            if (typeof loaded !== "string") {
+              return loaded;
+            }
+
+            return {
+              messages: [
+                {
+                  content: { text: loaded, type: "text" },
+                  role: "user" as const,
+                },
+              ],
+            };
+          } finally {
+            release();
           }
-
-          return {
-            messages: [
-              {
-                content: { text: loaded, type: "text" },
-                role: "user" as const,
-              },
-            ],
-          };
         }) as never,
       );
     }
@@ -1062,8 +1111,18 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     return app;
   }
 
-  /** Bridges the v2 per-request context onto ViteMCP's `Context`. */
-  #makeContext(auth: T | undefined, rawCtx: unknown): Context<T> {
+  /**
+   * Bridges the v2 per-request context onto ViteMCP's `Context`.
+   *
+   * `timeoutSignal` is folded into `context.signal` for a tool that declares
+   * `timeoutMs`; everything else mirrors the SDK's request signal alone. Call
+   * `release()` once the handler has settled — see {@link requestScope}.
+   */
+  #makeContext(
+    auth: T | undefined,
+    rawCtx: unknown,
+    timeoutSignal?: AbortSignal,
+  ): { context: Context<T>; release: () => void } {
     const ctx = rawCtx as {
       mcpReq?: {
         _meta?: {
@@ -1074,6 +1133,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         inputResponses?: Record<string, unknown>;
         notify?: (n: unknown) => Promise<void>;
         requestState?: <T>() => T | undefined;
+        signal?: AbortSignal;
       };
     };
     const mcpReq = ctx?.mcpReq;
@@ -1096,46 +1156,57 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         ?.catch(() => {});
     };
 
+    const scope = requestScope(mcpReq?.signal, timeoutSignal);
+
     return {
-      auth,
-      elicit: (params) =>
-        inputRequired.elicit({
-          message: params.message,
-          requestedSchema: params.requestedSchema as never,
-        }),
-      input: (key, schema) =>
-        acceptedContent(mcpReq?.inputResponses, key, schema as never) as never,
-      inputRequired: (inputRequests, requestState) =>
-        inputRequired({ inputRequests, requestState }),
-      inputResponses: mcpReq?.inputResponses,
-      log: {
-        debug: (m, d) => emit("debug", m, d),
-        error: (m, d) => emit("error", m, d),
-        info: (m, d) => emit("info", m, d),
-        warn: (m, d) => emit("warning", m, d),
-      },
-      reportProgress: async (progress) => {
-        const progressToken = mcpReq?._meta?.progressToken;
+      context: {
+        auth,
+        elicit: (params) =>
+          inputRequired.elicit({
+            message: params.message,
+            requestedSchema: params.requestedSchema as never,
+          }),
+        input: (key, schema) =>
+          acceptedContent(
+            mcpReq?.inputResponses,
+            key,
+            schema as never,
+          ) as never,
+        inputRequired: (inputRequests, requestState) =>
+          inputRequired({ inputRequests, requestState }),
+        inputResponses: mcpReq?.inputResponses,
+        log: {
+          debug: (m, d) => emit("debug", m, d),
+          error: (m, d) => emit("error", m, d),
+          info: (m, d) => emit("info", m, d),
+          warn: (m, d) => emit("warning", m, d),
+        },
+        reportProgress: async (progress) => {
+          const progressToken = mcpReq?._meta?.progressToken;
 
-        // No token means the client did not ask for progress on this request;
-        // emitting anyway would be an uncorrelatable notification.
-        if (progressToken === undefined) {
-          return;
-        }
+          // No token means the client did not ask for progress on this request;
+          // emitting anyway would be an uncorrelatable notification.
+          if (progressToken === undefined) {
+            return;
+          }
 
-        await mcpReq?.notify?.({
-          method: "notifications/progress",
-          params: {
-            message: progress.message,
-            progress: progress.progress,
-            progressToken,
-            total: progress.total,
-          },
-        });
+          await mcpReq?.notify?.({
+            method: "notifications/progress",
+            params: {
+              message: progress.message,
+              progress: progress.progress,
+              progressToken,
+              total: progress.total,
+            },
+          });
+        },
+        requestId: mcpReq?.id,
+        // The SDK exposes this as an accessor; call it so callers get the
+        // value.
+        requestState: mcpReq?.requestState?.<string>(),
+        signal: scope.signal,
       },
-      requestId: mcpReq?.id,
-      // The SDK exposes this as an accessor; call it so callers get the value.
-      requestState: mcpReq?.requestState?.<string>(),
+      release: scope.release,
     };
   }
 
@@ -1478,26 +1549,69 @@ const clientDisconnectSignal = (res: http.ServerResponse): AbortSignal => {
 };
 
 /**
- * Rejects if a tool outruns its `timeoutMs`. The work itself is not cancelled
- * — `execute` owns whatever it started — but the caller stops waiting.
+ * Rejects if a tool outruns its `timeoutMs`, and aborts `timeout.controller`
+ * first so `execute` — which reaches that signal through `context.signal` —
+ * can abandon whatever it started instead of running on unobserved.
  */
 const withTimeout = <T>(
   work: Promise<T>,
-  timeoutMs: number,
+  timeout: { controller: AbortController; ms: number },
   toolName: string,
 ): Promise<T> =>
   new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(
-        new UserError(`Tool '${toolName}' timed out after ${timeoutMs}ms`, {
-          timeoutMs,
-          toolName,
-        }),
+      const error = new UserError(
+        `Tool '${toolName}' timed out after ${timeout.ms}ms`,
+        { timeoutMs: timeout.ms, toolName },
       );
-    }, timeoutMs);
+
+      // Abort before rejecting so the reason `execute` observes is the same
+      // error the caller receives.
+      timeout.controller.abort(error);
+      reject(error);
+    }, timeout.ms);
 
     work.then(resolve, reject).finally(() => clearTimeout(timer));
   });
+
+/**
+ * Builds `context.signal` — never `undefined`, so callers can forward it to
+ * `fetch` without a guard — and bounds it to a single handler run.
+ *
+ * Handing the SDK's request signal straight through would abort on *success*
+ * too: the per-request transport is torn down as soon as the result is sent,
+ * which aborts every controller it owns. A signal that always ends aborted is
+ * useless for the one idiom that matters here — `addEventListener("abort",
+ * cleanup)` would roll back every completed call. So the sources are mirrored
+ * only while the handler is in flight, and `release()` stops the mirroring.
+ *
+ * A context built outside a request (`embedded()`) has no sources at all and
+ * gets a signal that never fires.
+ */
+const requestScope = (
+  ...sources: (AbortSignal | undefined)[]
+): { release: () => void; signal: AbortSignal } => {
+  const controller = new AbortController();
+  const detach = new AbortController();
+
+  for (const source of sources) {
+    if (source === undefined) {
+      continue;
+    }
+
+    if (source.aborted) {
+      controller.abort(source.reason);
+      break;
+    }
+
+    source.addEventListener("abort", () => controller.abort(source.reason), {
+      once: true,
+      signal: detach.signal,
+    });
+  }
+
+  return { release: () => detach.abort(), signal: controller.signal };
+};
 
 /** Renders a byte cap the way the error message should read (e.g. "1 MiB"). */
 const formatBytes = (bytes: number): string => {
