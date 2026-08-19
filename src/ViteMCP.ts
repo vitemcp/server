@@ -43,6 +43,7 @@ import type {
 } from "./auth/providers/AuthProvider.js";
 
 import { createOAuthRouter, OAUTH_PROXY_MAX_BODY_SIZE } from "./auth/router.js";
+import { cancelResponseBody } from "./cancelResponseBody.js";
 
 export interface Logger {
   debug: (...args: unknown[]) => void;
@@ -97,6 +98,8 @@ const readMedia = async (
       });
 
       if (!response.ok) {
+        await cancelResponseBody(response);
+
         throw new Error(`Server responded with status: ${response.status}`);
       }
 
