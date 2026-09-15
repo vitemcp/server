@@ -42,6 +42,7 @@ import {
 import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
 import { JWTIssuer } from "./utils/jwtIssuer.js";
+import { loopbackRedirectMatches } from "./utils/loopbackRedirect.js";
 import { PKCEUtils } from "./utils/pkce.js";
 import {
   EncryptedTokenStorage,
@@ -189,14 +190,22 @@ export class OAuthProxy {
 
     // Two ways to be a known client: a URL-formatted client_id resolved as a
     // Client ID Metadata Document, or a proxy-issued id from DCR.
-    const registeredUris = await this.resolveClientRedirectUris(
+    const registeredClient = await this.resolveClient(
       params.client_id,
+      params.redirect_uri,
     );
+    const registeredUris = registeredClient.redirectUris;
 
     // RFC 6749 §3.1.2.3 / RFC 6819 §4.1.5 - the redirect_uri MUST be one
     // the client declared. Skipping this check is CWE-601: an attacker can
     // steal an authorization code by passing their own URL as redirect_uri.
-    if (!registeredUris.includes(params.redirect_uri)) {
+    // A loopback declaration that omits the port matches any port (RFC 8252
+    // §7.3); nothing else is relaxed.
+    if (
+      !registeredUris.some((uri) =>
+        loopbackRedirectMatches(uri, params.redirect_uri),
+      )
+    ) {
       throw new OAuthProxyError(
         "invalid_request",
         "redirect_uri is not registered for this client",
@@ -274,10 +283,9 @@ export class OAuthProxy {
     }
 
     // RFC 6749 §5.2 - reject unknown clients. Only proxy-issued client_ids
-    // (obtained via DCR) are accepted, so stolen codes cannot be exchanged by
-    // arbitrary callers.
-    const registeredClient =
-      await this.stateStore.getRegisteredClientByClientId(request.client_id);
+    // (obtained via DCR) and, when enabled, resolved CIMD clients are
+    // accepted, so stolen codes cannot be exchanged by arbitrary callers.
+    const registeredClient = await this.resolveClient(request.client_id);
     if (!registeredClient) {
       throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
@@ -1601,7 +1609,18 @@ export class OAuthProxy {
    * (the preferred mechanism on this revision); anything else must have been
    * registered through DCR.
    */
-  private async resolveClientRedirectUris(clientId: string): Promise<string[]> {
+  private async resolveClient(
+    clientId: string,
+    requestedRedirectUri?: string,
+  ): Promise<ProxyDCRClient> {
+    // A proxy-issued id from DCR is authoritative: it was registered here.
+    const registered =
+      await this.stateStore.getRegisteredClientByClientId(clientId);
+
+    if (registered) {
+      return registered;
+    }
+
     if (this.clientIdMetadata.enabled && isClientIdMetadataUrl(clientId)) {
       let metadata;
 
@@ -1631,19 +1650,48 @@ export class OAuthProxy {
         }
       }
 
-      return metadata.redirect_uris;
+      // Record the resolved client so every later leg of this flow — the token
+      // exchange above all, which carries no redirect_uri to resolve against —
+      // finds it by the same lookup a DCR client uses. CIMD is a public-client
+      // mechanism secured by PKCE, so there is no secret to store.
+      const resolvedUris = [...metadata.redirect_uris];
+
+      // RFC 8252 §7.3: a loopback declaration that omits the port matches the
+      // ephemeral port the client actually bound. Record the concrete URI so
+      // the token exchange, which compares the code's redirect_uri exactly,
+      // still binds to the URI the authorization request carried.
+      if (
+        requestedRedirectUri &&
+        !resolvedUris.includes(requestedRedirectUri) &&
+        resolvedUris.some((uri) =>
+          loopbackRedirectMatches(uri, requestedRedirectUri),
+        )
+      ) {
+        resolvedUris.push(requestedRedirectUri);
+      }
+
+      const cimdClient: ProxyDCRClient = {
+        callbackUrl: resolvedUris[0],
+        clientId,
+        clientSecret: undefined,
+        metadata: {
+          client_name: metadata.client_name,
+          client_uri: metadata.client_uri,
+          redirect_uris: metadata.redirect_uris,
+        } as ProxyDCRClient["metadata"],
+        redirectUris: resolvedUris,
+        registeredAt: new Date(),
+      };
+
+      this.stateStore.cacheRegisteredClient(cimdClient);
+      await this.stateStore.saveRegisteredClient(cimdClient);
+
+      return cimdClient;
     }
 
     // RFC 6749 §5.2 - reject unknown clients with invalid_client. MCP clients
     // receive a proxy-issued client_id during DCR, so we look up by that.
-    const registeredClient =
-      await this.stateStore.getRegisteredClientByClientId(clientId);
-
-    if (!registeredClient) {
-      throw new OAuthProxyError("invalid_client", "Unknown client_id");
-    }
-
-    return registeredClient.redirectUris;
+    throw new OAuthProxyError("invalid_client", "Unknown client_id");
   }
 
   /**
