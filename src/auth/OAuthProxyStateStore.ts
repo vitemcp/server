@@ -266,19 +266,6 @@ export class OAuthProxyStateStore {
     return parsed.data;
   }
 
-  async isTransactionCallbackRegistered(
-    transaction: OAuthTransaction,
-  ): Promise<boolean> {
-    const registeredClient = await this.getRegisteredClientByClientId(
-      transaction.clientId,
-    );
-
-    return (
-      registeredClient?.redirectUris.includes(transaction.clientCallbackUrl) ??
-      false
-    );
-  }
-
   /**
    * Record that an authorization code has been redeemed, so a later attempt
    * gets "already used" rather than looking like an unknown code. Keyed and
