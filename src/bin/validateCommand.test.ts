@@ -140,8 +140,10 @@ describe("runTypeCheck", { timeout: 60_000 }, () => {
 
     const result = await runTypeCheck(join(project, "server.ts"));
 
-    expect(formatCommandFailure(result)).toBe("");
-    expect(result.failed).toBe(false);
+    // The output only explains a failure. A passing check need not be silent:
+    // under `pnpm test`, npx warns on stderr about the npm_config_* variables
+    // pnpm sets.
+    expect(result.failed, formatCommandFailure(result)).toBe(false);
     // Neither the throwaway config nor a `.tsbuildinfo` is left behind.
     expect(await readdir(project)).toEqual(before);
   });
@@ -168,8 +170,7 @@ describe("runTypeCheck", { timeout: 60_000 }, () => {
 
       const result = await runTypeCheck(join(dir, "server.ts"));
 
-      expect(formatCommandFailure(result)).toBe("");
-      expect(result.failed).toBe(false);
+      expect(result.failed, formatCommandFailure(result)).toBe(false);
       expect(await readdir(dir)).toEqual(["server.ts"]);
     },
   );
