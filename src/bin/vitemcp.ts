@@ -8,6 +8,11 @@ import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
 import { buildDevCommand, buildDevConfig } from "./devCommand.js";
+import {
+  buildStructureCheckCommand,
+  formatCommandFailure,
+  runTypeCheck,
+} from "./validateCommand.js";
 
 await yargs(hideBin(process.argv))
   .scriptName("vitemcp")
@@ -182,48 +187,42 @@ await yargs(hideBin(process.argv))
 
         console.log(`[ViteMCP] Validating server file: ${filePath}`);
 
-        const command = argv.strict
-          ? `npx tsc --noEmit --strict ${filePath}`
-          : `npx tsc --noEmit ${filePath}`;
+        const typeCheck = await runTypeCheck(filePath, argv.strict);
 
-        try {
-          await execa({
-            shell: true,
-            stderr: "pipe",
-            stdout: "pipe",
-          })`${command}`;
-
-          console.log("[ViteMCP] ✓ TypeScript compilation successful");
-        } catch (tsError) {
+        if (typeCheck.failed) {
           console.error("[ViteMCP] ✗ TypeScript compilation failed");
 
-          if (tsError instanceof Error && "stderr" in tsError) {
-            console.error(tsError.stderr);
+          const diagnostics = formatCommandFailure(typeCheck);
+
+          if (diagnostics) {
+            console.error(diagnostics);
           }
 
           process.exit(1);
         }
 
-        try {
-          await execa({
-            shell: true,
-            stderr: "pipe",
-            stdout: "pipe",
-          })`node -e "
-            (async () => {
-              try {
-                const { ViteMCP } = await import('@vitemcp/server');
-                await import('file://${filePath}');
-                console.log('[ViteMCP] ✓ Server structure validation passed');
-              } catch (error) {
-                console.error('[ViteMCP] ✗ Server structure validation failed:', error.message);
-                process.exit(1);
-              }
-            })();
-          "`;
-        } catch {
-          console.error("[ViteMCP] ✗ Server structure validation failed");
-          console.error("Make sure the file properly imports and uses ViteMCP");
+        console.log("[ViteMCP] ✓ TypeScript compilation successful");
+
+        const [structureCommand, ...structureArgs] =
+          buildStructureCheckCommand(filePath);
+        const structureCheck = await execa(structureCommand, structureArgs, {
+          reject: false,
+        });
+
+        if (structureCheck.failed) {
+          // The child explains the failure on stderr, which execa captures.
+          // Without replaying it the user only ever sees the generic hint, even
+          // when their server file has an error they could act on.
+          const reason = formatCommandFailure(structureCheck);
+
+          if (reason) {
+            console.error(reason);
+          } else {
+            console.error("[ViteMCP] ✗ Server structure validation failed");
+            console.error(
+              "Make sure the file properly imports and uses ViteMCP",
+            );
+          }
 
           process.exit(1);
         }
