@@ -254,16 +254,25 @@ describe("tool parameters via Valibot", () => {
   });
 });
 
-// Valibot has no JSON Schema of its own, so its schemas are converted through
-// xsschema, and the converted schema is what the SDK both advertises and
-// validates against. Closing every object in it — as inputs are documented to
-// be — must not swallow the keys a record or rest schema describes.
+/** A Standard Schema from a library xsschema has no converter for. */
+const unconvertible = {
+  "~standard": {
+    validate: (value: unknown) => ({ value: value as Record<string, never> }),
+    vendor: "hand-rolled",
+    version: 1 as const,
+  },
+};
+
+// Valibot has no JSON Schema of its own, so its schemas are converted for
+// tools/list, while Valibot itself still validates. Closing every object in
+// the advertised copy — as inputs are documented to be — must not swallow the
+// keys a record or rest schema describes.
 describe("Valibot schemas converted to JSON Schema", () => {
   it("keeps a record's value schema, so its keys are accepted", async () => {
     const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
     server.addTool({
-      execute: async (args) => JSON.stringify(args.labels),
+      execute: async (args) => JSON.stringify(args),
       name: "label",
       parameters: v.object({ labels: v.record(v.string(), v.string()) }),
     });
@@ -272,29 +281,97 @@ describe("Valibot schemas converted to JSON Schema", () => {
       run: async ({ client }) => {
         const { tools } = await client.listTools();
 
+        expect(tools[0].inputSchema.additionalProperties).toBe(false);
         expect(tools[0].inputSchema.properties?.labels).toMatchObject({
           additionalProperties: { type: "string" },
         });
+
+        // A key the schema does not declare is dropped by Valibot, as Zod
+        // drops one, rather than reaching execute.
         expect(
           withoutEnvelope(
             await client.callTool({
-              arguments: { labels: { team: "infra" } },
+              arguments: { extra: true, labels: { team: "infra" } },
               name: "label",
             }),
           ),
-        ).toEqual({ content: [{ text: '{"team":"infra"}', type: "text" }] });
+        ).toEqual({
+          content: [{ text: '{"labels":{"team":"infra"}}', type: "text" }],
+        });
 
-        // The value schema still applies, and the object around it stays closed.
-        for (const args of [
-          { labels: { team: 42 } },
-          { extra: true, labels: {} },
-        ]) {
-          const result = await client.callTool({
-            arguments: args,
-            name: "label",
-          });
-          expect(result.isError).toBe(true);
-        }
+        const wrongValue = await client.callTool({
+          arguments: { labels: { team: 42 } },
+          name: "label",
+        });
+        expect(wrongValue.isError).toBe(true);
+      },
+      server,
+    });
+  });
+
+  it("validates with Valibot itself, so a transform reaches execute", async () => {
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
+
+    server.addTool({
+      execute: async (args) => `${typeof args.n} ${args.n + 1}`,
+      name: "increment",
+      parameters: v.object({ n: v.pipe(v.string(), v.transform(Number)) }),
+    });
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        const [tool] = (await client.listTools()).tools;
+
+        // Advertised as what the caller sends: the input side of the transform.
+        expect(tool.inputSchema.properties?.n).toEqual({ type: "string" });
+        expect(
+          withoutEnvelope(
+            await client.callTool({
+              arguments: { n: "41" },
+              name: "increment",
+            }),
+          ),
+        ).toEqual({ content: [{ text: "number 42", type: "text" }] });
+      },
+      server,
+    });
+  });
+
+  it("enforces a check that JSON Schema cannot express", async () => {
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
+
+    server.addTool({
+      execute: async (args) => `hello ${args.name}`,
+      name: "greet",
+      parameters: v.object({
+        name: v.pipe(
+          v.string(),
+          v.check((name) => name === name.trim(), "must not be padded"),
+        ),
+      }),
+    });
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        const [tool] = (await client.listTools()).tools;
+
+        expect(tool.inputSchema.properties?.name).toEqual({ type: "string" });
+
+        const padded = await client.callTool({
+          arguments: { name: " Ada " },
+          name: "greet",
+        });
+        expect(padded.isError).toBe(true);
+        expect(JSON.stringify(padded.content)).toContain("must not be padded");
+
+        expect(
+          withoutEnvelope(
+            await client.callTool({
+              arguments: { name: "Ada" },
+              name: "greet",
+            }),
+          ),
+        ).toEqual({ content: [{ text: "hello Ada", type: "text" }] });
       },
       server,
     });
@@ -407,9 +484,8 @@ describe("Valibot schemas converted to JSON Schema", () => {
     });
     server.addTool({
       execute: async () => "unreachable",
-      name: "coerce",
-      // JSON Schema has no way to say "transform".
-      parameters: v.object({ n: v.pipe(v.string(), v.transform(Number)) }),
+      name: "opaque",
+      parameters: unconvertible,
     });
 
     // Before, the failed conversion failed every request, the handshake too.
@@ -429,9 +505,9 @@ describe("Valibot schemas converted to JSON Schema", () => {
         // Reported once, not on every request.
         expect(error).toHaveBeenCalledOnce();
         expect(error).toHaveBeenCalledWith(
-          '[ViteMCP error] Tool "coerce" is not served:',
+          '[ViteMCP error] Tool "opaque" is not served:',
           expect.objectContaining({
-            message: expect.stringContaining('"transform" action'),
+            message: expect.stringContaining('vendor "hand-rolled"'),
           }),
         );
       },
@@ -449,8 +525,8 @@ describe("Valibot schemas converted to JSON Schema", () => {
 
     server.addTool({
       execute: async () => "unreachable",
-      name: "coerce",
-      parameters: v.object({ n: v.pipe(v.string(), v.transform(Number)) }),
+      name: "opaque",
+      parameters: unconvertible,
     });
 
     await runWithTestServer({
@@ -459,5 +535,47 @@ describe("Valibot schemas converted to JSON Schema", () => {
       },
       server,
     });
+  });
+
+  it("explains what to install when @valibot/to-json-schema is missing", async () => {
+    vi.doMock("@valibot/to-json-schema", () => {
+      throw new Error("Cannot find package '@valibot/to-json-schema'");
+    });
+    vi.resetModules();
+
+    try {
+      const { ViteMCP: FreshViteMCP } = await import("./ViteMCP.js");
+      const error = vi.fn();
+      const noop = () => {};
+      const server = new FreshViteMCP({
+        logger: { debug: noop, error, info: noop, log: noop, warn: noop },
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        execute: async () => "unreachable",
+        name: "add",
+        parameters: v.object({ a: v.number() }),
+      });
+
+      await runWithTestServer({
+        run: async ({ client }) => {
+          expect((await client.listTools()).tools).toEqual([]);
+          expect(error).toHaveBeenCalledWith(
+            '[ViteMCP error] Tool "add" is not served:',
+            expect.objectContaining({
+              message: expect.stringContaining(
+                "npm install @valibot/to-json-schema",
+              ),
+            }),
+          );
+        },
+        server,
+      });
+    } finally {
+      vi.doUnmock("@valibot/to-json-schema");
+      vi.resetModules();
+    }
   });
 });

@@ -84,12 +84,16 @@
   },
   "peerDependencies": {
     "@apidevtools/swagger-parser": "^12.0.0",
+    "@valibot/to-json-schema": "^1.0.0",
     "ajv": "^8.0.0",
     "ajv-formats": "^3.0.0",
     "jose": "^5.0.0 || ^6.0.0"
   },
   "peerDependenciesMeta": {
     "@apidevtools/swagger-parser": {
+      "optional": true
+    },
+    "@valibot/to-json-schema": {
       "optional": true
     },
     "ajv": {

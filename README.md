@@ -259,13 +259,14 @@ server.addTool({
 
 Works for `outputSchema` too, and is advertised as written — as are Zod and
 ArkType schemas, which emit their own JSON Schema. Anything else (Valibot, for
-one) is converted through xsschema, and the result is also what arguments and
-results are validated against. Converted input schemas get
-`additionalProperties: false` on every object, except where a record or rest
-schema (`v.record()`, `v.objectWithRest()`) describes the extra keys; converted
-output schemas are left as they are. A tool whose schema cannot be converted
-(one using `v.transform()`, say) is left out of the server and reported
-through the logger.
+one) is converted to JSON Schema for `tools/list` only; arguments and results
+are still validated by the library itself, so a `v.transform()` reaches
+`execute` and a `v.check()` is enforced even though JSON Schema can express
+neither. Converted input schemas get `additionalProperties: false` on every
+object, except where a record or rest schema (`v.record()`,
+`v.objectWithRest()`) describes the extra keys; converted output schemas are
+left as they are. A tool whose schema cannot be converted at all is left out of
+the server and reported through the logger.
 
 Unlike the schema libraries above, a plain JSON Schema carries no TypeScript
 types, so `execute` receives `unknown` arguments. Cast or narrow them yourself.
