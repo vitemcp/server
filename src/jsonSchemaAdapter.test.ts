@@ -222,14 +222,14 @@ const withGreetServer = async (
   }
 };
 
-test("advertises the schema through tools/list, made strict like any other", async () => {
+test("advertises the schema through tools/list as written", async () => {
   await withGreetServer(async (client) => {
     const { tools } = await client.listTools();
     const greet = tools.find((tool) => tool.name === "greet");
 
-    // The adapter's schema goes through the same strictJsonSchema pass every
-    // Zod or Valibot tool does, rather than being advertised raw — note the
-    // additionalProperties the input schema never specified.
+    // The adapter carries its own JSON Schema, so it passes through untouched,
+    // as Zod and ArkType schemas do — only schemas that must be converted get
+    // closed with additionalProperties: false.
     expect(greet?.inputSchema).toEqual({
       properties: {
         age: { type: "number" },
@@ -239,9 +239,8 @@ test("advertises the schema through tools/list, made strict like any other", asy
       type: "object",
     });
 
-    // outputSchema is converted by the same path, which is why it works at all
-    // — xsschema would otherwise reject the "json-schema" vendor and fail the
-    // whole listing.
+    // outputSchema passes through the same way; xsschema, which has no
+    // converter for the "json-schema" vendor, is never asked.
     expect(greet?.outputSchema).toMatchObject({
       required: ["greeting"],
     });

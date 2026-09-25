@@ -35,7 +35,7 @@ import { pipeline } from "stream/promises";
 import { setTimeout as delay } from "timers/promises";
 import { fetch } from "undici";
 import parseURITemplate from "uri-templates";
-import { strictJsonSchema, toJsonSchema } from "xsschema";
+import { type JsonSchema, toJsonSchema } from "xsschema";
 import { z } from "zod";
 
 import type { OAuthProxy } from "./auth/OAuthProxy.js";
@@ -533,6 +533,9 @@ type Literal = boolean | null | number | string | undefined;
 const LATCH_NAME = "vitemcp.internal.capability-latch";
 const LATCH_URI = "vitemcp-internal:capability-latch";
 
+/** A tool's schemas in the form the SDK registers them. */
+type SdkToolSchemas = { inputSchema: unknown; outputSchema: unknown };
+
 export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   /**
    * The `auth` provider this server was constructed with, or `undefined` when
@@ -601,6 +604,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   #stdioHandle: null | StdioServerHandle = null;
 
   #tools: Tool<T>[] = [];
+  /** Each tool's schemas, as `#sdkSchemasFor` converted them. */
+  #toolSchemas = new WeakMap<Tool<T>, Promise<SdkToolSchemas | undefined>>();
 
   public constructor(options: ServerOptions<T>) {
     this.#options = options;
@@ -947,26 +952,31 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
       all: readonly P[],
     ): P[] => all.filter((entry) => !entry.canAccess || entry.canAccess(auth));
 
-    const tools = visible(this.#tools);
+    // A tool whose schemas cannot be converted is left out rather than allowed
+    // to fail the request: every request builds the whole server, so one such
+    // tool would otherwise take down every method, not just itself.
+    const tools = (
+      await Promise.all(
+        visible(this.#tools).map(async (tool) => {
+          const schemas = await this.#sdkSchemasFor(tool);
+
+          return schemas && { schemas, tool };
+        }),
+      )
+    ).filter((entry) => entry !== undefined);
     const resources = visible(this.#resources);
     const resourceTemplates = visible(this.#resourceTemplates);
     const prompts = visible(this.#prompts);
 
-    for (const tool of tools) {
+    for (const { schemas, tool } of tools) {
       server.registerTool(
         tool.name,
         {
           _meta: tool._meta,
           annotations: tool.annotations,
           description: tool.description,
-          inputSchema: (await this.#toSdkSchema(
-            tool.parameters,
-            `Tool "${tool.name}" parameters`,
-          )) as never,
-          outputSchema: (await this.#toSdkSchema(
-            tool.outputSchema,
-            `Tool "${tool.name}" outputSchema`,
-          )) as never,
+          inputSchema: schemas.inputSchema as never,
+          outputSchema: schemas.outputSchema as never,
         },
         (async (args: unknown, ctx: unknown) => {
           // Paired so the deadline reaches `execute` through `context.signal`
@@ -1276,6 +1286,45 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     if (kind === "resources") notifier.resourcesChanged();
   }
 
+  /**
+   * A tool's schemas in the form the SDK registers them, or `undefined` for a
+   * tool whose schemas cannot be converted — reported when that is found.
+   *
+   * Converted once per tool: `#buildServer` runs on every request, so a tool
+   * that cannot be served would otherwise be reported on each of them.
+   */
+  #sdkSchemasFor(tool: Tool<T>): Promise<SdkToolSchemas | undefined> {
+    let schemas = this.#toolSchemas.get(tool);
+
+    if (!schemas) {
+      schemas = Promise.all([
+        this.#toSdkSchema(
+          tool.parameters,
+          `Tool "${tool.name}" parameters`,
+          "input",
+        ),
+        this.#toSdkSchema(
+          tool.outputSchema,
+          `Tool "${tool.name}" outputSchema`,
+          "output",
+        ),
+      ]).then(
+        ([inputSchema, outputSchema]) => ({ inputSchema, outputSchema }),
+        (error: unknown) => {
+          this.#logger.error(
+            `[ViteMCP error] Tool "${tool.name}" is not served:`,
+            error,
+          );
+
+          return undefined;
+        },
+      );
+      this.#toolSchemas.set(tool, schemas);
+    }
+
+    return schemas;
+  }
+
   async #startHttp(config: {
     allowedOrigins?: string[];
     basePath?: string;
@@ -1508,10 +1557,18 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   }
 
   /**
-   * Converts a schema the SDK cannot consume directly. Zod v4 emits JSON
-   * Schema natively; valibot/arktype go via xsschema.
+   * Converts a schema the SDK cannot consume directly. Zod v4 and ArkType emit
+   * JSON Schema natively and pass through; anything else (Valibot, say) goes
+   * via xsschema, and what comes out is both what `tools/list` advertises and
+   * what the SDK validates against. Inputs are closed with `strictInputSchema`.
+   * Outputs are left as converted: closing them would turn a result the tool's
+   * own schema allows into a tool error.
    */
-  async #toSdkSchema(schema: unknown, label: string): Promise<unknown> {
+  async #toSdkSchema(
+    schema: unknown,
+    label: string,
+    io: "input" | "output",
+  ): Promise<unknown> {
     if (!schema) {
       return undefined;
     }
@@ -1525,8 +1582,11 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     }
 
     try {
-      const json = strictJsonSchema(await toJsonSchema(schema as never));
-      return fromJsonSchema(json as never);
+      const json = await toJsonSchema(schema as never);
+
+      return fromJsonSchema(
+        (io === "input" ? strictInputSchema(json) : json) as never,
+      );
     } catch (error) {
       throw new UnexpectedStateError(
         `${label} is not a supported Standard Schema: ${
@@ -1749,6 +1809,31 @@ const readCappedNodeBody = async (
 
   return Buffer.concat(chunks);
 };
+
+/**
+ * Closes a converted input schema's objects to undeclared keys, except where
+ * the schema describes those keys itself. A record's value schema, or an
+ * object's rest schema, arrives as `additionalProperties`; replacing it with
+ * `false` would reject exactly the keys the tool takes, so `v.record()`
+ * arguments could only ever be `{}`.
+ */
+const strictInputSchema = (schema: JsonSchema): JsonSchema => ({
+  ...schema,
+  additionalProperties:
+    typeof schema.additionalProperties === "object"
+      ? schema.additionalProperties
+      : false,
+  ...(schema.properties && {
+    properties: Object.fromEntries(
+      Object.entries(schema.properties).map(([key, value]) => [
+        key,
+        typeof value === "object" && value.type === "object"
+          ? strictInputSchema(value)
+          : value,
+      ]),
+    ),
+  }),
+});
 
 /** Rejects non-Standard-Schema at registration, not on first call. */
 const assertStandardSchema = (
