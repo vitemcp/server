@@ -1584,6 +1584,11 @@ const server = new ViteMCP({
 
 See `src/examples/custom-logger.ts` for examples with Winston, Pino, and file-based logging.
 
+With `transportType: "stdio"`, stdout carries the protocol itself, so the
+default logger writes every level to stderr there. A custom logger is used as
+given: make sure it stays off stdout too — unlike the example above, whose
+`console.log` and `console.info` write to it.
+
 ### Errors
 
 The errors that are meant to be shown to the user should be thrown as `UserError` instances:

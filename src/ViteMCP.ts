@@ -535,6 +535,15 @@ const LATCH_URI = "vitemcp-internal:capability-latch";
 /** A tool's schemas in the form the SDK registers them. */
 type SdkToolSchemas = { inputSchema: unknown; outputSchema: unknown };
 
+/** The default logger when stdout carries the protocol: every level to stderr. */
+const stderrLogger: Logger = {
+  debug: (...args) => console.error(...args),
+  error: (...args) => console.error(...args),
+  info: (...args) => console.error(...args),
+  log: (...args) => console.error(...args),
+  warn: (...args) => console.warn(...args),
+};
+
 export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   /**
    * The `auth` provider this server was constructed with, or `undefined` when
@@ -835,6 +844,10 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
 
     try {
       if (options.transportType === "stdio") {
+        // stdout is the transport here, and the default console logger writes
+        // info, log and debug to it — straight into the stream the client
+        // parses as JSON-RPC. A logger passed in is the caller's to direct.
+        this.#logger = this.#options.logger ?? stderrLogger;
         this.#stdioHandle = serveStdio(() => this.#buildServer(undefined));
         this.#logger.info(`[ViteMCP info] server is running on stdio`);
       } else {

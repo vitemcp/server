@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { ServerState, ViteMCP } from "./ViteMCP.js";
@@ -42,5 +42,55 @@ describe("stdio transport lifecycle", () => {
 
     await expect(server.stop()).resolves.toBeUndefined();
     expect(server.serverState).toBe(ServerState.Stopped);
+  });
+});
+
+// stdout is the transport: every byte on it is read by the client as
+// JSON-RPC, so a log line there corrupts the stream.
+describe("stdio logging", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the default logger off stdout", async () => {
+    // In Node these three write to stdout; error and warn go to stderr.
+    const toStdout = (["debug", "info", "log"] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation(() => {}),
+    );
+    const toStderr = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
+
+    try {
+      await server.start({ transportType: "stdio" });
+
+      for (const spy of toStdout) {
+        expect(spy).not.toHaveBeenCalled();
+      }
+      expect(toStderr).toHaveBeenCalledWith(
+        "[ViteMCP info] server is running on stdio",
+      );
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("leaves a logger it was given to direct its own output", async () => {
+    const info = vi.fn();
+    const noop = () => {};
+    const server = new ViteMCP({
+      logger: { debug: noop, error: noop, info, log: noop, warn: noop },
+      name: "Test",
+      version: "1.0.0",
+    });
+
+    try {
+      await server.start({ transportType: "stdio" });
+
+      expect(info).toHaveBeenCalledWith(
+        "[ViteMCP info] server is running on stdio",
+      );
+    } finally {
+      await server.stop();
+    }
   });
 });
