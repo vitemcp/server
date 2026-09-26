@@ -132,7 +132,7 @@ describe("canAccess hides every member of a family", () => {
       expect(body.result?.capabilities).toEqual({
         logging: {},
         prompts: { listChanged: true },
-        resources: { listChanged: true },
+        resources: { listChanged: true, subscribe: true },
         tools: { listChanged: true },
       });
     });

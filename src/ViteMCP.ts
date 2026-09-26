@@ -779,7 +779,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
 
   /**
    * Publishes `notifications/resources/updated` for a URI to any subscription
-   * that opted in to it.
+   * that opted in to it. HTTP only: a stdio client is never reached.
    */
   public notifyResourceUpdated(uri: string): void {
     this.#handler?.notify.resourceUpdated(uri);
@@ -962,7 +962,14 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     return { auth };
   }
 
-  async #buildServer(auth: T | undefined): Promise<McpServer> {
+  /**
+   * `resourceSubscriptions` declares `resources.subscribe`. Set it only where
+   * `notifyResourceUpdated` delivers: to 2026-07-28 HTTP clients.
+   */
+  async #buildServer(
+    auth: T | undefined,
+    { resourceSubscriptions = false }: { resourceSubscriptions?: boolean } = {},
+  ): Promise<McpServer> {
     const server = new McpServer(
       {
         description: this.#options.description,
@@ -1189,6 +1196,15 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         .remove();
     }
 
+    // The SDK drops `resourceSubscriptions` from a `subscriptions/listen`
+    // filter unless the server declares `resources.subscribe`, so without it
+    // no update ever reached a client. Added to a resources capability that
+    // registration declared, never in place of one: a server without resources
+    // must not advertise the family.
+    if (resourceSubscriptions && server.server.getCapabilities().resources) {
+      server.server.registerCapabilities({ resources: { subscribe: true } });
+    }
+
     return server;
   }
 
@@ -1389,7 +1405,12 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
       // Authentication has already run in the route below, which is the only
       // place that can turn a refusal into an HTTP status. What reaches here
       // is either an authenticated session or a deliberately anonymous one.
-      async () => this.#buildServer(this.#authStore.getStore()?.auth),
+      async ({ era }) =>
+        this.#buildServer(this.#authStore.getStore()?.auth, {
+          // A 2025-era client reads `resources.subscribe` as a promise of
+          // `resources/subscribe`, which is not served.
+          resourceSubscriptions: era === "modern",
+        }),
       {
         // Tradeoff: `server/discover` advertises only 2026-07-28, so legacy
         // requests are answered unadvertised and skip Mcp-* validation.
