@@ -1422,7 +1422,16 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
 
     this.#corsMiddleware = config.cors === false ? null : cors(config.cors);
 
-    const oauth = this.#options.oauth ?? this.#options.auth?.getOAuthConfig();
+    // An explicit `oauth` config is served as written. A provider's cannot be
+    // complete until the endpoint is known, which is here.
+    const provider = this.#options.auth;
+    const oauth =
+      this.#options.oauth ??
+      (provider &&
+        withEndpointAsResource(
+          provider.getOAuthConfig(),
+          config.endpoint ?? "/mcp",
+        ));
 
     if (
       oauth?.enabled !== false &&
@@ -1702,6 +1711,28 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     );
   }
 }
+
+/**
+ * An auth provider's OAuth config, naming the MCP endpoint as the protected
+ * resource rather than the provider's base URL.
+ *
+ * RFC 9728 §3.3: the document served at
+ * `/.well-known/oauth-protected-resource<endpoint>` must name the URL that
+ * path was derived from, and strict clients discard one that does not. The
+ * base URL already carries any `basePath`, as the proxy's own endpoints do.
+ */
+const withEndpointAsResource = <
+  C extends { protectedResource: { resource: string } },
+>(
+  config: C,
+  endpoint: string,
+): C => ({
+  ...config,
+  protectedResource: {
+    ...config.protectedResource,
+    resource: `${config.protectedResource.resource}${endpoint}`,
+  },
+});
 
 /**
  * Builds a web-standard Request from a Node request whose body is already
