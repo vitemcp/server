@@ -845,7 +845,15 @@ the client identifies itself with an HTTPS URL serving its own metadata and no
 registration step is needed.
 
 If you keep CIMD enabled, set `clientIdMetadata.allowedDomains` — otherwise the
-server will fetch client-supplied URLs.
+server will fetch client-supplied URLs. The providers take `clientIdMetadata`
+too:
+
+```typescript
+new GitHubProvider({
+  // …
+  clientIdMetadata: { allowedDomains: ["app.example.com"] },
+});
+```
 
 ## Security
 

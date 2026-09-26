@@ -43,7 +43,9 @@ export class AzureProvider extends AuthProvider<AzureSession> {
       // they trust. A previous default of ["http://localhost:*", "https://*"]
       // enabled CWE-601 open-redirect / code-theft via /oauth/authorize.
       allowedRedirectUriPatterns: this.config.allowedRedirectUriPatterns,
+      allowPlainPkce: this.config.allowPlainPkce,
       baseUrl: this.config.baseUrl,
+      clientIdMetadata: this.config.clientIdMetadata,
       consentRequired: this.config.consentRequired ?? true,
       encryptionKey: this.config.encryptionKey,
       jwtSigningKey: this.config.jwtSigningKey,

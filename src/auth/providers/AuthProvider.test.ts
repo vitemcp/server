@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { AuthProviderConfig } from "./AuthProvider.js";
+
 import { AzureProvider } from "./AzureProvider.js";
 import { GitHubProvider } from "./GitHubProvider.js";
 import { GoogleProvider } from "./GoogleProvider.js";
@@ -404,5 +406,53 @@ describe("AuthProvider common behavior", () => {
       ).rejects.toThrow(/destroyed/i);
       expect(activeTimers()).toBe(before);
     });
+  });
+});
+
+describe("options forwarded to the proxy", () => {
+  const config = {
+    baseUrl: "http://localhost:8000",
+    clientId: "test",
+    clientSecret: "test",
+  };
+
+  /** One of each provider, built with `options`. */
+  const everyProvider = (options: Partial<AuthProviderConfig> = {}) => [
+    new OAuthProvider({
+      ...config,
+      ...options,
+      authorizationEndpoint: "https://auth.example.com/authorize",
+      tokenEndpoint: "https://auth.example.com/token",
+    }),
+    new GitHubProvider({ ...config, ...options }),
+    new GoogleProvider({ ...config, ...options }),
+    new AzureProvider({ ...config, ...options }),
+  ];
+
+  // The production checklist asks for `clientIdMetadata.allowedDomains` or
+  // CIMD turned off, neither of which a provider could pass on before.
+  it("reach the proxy from every provider", () => {
+    for (const provider of everyProvider({
+      allowPlainPkce: true,
+      clientIdMetadata: { enabled: false },
+    })) {
+      const metadata = provider.getProxy().getAuthorizationServerMetadata();
+
+      expect(metadata.clientIdMetadataDocumentSupported).toBe(false);
+      expect(metadata.codeChallengeMethodsSupported).toEqual(["S256", "plain"]);
+
+      provider.destroy();
+    }
+  });
+
+  it("leave the proxy's defaults in place when unset", () => {
+    for (const provider of everyProvider()) {
+      const metadata = provider.getProxy().getAuthorizationServerMetadata();
+
+      expect(metadata.clientIdMetadataDocumentSupported).toBe(true);
+      expect(metadata.codeChallengeMethodsSupported).toEqual(["S256"]);
+
+      provider.destroy();
+    }
   });
 });

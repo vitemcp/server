@@ -3,6 +3,7 @@
  * High-level abstraction for OAuth authentication that simplifies configuration
  */
 
+import type { ClientIdMetadataOptions } from "../clientIdMetadata.js";
 import type { TokenStorage, UpstreamTokenSet } from "../types.js";
 
 import { OAuthProxy } from "../OAuthProxy.js";
@@ -23,10 +24,21 @@ export interface AuthProviderConfig {
    * SECURITY advisory before loosening this.
    */
   allowedRedirectUriPatterns?: string[];
+  /**
+   * Accept PKCE `plain` as well as `S256` (default: false), for the rare
+   * client that cannot hash. See `OAuthProxyConfig.allowPlainPkce` first.
+   */
+  allowPlainPkce?: boolean;
   /** Base URL where the MCP server is accessible */
   baseUrl: string;
   /** OAuth client ID */
   clientId: string;
+  /**
+   * Client ID Metadata Document support, on by default. Set `allowedDomains`
+   * to limit which hosts client metadata is fetched from, or `enabled: false`
+   * to turn it off.
+   */
+  clientIdMetadata?: ClientIdMetadataOptions;
   /** OAuth client secret */
   clientSecret: string;
   /** Require user consent screen (default: true) */
