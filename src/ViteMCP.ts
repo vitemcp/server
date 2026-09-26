@@ -6,6 +6,7 @@ import {
   createMcpHandler,
   getOAuthProtectedResourceMetadataUrl,
   type Icon,
+  InMemoryServerEventBus,
   type InputRequest,
   inputRequired,
   type InputRequiredResult,
@@ -19,6 +20,8 @@ import {
   originValidationResponse,
   ResourceTemplate as SDKResourceTemplate,
   type ToolAnnotations as SDKToolAnnotations,
+  type ServerEventBus,
+  UriTemplate,
 } from "@modelcontextprotocol/server";
 import {
   serveStdio,
@@ -779,7 +782,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
 
   /**
    * Publishes `notifications/resources/updated` for a URI to any subscription
-   * that opted in to it. HTTP only: a stdio client is never reached.
+   * that opted in to it and whose caller may read it. HTTP only: a stdio
+   * client is never reached.
    */
   public notifyResourceUpdated(uri: string): void {
     this.#handler?.notify.resourceUpdated(uri);
@@ -1208,6 +1212,57 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     return server;
   }
 
+  /**
+   * Whether `resources/read` would serve `uri` to this caller: a resource of
+   * that URI, or a template matching it, that `canAccess` leaves visible.
+   */
+  #canRead(uri: string, auth: T | undefined): boolean {
+    const visible = (entry: { canAccess?: (auth: T | undefined) => boolean }) =>
+      !entry.canAccess || entry.canAccess(auth);
+
+    return (
+      this.#resources.some(
+        (resource) => resource.uri === uri && visible(resource),
+      ) ||
+      this.#resourceTemplates.some(
+        (template) =>
+          visible(template) &&
+          new UriTemplate(template.uriTemplate).match(uri) !== null,
+      )
+    );
+  }
+
+  /**
+   * The bus `notifyResourceUpdated` publishes to and `subscriptions/listen`
+   * streams read from, narrowed per stream to updates its caller could read.
+   *
+   * `canAccess` keeps a resource out of `resources/read`, so its updates must
+   * not reach that caller either, or subscribing to the URI would reveal what
+   * reading it cannot. The SDK subscribes a stream while serving its listen
+   * request, so that caller's auth is still in scope here.
+   */
+  #eventBus(): ServerEventBus {
+    const events = new InMemoryServerEventBus((error) =>
+      this.#logger.error("[ViteMCP error]", error),
+    );
+
+    return {
+      publish: (event) => events.publish(event),
+      subscribe: (listener) => {
+        const auth = this.#authStore.getStore()?.auth;
+
+        return events.subscribe((event) => {
+          if (
+            event.kind !== "resource_updated" ||
+            this.#canRead(event.uri, auth)
+          ) {
+            listener(event);
+          }
+        });
+      },
+    };
+  }
+
   /** Builds the Hono app with the CORS shim installed ahead of user routes. */
   #freshApp(): Hono {
     const app = new Hono();
@@ -1412,6 +1467,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
           resourceSubscriptions: era === "modern",
         }),
       {
+        bus: this.#eventBus(),
         // Tradeoff: `server/discover` advertises only 2026-07-28, so legacy
         // requests are answered unadvertised and skip Mcp-* validation.
         legacy: config.legacy ?? "stateless",
