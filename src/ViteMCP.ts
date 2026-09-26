@@ -869,7 +869,9 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         // info, log and debug to it — straight into the stream the client
         // parses as JSON-RPC. A logger passed in is the caller's to direct.
         this.#logger = this.#options.logger ?? stderrLogger;
-        this.#stdioHandle = serveStdio(() => this.#buildServer(undefined));
+        this.#stdioHandle = serveStdio(({ era }) =>
+          this.#buildServer(undefined, { era }),
+        );
         this.#logger.info(`[ViteMCP info] server is running on stdio`);
       } else {
         await this.#startHttp(options.httpStream);
@@ -967,12 +969,17 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   }
 
   /**
+   * `era` is the protocol era the server will speak, where it is known: one
+   * built for `connect()` speaks whichever the client picks.
    * `resourceSubscriptions` declares `resources.subscribe`. Set it only where
    * `notifyResourceUpdated` delivers: to 2026-07-28 HTTP clients.
    */
   async #buildServer(
     auth: T | undefined,
-    { resourceSubscriptions = false }: { resourceSubscriptions?: boolean } = {},
+    {
+      era,
+      resourceSubscriptions = false,
+    }: { era?: "legacy" | "modern"; resourceSubscriptions?: boolean } = {},
   ): Promise<McpServer> {
     const server = new McpServer(
       {
@@ -986,7 +993,10 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
       {
         // Without it the SDK refuses to send `notifications/message`, and
         // `log.*` swallows the refusal, so every log line vanished silently.
-        capabilities: { logging: {} },
+        // Left out for a 2025-era client: `log.*` answers only the 2026-07-28
+        // per-request opt-in, so the `logging/setLevel` it would promise that
+        // client could never take effect.
+        capabilities: era === "legacy" ? {} : { logging: {} },
         instructions: this.#options.instructions,
       },
     );
@@ -1462,6 +1472,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
       // is either an authenticated session or a deliberately anonymous one.
       async ({ era }) =>
         this.#buildServer(this.#authStore.getStore()?.auth, {
+          era,
           // A 2025-era client reads `resources.subscribe` as a promise of
           // `resources/subscribe`, which is not served.
           resourceSubscriptions: era === "modern",

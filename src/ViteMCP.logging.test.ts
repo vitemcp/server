@@ -1,5 +1,4 @@
-import type { Client } from "@modelcontextprotocol/client";
-
+import { Client } from "@modelcontextprotocol/client";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -89,6 +88,19 @@ describe("context.log", () => {
         // A level `log` has no method for still sets the floor.
         expect(await levels("notice")).toEqual(["warning", "error"]);
         expect(await levels("critical")).toEqual([]);
+      },
+      server: withChattyTool,
+    });
+  });
+
+  // It would read `logging` as a promise that `logging/setLevel` works, and
+  // `log` answers only the 2026-07-28 per-request opt-in.
+  it("does not advertise logging to a 2025-era client", async () => {
+    await runWithTestServer({
+      client: async () =>
+        new Client({ name: "legacy-client", version: "1.0.0" }),
+      run: async ({ client }) => {
+        expect(client.getServerCapabilities()?.logging).toBeUndefined();
       },
       server: withChattyTool,
     });
