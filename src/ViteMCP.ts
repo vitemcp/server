@@ -10,6 +10,8 @@ import {
   inputRequired,
   type InputRequiredResult,
   localhostAllowedOrigins,
+  LOG_LEVEL_META_KEY,
+  type LoggingLevel,
   type McpHttpHandler,
   McpServer,
   OAuthError,
@@ -267,7 +269,7 @@ export type Context<T extends ViteMCPAuth> = {
   /**
    * Emits `notifications/message`. The spec forbids emitting these unless the
    * request opted in via `_meta` log level, so these are dropped when the
-   * client did not ask for logs.
+   * client did not ask for logs, and below the level it asked for.
    */
   log: {
     debug: (message: string, data?: SerializableValue) => void;
@@ -531,6 +533,21 @@ type Literal = boolean | null | number | string | undefined;
  */
 const LATCH_NAME = "vitemcp.internal.capability-latch";
 const LATCH_URI = "vitemcp-internal:capability-latch";
+
+/**
+ * The spec's log levels, least severe first. A request's
+ * `io.modelcontextprotocol/logLevel` names the least severe one it wants.
+ */
+const LOG_LEVELS: readonly LoggingLevel[] = [
+  "debug",
+  "info",
+  "notice",
+  "warning",
+  "error",
+  "critical",
+  "alert",
+  "emergency",
+];
 
 /** A tool's schemas in the form the SDK registers them. */
 type SdkToolSchemas = { inputSchema: unknown; outputSchema: unknown };
@@ -955,7 +972,12 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         version: this.#options.version,
         websiteUrl: this.#options.websiteUrl,
       },
-      { instructions: this.#options.instructions },
+      {
+        // Without it the SDK refuses to send `notifications/message`, and
+        // `log.*` swallows the refusal, so every log line vanished silently.
+        capabilities: { logging: {} },
+        instructions: this.#options.instructions,
+      },
     );
 
     const visible = <
@@ -1196,9 +1218,13 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     const ctx = rawCtx as {
       mcpReq?: {
         _meta?: {
-          "io.modelcontextprotocol/logLevel"?: string;
           progressToken?: number | string;
         };
+        /**
+         * The reserved `io.modelcontextprotocol/*` keys, which the SDK moves
+         * here out of `_meta`.
+         */
+        envelope?: { [LOG_LEVEL_META_KEY]?: LoggingLevel };
         id?: string;
         inputResponses?: Record<string, unknown>;
         notify?: (n: unknown) => Promise<void>;
@@ -1209,12 +1235,20 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     const mcpReq = ctx?.mcpReq;
 
     // The spec forbids `notifications/message` for a request that did not opt
-    // in via `_meta`. Failures are swallowed: a log line must never take down
-    // the request.
-    const requestedLevel = mcpReq?._meta?.["io.modelcontextprotocol/logLevel"];
+    // in via `_meta`, and the level it opts in with is a floor: a client that
+    // asks for `error` wants errors, not everything. Failures are swallowed: a
+    // log line must never take down the request.
+    const requestedLevel = mcpReq?.envelope?.[LOG_LEVEL_META_KEY];
 
-    const emit = (level: string, message: string, data?: SerializableValue) => {
-      if (!requestedLevel) {
+    const emit = (
+      level: LoggingLevel,
+      message: string,
+      data?: SerializableValue,
+    ) => {
+      if (
+        !requestedLevel ||
+        LOG_LEVELS.indexOf(level) < LOG_LEVELS.indexOf(requestedLevel)
+      ) {
         return;
       }
 

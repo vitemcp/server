@@ -130,6 +130,7 @@ describe("canAccess hides every member of a family", () => {
       // may see — a client that reads them must still be able to call the
       // list method and be told, truthfully, that it may see nothing.
       expect(body.result?.capabilities).toEqual({
+        logging: {},
         prompts: { listChanged: true },
         resources: { listChanged: true },
         tools: { listChanged: true },
@@ -193,7 +194,7 @@ describe("canAccess hides every member of a family", () => {
 });
 
 describe("a server carrying none of a primitive", () => {
-  it("advertises nothing and leaves the list methods absent", async () => {
+  it("advertises no primitive family and leaves the list methods absent", async () => {
     const server = new ViteMCP({ name: "Bare", version: "1.0.0" });
 
     await server.start({
@@ -208,9 +209,10 @@ describe("a server carrying none of a primitive", () => {
         );
       }
 
+      // `logging` is not a family: it has no list method to leave absent.
       expect(
         (await call(server.port!, "server/discover", "x")).result?.capabilities,
-      ).toEqual({});
+      ).toEqual({ logging: {} });
     } finally {
       await server.stop();
     }

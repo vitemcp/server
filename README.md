@@ -1512,7 +1512,8 @@ Tools can log messages to the client using the `log` object in the context objec
 > setting `io.modelcontextprotocol/logLevel` in the request's `_meta`. The
 > revision forbids servers from sending `notifications/message` for a request
 > that did not opt in, so `log.*` is a no-op otherwise — that is expected
-> behaviour, not a bug.
+> behaviour, not a bug. The level is a floor: a request that asks for
+> `warning` receives `log.warn` and `log.error`, not `log.info` or `log.debug`.
 >
 > Logging is also deprecated as of 2026-07-28. For diagnostics that always
 > reach you, write to `stderr` (stdio servers) or use OpenTelemetry; for
