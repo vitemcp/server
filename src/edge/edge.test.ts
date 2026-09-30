@@ -77,10 +77,13 @@ const call = async (
       // SEP-2243 requires the standard MCP request headers on streamable
       // POSTs: `Mcp-Method` always, and `Mcp-Name` whenever the body names a
       // target (`params.name` or `params.uri`). The server rejects a
-      // header/body mismatch with -32020.
+      // header/body mismatch with -32020. `MCP-Protocol-Version` has to agree
+      // with the version the envelope names, and later SDK releases refuse a
+      // request that leaves it out.
       headers: {
         ...MCP_HEADERS,
         "Mcp-Method": method,
+        "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
         ...(typeof params.name === "string"
           ? { "Mcp-Name": params.name }
           : typeof params.uri === "string"
@@ -422,6 +425,7 @@ describe("EdgeViteMCP request body cap", () => {
           ...MCP_HEADERS,
           "Mcp-Method": "tools/call",
           "Mcp-Name": "measure",
+          "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
         },
         method: "POST",
       }),

@@ -38,6 +38,7 @@ const callTool = (port: number, headers: Record<string, string> = {}) =>
       "Content-Type": "application/json",
       "Mcp-Method": "tools/call",
       "Mcp-Name": "secret",
+      "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
       ...headers,
     },
     method: "POST",

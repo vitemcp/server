@@ -83,6 +83,7 @@ describe("protocol envelope", () => {
           "Content-Type": "application/json",
           "Mcp-Method": "tools/call",
           "Mcp-Name": "add",
+          "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
         },
         method: "POST",
       });
@@ -305,6 +306,7 @@ describe("protocol envelope", () => {
           Accept: "application/json, text/event-stream",
           "Content-Type": "application/json",
           "Mcp-Method": "tools/list",
+          "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
           Origin: "https://evil.example",
         },
         method: "POST",
@@ -343,6 +345,7 @@ describe("protocol envelope", () => {
           Accept: "application/json, text/event-stream",
           "Content-Type": "application/json",
           "Mcp-Method": "tools/list",
+          "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
           Origin: `http://localhost:${port}`,
         },
         method: "POST",

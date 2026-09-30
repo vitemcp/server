@@ -192,6 +192,7 @@ describe("context.signal", () => {
             "Content-Type": "application/json",
             "Mcp-Method": "tools/call",
             "Mcp-Name": "hang",
+            "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
           },
           method: "POST",
           signal: controller.signal,
