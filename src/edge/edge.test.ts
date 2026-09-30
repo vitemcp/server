@@ -382,3 +382,149 @@ describe("EdgeViteMCP", () => {
     expect(wrongPath.status).toBe(404);
   });
 });
+
+/**
+ * The MCP endpoint's request body cap. The Node transport has always had one;
+ * this entry point handed the request straight to the SDK, which reads whatever
+ * it is given in full.
+ */
+describe("EdgeViteMCP request body cap", () => {
+  const MIB = 1024 * 1024;
+
+  /** A server whose one tool reports how much it was sent. */
+  const measuring = (options: { maxBodySize?: number } = {}) => {
+    const received: number[] = [];
+    const server = new EdgeViteMCP({
+      name: "TestServer",
+      version: "1.0.0",
+      ...options,
+    });
+
+    server.addTool({
+      description: "Reports the size of what it was sent",
+      execute: async ({ blob }) => {
+        received.push(blob.length);
+        return `received ${blob.length}`;
+      },
+      name: "measure",
+      parameters: z.object({ blob: z.string() }),
+    });
+
+    return { received, server };
+  };
+
+  const post = (server: EdgeViteMCP, body: ReadableStream | string) =>
+    server.fetch(
+      new Request("http://localhost/mcp", {
+        body,
+        duplex: "half",
+        headers: {
+          ...MCP_HEADERS,
+          "Mcp-Method": "tools/call",
+          "Mcp-Name": "measure",
+        },
+        method: "POST",
+      }),
+    );
+
+  const callWith = (characters: number) =>
+    JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "tools/call",
+      params: {
+        _meta: envelope,
+        arguments: { blob: "x".repeat(characters) },
+        name: "measure",
+      },
+    });
+
+  it("refuses a body over 1 MiB by default", async () => {
+    const { received, server } = measuring();
+    const response = await post(server, callWith(2 * MIB));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "invalid_request",
+      error_description: "Request body exceeds 1 MiB",
+    });
+    expect(received).toEqual([]);
+  });
+
+  it("stops reading a body of undeclared length once it passes the cap", async () => {
+    const { server } = measuring();
+    const chunk = new Uint8Array(64 * 1024).fill(0x20);
+    let pulled = 0;
+    let cancelled = false;
+
+    // No Content-Length to refuse up front, as with a chunked upload: the cap
+    // has to be enforced on the bytes actually read.
+    const response = await post(
+      server,
+      new ReadableStream<Uint8Array>({
+        cancel() {
+          cancelled = true;
+        },
+        pull(controller) {
+          pulled += 1;
+
+          if (pulled > 64) {
+            controller.close();
+            return;
+          }
+
+          controller.enqueue(chunk);
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error_description: "Request body exceeds 1 MiB",
+    });
+
+    // 4 MiB were on offer; reading stopped just past the first.
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(24);
+  });
+
+  it("answers a body that fails mid-stream instead of throwing", async () => {
+    const noop = () => {};
+    const server = new EdgeViteMCP({
+      logger: { debug: noop, error: noop, info: noop, log: noop, warn: noop },
+      name: "TestServer",
+      version: "1.0.0",
+    });
+    let pulled = 0;
+
+    const response = await post(
+      server,
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulled += 1;
+
+          if (pulled === 1) {
+            controller.enqueue(new Uint8Array(16));
+            return;
+          }
+
+          controller.error(new Error("client went away"));
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "invalid_request",
+      error_description: "Request body could not be read",
+    });
+  });
+
+  it("accepts a larger body when maxBodySize is raised", async () => {
+    const { received, server } = measuring({ maxBodySize: 4 * MIB });
+    const response = await post(server, callWith(2 * MIB));
+
+    expect(response.status).toBe(200);
+    expect(received).toEqual([2 * MIB]);
+  });
+});

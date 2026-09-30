@@ -9,6 +9,7 @@ import { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
 import { z } from "zod";
 
+import { formatBytes } from "../formatBytes.js";
 import {
   type JsonSchemaConverter,
   toSdkSchema,
@@ -78,6 +79,12 @@ export interface EdgeViteMCPOptions {
   description?: string;
   logger?: EdgeLogger;
   /**
+   * Largest request body the MCP endpoint accepts, in bytes (default: 1 MiB,
+   * as on the Node transport). A larger one is refused without being held in
+   * memory. Routes added through `getApp()` are not covered.
+   */
+  maxBodySize?: number;
+  /**
    * Base path for MCP endpoints (default: "/mcp")
    */
   mcpPath?: string;
@@ -104,10 +111,80 @@ const convertToJsonSchema: JsonSchemaConverter = async (schema, io) => {
   return valibotToJsonSchema(schema, io);
 };
 
+/**
+ * The request with its body read under a hard cap, or `null` when the body is
+ * larger than that.
+ *
+ * The SDK reads whatever it is handed in full, so the cap has to be applied
+ * before it sees the request — and while reading, not after: a declared
+ * `Content-Length` over the cap is refused before a byte is read, and a body
+ * that declares none is abandoned at the first chunk past it.
+ */
+const readCappedRequest = async (
+  request: Request,
+  maxBytes: number,
+): Promise<null | Request> => {
+  if (!request.body) {
+    return request;
+  }
+
+  if (Number(request.headers.get("content-length") ?? 0) > maxBytes) {
+    return null;
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    size += value.byteLength;
+
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(size);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  // Rebuilt rather than cloned: the original's body is spent.
+  return new Request(request.url, {
+    body,
+    headers: request.headers,
+    method: request.method,
+    signal: request.signal,
+  });
+};
+
+/** The Node transport's default for `httpStream.maxBodySize`. */
+const DEFAULT_MAX_BODY_SIZE = 1024 * 1024;
+
+/** A refusal in the shape the Node transport gives a body it will not take. */
+const invalidRequest = (description: string): Response =>
+  Response.json(
+    { error: "invalid_request", error_description: description },
+    { status: 400 },
+  );
+
 export class EdgeViteMCP {
   #handler: null | ReturnType<typeof createMcpHandler> = null;
   #honoApp = new Hono();
   #logger: EdgeLogger;
+  #maxBodySize: number;
   #mcpPath: string;
   #name: string;
   #prompts: EdgePrompt[] = [];
@@ -124,6 +201,7 @@ export class EdgeViteMCP {
     this.#name = options.name;
     this.#version = options.version;
     this.#logger = options.logger ?? console;
+    this.#maxBodySize = options.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
     this.#mcpPath = options.mcpPath ?? "/mcp";
   }
 
@@ -150,8 +228,26 @@ export class EdgeViteMCP {
     const url = new URL(request.url);
 
     if (url.pathname === this.#mcpPath) {
+      let capped: null | Request;
+
+      try {
+        capped = await readCappedRequest(request, this.#maxBodySize);
+      } catch (error) {
+        // A body that aborts mid-stream rejects here. Answer it, as the Node
+        // transport does, rather than let the rejection escape the handler.
+        this.#logger.debug(`[EdgeViteMCP] request body failed:`, error);
+
+        return invalidRequest("Request body could not be read");
+      }
+
+      if (!capped) {
+        return invalidRequest(
+          `Request body exceeds ${formatBytes(this.#maxBodySize)}`,
+        );
+      }
+
       this.#handler ??= createMcpHandler(() => this.#buildServer());
-      return this.#handler.fetch(request);
+      return this.#handler.fetch(capped);
     }
 
     return this.#honoApp.fetch(request);
