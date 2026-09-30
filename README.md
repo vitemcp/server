@@ -2009,6 +2009,7 @@ When running on edge runtimes:
 - **No filesystem access**: Use fetch APIs for external data
 - **V8 Isolates**: Fast cold starts and efficient resource usage
 - **Global deployment**: Automatic distribution to edge locations
+- **Schema libraries**: Zod, ArkType and Valibot describe a tool as they do on Node. Any other library that carries no JSON Schema of its own is not converted here: a tool written in one is left out and reported through the logger
 
 #### Custom Routes on Edge
 

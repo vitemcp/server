@@ -9,6 +9,12 @@ import { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
 import { z } from "zod";
 
+import {
+  type JsonSchemaConverter,
+  toSdkSchema,
+  valibotToJsonSchema,
+} from "../toSdkSchema.js";
+
 export type EdgeFetchHandler = (request: Request) => Promise<Response>;
 
 /**
@@ -79,6 +85,25 @@ export interface EdgeViteMCPOptions {
   version: string;
 }
 
+/**
+ * JSON Schema for a schema that carries none, from the one converter this
+ * entry point can afford. `ViteMCP` hands every other library to xsschema,
+ * which reaches each converter through an `import()` a bundler has to resolve:
+ * an edge bundle would then fail to build for want of Effect or Sury, whichever
+ * library the server was actually written in.
+ */
+const convertToJsonSchema: JsonSchemaConverter = async (schema, io) => {
+  const { vendor } = schema["~standard"];
+
+  if (vendor !== "valibot") {
+    throw new Error(
+      `Schema library "${vendor}" carries no JSON Schema (\`~standard.jsonSchema\`), and EdgeViteMCP converts only Valibot's. Use Zod 4, ArkType or Valibot.`,
+    );
+  }
+
+  return valibotToJsonSchema(schema, io);
+};
+
 export class EdgeViteMCP {
   #handler: null | ReturnType<typeof createMcpHandler> = null;
   #honoApp = new Hono();
@@ -88,6 +113,11 @@ export class EdgeViteMCP {
   #prompts: EdgePrompt[] = [];
   #resources: EdgeResource[] = [];
   #tools: EdgeTool[] = [];
+  /** Each tool's input schema, as `#sdkSchemaFor` converted it. */
+  #toolSchemas = new WeakMap<
+    EdgeTool,
+    Promise<{ inputSchema: unknown } | undefined>
+  >();
   #version: string;
 
   constructor(options: EdgeViteMCPOptions) {
@@ -132,13 +162,26 @@ export class EdgeViteMCP {
     return this.#honoApp;
   }
 
-  #buildServer(): McpServer {
+  async #buildServer(): Promise<McpServer> {
     const server = new McpServer({
       name: this.#name,
       version: this.#version,
     });
 
-    for (const tool of this.#tools) {
+    // A tool whose schema cannot be advertised is left out rather than allowed
+    // to fail the request: `tools/list` describes every tool at once, so one
+    // such tool took the list down for all of them.
+    const tools = (
+      await Promise.all(
+        this.#tools.map(async (tool) => {
+          const schema = await this.#sdkSchemaFor(tool);
+
+          return schema && { schema, tool };
+        }),
+      )
+    ).filter((entry) => entry !== undefined);
+
+    for (const { schema, tool } of tools) {
       const call = async (args: unknown) => {
         const result = await tool.execute(args as never);
         return typeof result === "string"
@@ -150,12 +193,12 @@ export class EdgeViteMCP {
         tool.name,
         {
           description: tool.description,
-          inputSchema: tool.parameters as never,
+          inputSchema: schema.inputSchema as never,
         },
         // The SDK passes arguments only to a tool that declares an input
         // schema; one that does not is called with the request context alone,
         // which must not reach `execute` as its parameters.
-        (tool.parameters ? call : () => call(undefined)) as never,
+        (schema.inputSchema ? call : () => call(undefined)) as never,
       );
     }
 
@@ -209,5 +252,33 @@ export class EdgeViteMCP {
     this.#logger.debug(`[EdgeViteMCP] built server ${this.#name}`);
 
     return server;
+  }
+
+  /**
+   * A tool's input schema in the form the SDK registers it, or `undefined` for
+   * a tool whose schema cannot be converted — reported when that is found.
+   *
+   * Converted once per tool: `#buildServer` runs on every request, so a tool
+   * that cannot be served would otherwise be reported on each of them.
+   */
+  #sdkSchemaFor(tool: EdgeTool): Promise<{ inputSchema: unknown } | undefined> {
+    let schema = this.#toolSchemas.get(tool);
+
+    if (!schema) {
+      schema = toSdkSchema(tool.parameters, "input", convertToJsonSchema).then(
+        (inputSchema) => ({ inputSchema }),
+        (error: unknown) => {
+          this.#logger.error(
+            `[EdgeViteMCP] Tool "${tool.name}" is not served:`,
+            error,
+          );
+
+          return undefined;
+        },
+      );
+      this.#toolSchemas.set(tool, schema);
+    }
+
+    return schema;
   }
 }

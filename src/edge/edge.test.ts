@@ -2,7 +2,8 @@ import {
   CLIENT_CAPABILITIES_META_KEY,
   PROTOCOL_VERSION_META_KEY,
 } from "@modelcontextprotocol/server";
-import { describe, expect, it } from "vitest";
+import * as v from "valibot";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { EdgeViteMCP } from "./index.js";
@@ -226,6 +227,93 @@ describe("EdgeViteMCP", () => {
     await call(server, "prompts/get", { name: "summary" });
 
     expect(received).toEqual([{}]);
+  });
+
+  // Valibot carries no JSON Schema of its own, and the SDK refuses to list a
+  // tool without one — which failed `tools/list` for every tool on the server,
+  // not only the Valibot one.
+  it("serves a tool written with Valibot", async () => {
+    const server = makeServer();
+
+    server.addTool({
+      description: "Greet someone",
+      execute: async ({ name }) => `Hello, ${name}!`,
+      name: "greet",
+      parameters: v.object({ name: v.pipe(v.string(), v.trim()) }),
+    });
+
+    const listed = await call(server, "tools/list");
+    const [tool] = (
+      listed.result as { tools: { inputSchema: unknown; name: string }[] }
+    ).tools;
+
+    expect(tool).toMatchObject({
+      inputSchema: {
+        additionalProperties: false,
+        properties: { name: { type: "string" } },
+        required: ["name"],
+        type: "object",
+      },
+      name: "greet",
+    });
+
+    // Validated by Valibot itself, so the transform reaches `execute`.
+    const called = await call(server, "tools/call", {
+      arguments: { name: "  World " },
+      name: "greet",
+    });
+
+    expect(
+      (called.result as { content: { text: string }[] }).content[0].text,
+    ).toBe("Hello, World!");
+  });
+
+  it("leaves out a tool whose schema cannot be advertised, and serves the rest", async () => {
+    const error = vi.fn();
+    const noop = () => {};
+    const server = new EdgeViteMCP({
+      logger: { debug: noop, error, info: noop, log: noop, warn: noop },
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    server.addTool({
+      description: "Greet someone",
+      execute: async ({ name }) => `Hello, ${name}!`,
+      name: "greet",
+      parameters: z.object({ name: z.string() }),
+    });
+    server.addTool({
+      description: "Written with a library that carries no JSON Schema",
+      execute: async () => "unreachable",
+      name: "opaque",
+      parameters: {
+        "~standard": {
+          validate: (value: unknown) => ({ value }),
+          vendor: "hand-rolled",
+          version: 1 as const,
+        },
+      },
+    });
+
+    for (let request = 0; request < 2; request++) {
+      const listed = await call(server, "tools/list");
+
+      expect(
+        (listed.result as { tools: { name: string }[] }).tools.map(
+          (tool) => tool.name,
+        ),
+      ).toEqual(["greet"]);
+    }
+
+    // Reported once, not on every request.
+    expect(error).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith(
+      '[EdgeViteMCP] Tool "opaque" is not served:',
+      expect.objectContaining({
+        message: expect.stringContaining('"hand-rolled"'),
+      }),
+    );
   });
 
   it("serves custom routes alongside the MCP endpoint", async () => {
