@@ -727,8 +727,10 @@ export class OAuthProxy {
       registeredAt: new Date(),
     };
 
-    this.stateStore.cacheRegisteredClient(client);
+    // Persisted before it is cached: a write that fails must not leave behind
+    // a client this instance honours and no other instance has heard of.
     await this.stateStore.saveRegisteredClient(client);
+    this.stateStore.cacheRegisteredClient(client);
 
     // Return RFC 7591 compliant response with proxy-issued credentials.
     const response: DCRResponse = {
