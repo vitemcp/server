@@ -60,6 +60,38 @@ describe("protected resource metadata from an auth provider", () => {
     }
   });
 
+  it("challenges with the public document behind a TLS-terminating proxy", async () => {
+    // The provider is told the address clients use; the listener is reached
+    // on another one, over plain http, as it is behind such a proxy.
+    const auth = provider("https://mcp.example.com");
+    const server = new ViteMCP({ auth, name: "Test", version: "1.0.0" });
+
+    await server.start({
+      httpStream: { port: 0 },
+      transportType: "httpStream",
+    });
+
+    try {
+      const challenge = await fetch(`http://localhost:${server.port}/mcp`, {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+      expect(challenge.status).toBe(401);
+
+      // Built from the request, this was `http://localhost:<port>/…`: the
+      // listener's scheme and host, which a client on the far side of the
+      // proxy cannot fetch — or fetches in the clear.
+      expect(challenge.headers.get("WWW-Authenticate")).toContain(
+        'resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp"',
+      );
+    } finally {
+      await server.stop();
+      auth.destroy();
+    }
+  });
+
   it("names a custom endpoint under a base path", async () => {
     const port = await allocateTestPort();
     const origin = `http://localhost:${port}`;

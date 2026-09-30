@@ -1134,7 +1134,7 @@ This configuration automatically exposes OAuth discovery endpoints:
 
 Clients discover protected resource metadata using the following search order:
 
-1. **WWW-Authenticate header** - Primary method (handled automatically by mcp-proxy)
+1. **WWW-Authenticate header** - Primary method. The `401` challenge carries `resource_metadata`, formed from the configured `resource`, so it names the public address even behind a proxy that terminates TLS
 2. **Sub-path well-known** - `/.well-known/oauth-protected-resource<endpoint>` (e.g., `/.well-known/oauth-protected-resource/mcp`)
 3. **Root well-known** - `/.well-known/oauth-protected-resource` (fallback)
 

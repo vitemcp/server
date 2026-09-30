@@ -127,7 +127,43 @@ describe("authenticate gate", () => {
         oauth: {
           protectedResource: {
             authorizationServers: ["https://auth.example.com"],
-            resource: "http://localhost/mcp",
+            // Not the address this test reaches the server on, which is how a
+            // server behind a TLS-terminating proxy sees every request: over
+            // plain http, under whatever Host the proxy forwarded.
+            resource: "https://mcp.example.com/mcp",
+          },
+        },
+      },
+      async (port) => {
+        const challenge = (await callTool(port)).headers.get(
+          "WWW-Authenticate",
+        );
+
+        // Named after the resource the server was configured as — the address
+        // a client can reach. Built from the request instead, this read
+        // `http://localhost:<port>/…`, which that client cannot fetch.
+        expect(challenge).toContain(
+          'resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp"',
+        );
+
+        // That path must actually serve the document — a challenge pointing
+        // at a 404 sends the client nowhere.
+        const metadata = await fetch(
+          `http://localhost:${port}/.well-known/oauth-protected-resource/mcp`,
+        );
+
+        expect(metadata.status).toBe(200);
+      },
+    );
+  });
+
+  it("falls back to the request's own address when no resource is configured", async () => {
+    await withServer(
+      {
+        authenticate: async () => undefined,
+        oauth: {
+          protectedResource: {
+            authorizationServers: ["https://auth.example.com"],
           },
         },
       },
@@ -139,14 +175,6 @@ describe("authenticate gate", () => {
         expect(challenge).toContain(
           `resource_metadata="http://localhost:${port}/.well-known/oauth-protected-resource/mcp"`,
         );
-
-        // The advertised URL must actually serve the document — a challenge
-        // pointing at a 404 sends the client nowhere.
-        const metadata = await fetch(
-          `http://localhost:${port}/.well-known/oauth-protected-resource/mcp`,
-        );
-
-        expect(metadata.status).toBe(200);
       },
     );
   });

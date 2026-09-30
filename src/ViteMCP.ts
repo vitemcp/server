@@ -619,16 +619,16 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   #logger: Logger;
   #options: ServerOptions<T>;
   #prompts: Prompt<T>[] = [];
-  #resources: Resource<T>[] = [];
-  #resourceTemplates: ResourceTemplate<T>[] = [];
-  #serverState: ServerState = ServerState.Stopped;
   /**
-   * Whether this server publishes an RFC 9728 protected-resource document, and
-   * so whether a 401 can point a client at it. Latched when the routes are
+   * The RFC 9728 protected-resource document this server publishes, if it
+   * publishes one — what a 401 points a client at. Latched when the routes are
    * mounted rather than read back from `auth` per rejection: the provider's
    * config getter builds its proxy on demand and refuses once destroyed.
    */
-  #servesProtectedResourceMetadata = false;
+  #protectedResource: { resource?: unknown } | undefined;
+  #resources: Resource<T>[] = [];
+  #resourceTemplates: ResourceTemplate<T>[] = [];
+  #serverState: ServerState = ServerState.Stopped;
   #stdioHandle: null | StdioServerHandle = null;
 
   #tools: Tool<T>[] = [];
@@ -1530,7 +1530,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         }),
       );
 
-      this.#servesProtectedResourceMetadata = Boolean(oauth.protectedResource);
+      this.#protectedResource = oauth.protectedResource;
     }
 
     const health = this.#options.health;
@@ -1776,23 +1776,35 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
    * `resource_metadata` (RFC 9728 §5.1) is the parameter that turns a bare
    * rejection into a login: it points the client at this server's
    * protected-resource document, from which it discovers the authorization
-   * server and starts the flow. It is derived from the URL the request
-   * arrived on, which is exactly where `createOAuthRouter` mounts that
-   * document, and is omitted when this server publishes no such document.
+   * server and starts the flow. It is omitted when this server publishes no
+   * such document.
+   *
+   * The URL is formed from the resource that document names: the address the
+   * server was configured as, which is the one a client can reach. The
+   * request's own URL is not that address behind a proxy that terminates TLS —
+   * it carries the listener's scheme and whatever Host was forwarded, so a
+   * challenge built from it sent clients to `http://`, or to an internal host.
+   * It is the fallback only, for a document that names no resource.
    */
   #unauthorized(request: Request): Response {
+    const published = this.#protectedResource;
+
     return bearerAuthChallengeResponse(
       new OAuthError(OAuthErrorCode.InvalidToken, "Authentication required"),
-      this.#servesProtectedResourceMetadata
+      published
         ? {
             resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(
-              new URL(request.url),
+              toUrl(published.resource) ?? new URL(request.url),
             ),
           }
         : {},
     );
   }
 }
+
+/** `value` as a URL, or `undefined` when it is not an absolute one. */
+const toUrl = (value: unknown): undefined | URL =>
+  typeof value === "string" && URL.canParse(value) ? new URL(value) : undefined;
 
 /**
  * An auth provider's OAuth config, naming the MCP endpoint as the protected
