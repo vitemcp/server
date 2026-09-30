@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ClientIdMetadataError,
   ClientIdMetadataResolver,
+  isBlockedAddress,
   isClientIdMetadataUrl,
   validateClientIdMetadata,
 } from "./clientIdMetadata.js";
@@ -66,6 +67,70 @@ describe("Client ID Metadata Documents", () => {
         await expect(
           resolver.resolve(`https://${host}/client.json`),
         ).rejects.toBeInstanceOf(ClientIdMetadataError);
+      }
+    });
+
+    // A literal never reaches the DNS hook, so the address check is all that
+    // stands between the fetch and the host's own network. `URL` writes an
+    // embedded IPv4 address in hex — `[::ffff:127.0.0.1]` arrives as
+    // `[::ffff:7f00:1]` — and matched only in its dotted form it was taken
+    // for a public IPv6 address: the request went to loopback.
+    it("refuses an IPv4 address carried inside an IPv6 literal", async () => {
+      const resolver = new ClientIdMetadataResolver();
+
+      for (const host of [
+        "[::ffff:127.0.0.1]",
+        "[::ffff:7f00:1]",
+        "[::ffff:169.254.169.254]",
+        "[::ffff:10.0.0.1]",
+        "[::127.0.0.1]",
+        "[64:ff9b::10.0.0.1]",
+      ]) {
+        // The message, not only the class: a fetch that was attempted and
+        // failed is a `ClientIdMetadataError` too.
+        await expect(
+          resolver.resolve(`https://${host}/client.json`),
+        ).rejects.toThrow(/internal address/);
+      }
+    });
+
+    it("judges an address by the network it reaches, however it is written", () => {
+      const internal: [string, number][] = [
+        ["127.0.0.1", 4],
+        ["169.254.169.254", 4],
+        ["::", 6],
+        ["::1", 6],
+        ["0:0:0:0:0:0:0:1", 6],
+        ["fe80::1%lo0", 6],
+        ["fd00:ec2::254", 6],
+        ["ff02::1", 6],
+        // IPv4-mapped, dotted and as `URL` normalises it.
+        ["::ffff:127.0.0.1", 6],
+        ["::ffff:7f00:1", 6],
+        ["::ffff:a9fe:a9fe", 6],
+        ["::ffff:192.168.1.1", 6],
+        // IPv4-compatible, and the NAT64 prefix a gateway translates.
+        ["::10.0.0.1", 6],
+        ["64:ff9b::a00:1", 6],
+        // Not an address: refused rather than guessed at.
+        ["not-an-address", 6],
+      ];
+      const external: [string, number][] = [
+        ["8.8.8.8", 4],
+        ["2606:4700:4700::1111", 6],
+        ["2001:4860:4860::8888", 6],
+        // Carrying a public IPv4 address is not a reason to refuse.
+        ["::ffff:8.8.8.8", 6],
+        ["::ffff:808:808", 6],
+        ["64:ff9b::808:808", 6],
+      ];
+
+      for (const [address, family] of internal) {
+        expect(isBlockedAddress(address, family), address).toBe(true);
+      }
+
+      for (const [address, family] of external) {
+        expect(isBlockedAddress(address, family), address).toBe(false);
       }
     });
 

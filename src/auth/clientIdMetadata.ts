@@ -74,30 +74,79 @@ const isBlockedIpv4 = (ip: string): boolean => {
   );
 };
 
-const isBlockedIpv6 = (ip: string): boolean => {
-  const address = ip.toLowerCase().split("%")[0];
+/**
+ * The eight 16-bit groups of an IPv6 address, or `null` when it is not one.
+ *
+ * `URL` does the parsing, and its hostname is the canonical form: hex groups
+ * only, so an address written with a dotted quad at the end
+ * (`::ffff:127.0.0.1`) has had it folded into the last two.
+ */
+const ipv6Groups = (address: string): null | number[] => {
+  let canonical: string;
 
-  // IPv4-mapped (::ffff:a.b.c.d) must be judged on the embedded IPv4.
-  const mapped = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-
-  if (mapped) {
-    return isBlockedIpv4(mapped[1]);
+  try {
+    canonical = new URL(`http://[${address}]`).hostname.slice(1, -1);
+  } catch {
+    return null;
   }
 
-  return (
-    address === "::" ||
-    address === "::1" ||
-    address.startsWith("fc") || // unique local
-    address.startsWith("fd") || // unique local
-    address.startsWith("fe8") || // link-local
-    address.startsWith("fe9") ||
-    address.startsWith("fea") ||
-    address.startsWith("feb") ||
-    address.startsWith("ff") // multicast
+  const [head, tail] = canonical.split("::");
+  const leading = head ? head.split(":") : [];
+  const trailing = tail ? tail.split(":") : [];
+  const elided = Array<string>(8 - leading.length - trailing.length).fill("0");
+
+  return [...leading, ...elided, ...trailing].map((group) =>
+    Number.parseInt(group, 16),
   );
 };
 
-const isBlockedAddress = (ip: string, family: number): boolean =>
+/**
+ * Prefixes under which the last 32 bits of an IPv6 address are an IPv4 address,
+ * and the packet ends up there.
+ */
+const IPV4_CARRYING_PREFIXES = [
+  [0, 0, 0, 0, 0, 0xffff], // IPv4-mapped, ::ffff:0:0/96
+  [0, 0, 0, 0, 0, 0], // IPv4-compatible, ::/96 — which takes in :: and ::1
+  [0x64, 0xff9b, 0, 0, 0, 0], // NAT64, 64:ff9b::/96
+];
+
+const isBlockedIpv6 = (ip: string): boolean => {
+  // Judged on its groups, not its spelling. Matching the text let through
+  // every form that was not the one expected — `::ffff:7f00:1`, which is how
+  // `URL` writes `::ffff:127.0.0.1`, read as a public address and was fetched.
+  const groups = ipv6Groups(ip.split("%")[0]);
+
+  if (!groups) {
+    return true;
+  }
+
+  // An IPv4 address in IPv6 clothing is judged as the IPv4 address it reaches.
+  if (
+    IPV4_CARRYING_PREFIXES.some((prefix) =>
+      prefix.every((group, index) => groups[index] === group),
+    )
+  ) {
+    const [high, low] = groups.slice(6);
+
+    return isBlockedIpv4(
+      `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`,
+    );
+  }
+
+  const [first] = groups;
+
+  return (
+    (first & 0xfe00) === 0xfc00 || // unique local, fc00::/7
+    (first & 0xffc0) === 0xfe80 || // link-local, fe80::/10
+    (first & 0xff00) === 0xff00 // multicast, ff00::/8
+  );
+};
+
+/**
+ * Whether a metadata fetch to this address would reach the host's own network.
+ * Exported so the ranges can be tested without a connection being attempted.
+ */
+export const isBlockedAddress = (ip: string, family: number): boolean =>
   family === 4 ? isBlockedIpv4(ip) : isBlockedIpv6(ip);
 
 /** URL hostnames wrap IPv6 literals in brackets; `isIP` does not accept those. */
