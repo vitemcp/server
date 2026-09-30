@@ -746,7 +746,11 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         });
       }
 
-      return { ...first, mimeType: first.mimeType ?? direct.mimeType, uri };
+      return {
+        ...first,
+        mimeType: first.mimeType ?? direct.mimeType,
+        uri: first.uri ?? uri,
+      };
     }
 
     for (const template of this.#resourceTemplates) {
@@ -769,7 +773,11 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         );
       }
 
-      return { ...first, mimeType: first.mimeType ?? template.mimeType, uri };
+      return {
+        ...first,
+        mimeType: first.mimeType ?? template.mimeType,
+        uri: first.uri ?? uri,
+      };
     }
 
     throw new UnexpectedStateError(`Resource not found: ${uri}`, { uri });
