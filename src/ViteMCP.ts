@@ -1621,7 +1621,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
             },
           );
 
-          res.writeHead(response.status, Object.fromEntries(response.headers));
+          res.writeHead(response.status, toNodeHeaders(response.headers));
 
           if (!response.body) {
             res.end();
@@ -1856,6 +1856,24 @@ const nodeToWebRequest = (
     signal,
     ...(hasBody ? { body } : {}),
   });
+};
+
+/**
+ * A response's headers in the form Node writes them.
+ *
+ * `Headers` folds a repeated header into one comma-joined value, except
+ * `Set-Cookie`: a cookie's own `Expires` contains a comma, so it yields an
+ * entry per cookie instead. An object keyed by header name keeps only the last
+ * of those, which dropped every cookie but one. Given an array, Node writes a
+ * header line for each entry.
+ */
+const toNodeHeaders = (headers: Headers): http.OutgoingHttpHeaders => {
+  const cookies = headers.getSetCookie();
+
+  return {
+    ...Object.fromEntries(headers),
+    ...(cookies.length > 0 ? { "set-cookie": cookies } : {}),
+  };
 };
 
 /**

@@ -1034,3 +1034,43 @@ test("custom route stream that fails mid-body aborts the response", async () => 
     },
   });
 });
+
+test("custom routes send every Set-Cookie header, not only the last", async () => {
+  await runWithTestServer({
+    run: async ({ port }) => {
+      const response = await fetch(`http://localhost:${port}/login`);
+
+      // `Headers` folds a repeated header into one comma-joined value, except
+      // this one: a cookie's own `Expires` contains a comma, so it yields an
+      // entry per cookie instead. Collected into an object keyed by header
+      // name, only the last of them survived.
+      expect(response.headers.getSetCookie()).toEqual([
+        "session=abc; Path=/; HttpOnly",
+        "csrf=xyz; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT",
+      ]);
+    },
+    server: async () => {
+      const server = new ViteMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      const app = server.getApp();
+
+      app.get("/login", (c) => {
+        c.header("Set-Cookie", "session=abc; Path=/; HttpOnly", {
+          append: true,
+        });
+        c.header(
+          "Set-Cookie",
+          "csrf=xyz; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT",
+          { append: true },
+        );
+
+        return c.text("ok");
+      });
+
+      return server;
+    },
+  });
+});
