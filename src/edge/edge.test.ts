@@ -191,6 +191,43 @@ describe("EdgeViteMCP", () => {
     expect(messages[0].content.text).toBe("Tell me about otters");
   });
 
+  // The SDK calls a handler that declares no schema with its request context
+  // alone, which used to reach `execute` and `load` as their arguments.
+  it("hands a tool without parameters no arguments", async () => {
+    const server = makeServer();
+    const received: unknown[] = [];
+
+    server.addTool({
+      description: "Report status",
+      execute: async (params) => {
+        received.push(params);
+        return "ok";
+      },
+      name: "status",
+    });
+
+    await call(server, "tools/call", { arguments: {}, name: "status" });
+
+    expect(received).toEqual([undefined]);
+  });
+
+  it("hands a prompt without arguments an empty object", async () => {
+    const server = makeServer();
+    const received: unknown[] = [];
+
+    server.addPrompt({
+      load: async (args) => {
+        received.push(args);
+        return "Summarise the last deploy.";
+      },
+      name: "summary",
+    });
+
+    await call(server, "prompts/get", { name: "summary" });
+
+    expect(received).toEqual([{}]);
+  });
+
   it("serves custom routes alongside the MCP endpoint", async () => {
     const server = makeServer();
     server.getApp().get("/health", (c) => c.text("ok"));

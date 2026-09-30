@@ -1024,6 +1024,38 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     const prompts = visible(this.#prompts);
 
     for (const { schemas, tool } of tools) {
+      const call = async (args: unknown, ctx: unknown) => {
+        // Paired so the deadline reaches `execute` through `context.signal`
+        // as well as rejecting the caller — a timeout the tool cannot see
+        // leaves its work running behind an already-settled promise.
+        const timeout = tool.timeoutMs
+          ? { controller: new AbortController(), ms: tool.timeoutMs }
+          : undefined;
+        const { context, release } = this.#makeContext(
+          auth,
+          ctx,
+          timeout?.controller.signal,
+        );
+
+        try {
+          const result = await (timeout
+            ? withTimeout(tool.execute(args, context), timeout, tool.name)
+            : tool.execute(args, context));
+          return normalizeToolResult(result, tool.outputSchema !== undefined);
+        } catch (error) {
+          if (error instanceof UserError) {
+            return {
+              content: [{ text: error.message, type: "text" }],
+              isError: true,
+              ...(error.extras ? { structuredContent: error.extras } : {}),
+            };
+          }
+          throw error;
+        } finally {
+          release();
+        }
+      };
+
       server.registerTool(
         tool.name,
         {
@@ -1033,37 +1065,14 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
           inputSchema: schemas.inputSchema as never,
           outputSchema: schemas.outputSchema as never,
         },
-        (async (args: unknown, ctx: unknown) => {
-          // Paired so the deadline reaches `execute` through `context.signal`
-          // as well as rejecting the caller — a timeout the tool cannot see
-          // leaves its work running behind an already-settled promise.
-          const timeout = tool.timeoutMs
-            ? { controller: new AbortController(), ms: tool.timeoutMs }
-            : undefined;
-          const { context, release } = this.#makeContext(
-            auth,
-            ctx,
-            timeout?.controller.signal,
-          );
-
-          try {
-            const result = await (timeout
-              ? withTimeout(tool.execute(args, context), timeout, tool.name)
-              : tool.execute(args, context));
-            return normalizeToolResult(result, tool.outputSchema !== undefined);
-          } catch (error) {
-            if (error instanceof UserError) {
-              return {
-                content: [{ text: error.message, type: "text" }],
-                isError: true,
-                ...(error.extras ? { structuredContent: error.extras } : {}),
-              };
-            }
-            throw error;
-          } finally {
-            release();
-          }
-        }) as never,
+        // The SDK passes arguments only to a tool that declares an input
+        // schema; one that does not is called with the request context alone.
+        // Registering `call` as it stands would take that context for `args`
+        // and leave the tool without one: no progress, no logs, no request id
+        // and a `signal` that never fires.
+        (schemas.inputSchema
+          ? call
+          : (ctx: unknown) => call(undefined, ctx)) as never,
       );
     }
 
@@ -1143,34 +1152,40 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     }
 
     for (const prompt of prompts) {
+      const argsSchema = promptArgsSchema(prompt);
+
+      const load = async (
+        args: Record<string, string> | undefined,
+        ctx: unknown,
+      ) => {
+        const { context, release } = this.#makeContext(auth, ctx);
+
+        try {
+          const loaded = await prompt.load(args ?? {}, context);
+
+          if (typeof loaded !== "string") {
+            return loaded;
+          }
+
+          return {
+            messages: [
+              {
+                content: { text: loaded, type: "text" },
+                role: "user" as const,
+              },
+            ],
+          };
+        } finally {
+          release();
+        }
+      };
+
       server.registerPrompt(
         prompt.name,
-        {
-          argsSchema: promptArgsSchema(prompt),
-          description: prompt.description,
-        } as never,
-        (async (args: Record<string, string>, ctx: unknown) => {
-          const { context, release } = this.#makeContext(auth, ctx);
-
-          try {
-            const loaded = await prompt.load(args ?? {}, context);
-
-            if (typeof loaded !== "string") {
-              return loaded;
-            }
-
-            return {
-              messages: [
-                {
-                  content: { text: loaded, type: "text" },
-                  role: "user" as const,
-                },
-              ],
-            };
-          } finally {
-            release();
-          }
-        }) as never,
+        { argsSchema, description: prompt.description } as never,
+        // As for tools: without `argsSchema` the SDK passes the request
+        // context alone.
+        (argsSchema ? load : (ctx: unknown) => load(undefined, ctx)) as never,
       );
     }
 

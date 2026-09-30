@@ -139,18 +139,23 @@ export class EdgeViteMCP {
     });
 
     for (const tool of this.#tools) {
+      const call = async (args: unknown) => {
+        const result = await tool.execute(args as never);
+        return typeof result === "string"
+          ? { content: [{ text: result, type: "text" }] }
+          : result;
+      };
+
       server.registerTool(
         tool.name,
         {
           description: tool.description,
           inputSchema: tool.parameters as never,
         },
-        (async (args: unknown) => {
-          const result = await tool.execute(args as never);
-          return typeof result === "string"
-            ? { content: [{ text: result, type: "text" }] }
-            : result;
-        }) as never,
+        // The SDK passes arguments only to a tool that declares an input
+        // schema; one that does not is called with the request context alone,
+        // which must not reach `execute` as its parameters.
+        (tool.parameters ? call : () => call(undefined)) as never,
       );
     }
 
@@ -181,20 +186,23 @@ export class EdgeViteMCP {
         shape[arg.name] = arg.required ? z.string() : z.string().optional();
       }
 
+      const argsSchema = prompt.arguments?.length ? z.object(shape) : undefined;
+
+      const load = async (args?: Record<string, string>) => {
+        const text = await prompt.load(args ?? {});
+        return {
+          messages: [
+            { content: { text, type: "text" }, role: "user" as const },
+          ],
+        };
+      };
+
       server.registerPrompt(
         prompt.name,
-        {
-          argsSchema: prompt.arguments?.length ? z.object(shape) : undefined,
-          description: prompt.description,
-        } as never,
-        (async (args: Record<string, string>) => {
-          const text = await prompt.load(args ?? {});
-          return {
-            messages: [
-              { content: { text, type: "text" }, role: "user" as const },
-            ],
-          };
-        }) as never,
+        { argsSchema, description: prompt.description } as never,
+        // As for tools: without `argsSchema` the SDK passes the request
+        // context alone.
+        (argsSchema ? load : () => load()) as never,
       );
     }
 
