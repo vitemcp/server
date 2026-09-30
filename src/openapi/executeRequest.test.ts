@@ -266,6 +266,64 @@ describe("building the request", () => {
     });
   });
 
+  // An empty `properties` beside `additionalProperties` is how generators
+  // write a dictionary. Flattened, it left the tool no argument to carry the
+  // body in — only the query parameter that happens to share its name.
+  it("sends a dictionary body whose schema declares an empty properties map", async () => {
+    const { calls, client } = await withRecordedCalls({
+      info: { title: "Labels", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/labels": {
+          post: {
+            operationId: "setLabels",
+            parameters: [
+              { in: "query", name: "body", schema: { type: "string" } },
+            ],
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    additionalProperties: { type: "string" },
+                    properties: {},
+                    type: "object",
+                  },
+                },
+              },
+              required: true,
+            },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.test" }],
+    });
+
+    const sent = await client.callTool({
+      arguments: {
+        body: { environment: "staging", team: "infra" },
+        body__query: "preview",
+      },
+      name: "setLabels",
+    });
+
+    expect(sent.isError).toBeFalsy();
+    expect(calls[0].url.search).toBe("?body=preview");
+    expect(calls[0].headers.get("content-type")).toBe("application/json");
+    expect(JSON.parse(calls[0].body ?? "")).toEqual({
+      environment: "staging",
+      team: "infra",
+    });
+
+    // Still validated as the dictionary it is, before any request is made.
+    const wrongValue = await client.callTool({
+      arguments: { body: { team: 42 } },
+      name: "setLabels",
+    });
+
+    expect(wrongValue.isError).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
   it("form-encodes a body the document declares as form-encoded", async () => {
     const { calls, client } = await withRecordedCalls({
       info: { title: "Auth", version: "1.0.0" },

@@ -223,6 +223,42 @@ describe("request bodies", () => {
     expect(binding.inputSchema.required).toEqual(["body"]);
   });
 
+  // The second shape is how a generator writes a record: zod-to-json-schema's
+  // OpenAPI target puts an empty `properties` beside the value schema.
+  it.each([
+    { additionalProperties: { type: "string" }, type: "object" },
+    {
+      additionalProperties: { type: "string" },
+      properties: {},
+      type: "object",
+    },
+  ])("exposes a dictionary body as a single argument: %j", (schema) => {
+    const [{ binding }] = bind({
+      openapi: "3.0.3",
+      paths: { "/labels": { put: { requestBody: jsonBody(schema) } } },
+    });
+
+    expect(binding.wholeBodyKey).toBe("body");
+    expect(binding.inputSchema.properties).toEqual({ body: schema });
+    expect(binding.inputSchema.required).toEqual(["body"]);
+  });
+
+  it("keeps an object that declares no keys whole, so it can still be sent", () => {
+    const schema = {
+      additionalProperties: false,
+      properties: {},
+      type: "object",
+    };
+    const [{ binding }] = bind({
+      openapi: "3.0.3",
+      paths: { "/touch": { post: { requestBody: jsonBody(schema) } } },
+    });
+
+    // Flattened into no arguments at all, a required `{}` could not be sent.
+    expect(binding.wholeBodyKey).toBe("body");
+    expect(binding.inputSchema.properties).toEqual({ body: schema });
+  });
+
   it("ignores a body declared on a GET, which fetch cannot send", () => {
     const [{ binding }] = bind({
       openapi: "3.0.3",

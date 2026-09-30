@@ -167,7 +167,12 @@ const describeBody = (
 
   const object = flattenObject(schema, normalizer.definitions);
 
-  if (object) {
+  // An object that declares no properties is not one without a body: it is a
+  // dictionary, whose keys are the caller's to choose, or an object that must
+  // be sent empty. Flattened, either would leave the tool no argument to carry
+  // it in. Generators write a dictionary exactly this way, with an empty
+  // `properties` beside `additionalProperties`.
+  if (object && Object.keys(object.properties).length > 0) {
     for (const [name, property] of Object.entries(object.properties)) {
       properties.set(name, {
         required: object.required.has(name),
@@ -178,8 +183,8 @@ const describeBody = (
     return { encoding, properties };
   }
 
-  // An array body, or one the document describes only by `$ref` or a
-  // composition keyword: there is nothing to flatten, so the whole body
+  // An array body, a dictionary, or one the document describes only by `$ref`
+  // or a composition keyword: there is nothing to flatten, so the whole body
   // becomes one argument.
   properties.set("body", { required, schema });
 

@@ -171,8 +171,9 @@ more often than one asked to nest a body under `body` and parameters under
 `params`.
 
 A request body defined by `$ref`, or composed with `allOf`, is followed and
-flattened too. A body that is not an object — an array, or a scalar — becomes a
-single `body` argument instead.
+flattened too. A body with no properties to flatten — an array, a scalar, or a
+dictionary that only declares `additionalProperties` — becomes a single `body`
+argument instead.
 
 Names can collide between the four locations and the body. A colliding
 parameter is suffixed with its location; the body keeps the bare name:
