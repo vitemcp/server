@@ -50,6 +50,31 @@ describe("OAuthProvider", () => {
     expect(config.protectedResource.scopesSupported).toEqual(["openid"]);
   });
 
+  // Every endpoint is the base URL with a path appended, so a trailing slash
+  // doubled up: `http://localhost:8000//oauth/token` is advertised, no route
+  // answers it, and the provider's callback no longer matches the one
+  // registered with it.
+  it("ignores a trailing slash on baseUrl", () => {
+    const provider = new OAuthProvider({
+      ...baseConfig,
+      baseUrl: "http://localhost:8000/",
+    });
+    const config = provider.getOAuthConfig();
+
+    expect(config.protectedResource).toMatchObject({
+      authorizationServers: ["http://localhost:8000"],
+      resource: "http://localhost:8000",
+    });
+    expect(config.authorizationServer).toMatchObject({
+      authorizationEndpoint: "http://localhost:8000/oauth/authorize",
+      issuer: "http://localhost:8000",
+      registrationEndpoint: "http://localhost:8000/oauth/register",
+      tokenEndpoint: "http://localhost:8000/oauth/token",
+    });
+
+    provider.destroy();
+  });
+
   describe("authenticate", () => {
     it("should return undefined for undefined request (stdio)", async () => {
       const provider = new OAuthProvider(baseConfig);

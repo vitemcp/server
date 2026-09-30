@@ -92,6 +92,43 @@ describe("protected resource metadata from an auth provider", () => {
     }
   });
 
+  it("serves what it advertises when baseUrl ends in a slash", async () => {
+    const port = await allocateTestPort();
+    const origin = `http://localhost:${port}`;
+    const auth = provider(`${origin}/`);
+    const server = new ViteMCP({ auth, name: "Test", version: "1.0.0" });
+
+    await server.start({ httpStream: { port }, transportType: "httpStream" });
+
+    try {
+      // `//mcp` is not the address any client asked for, so it would discard
+      // the document.
+      expect(
+        await resourceAt(`${origin}/.well-known/oauth-protected-resource/mcp`),
+      ).toBe(`${origin}/mcp`);
+
+      const metadata = (await (
+        await fetch(`${origin}/.well-known/oauth-authorization-server`)
+      ).json()) as { registration_endpoint: string };
+
+      expect(metadata.registration_endpoint).toBe(`${origin}/oauth/register`);
+
+      // And the endpoint it names has to exist: `//oauth/register` is a 404.
+      const registration = await fetch(metadata.registration_endpoint, {
+        body: JSON.stringify({
+          redirect_uris: ["https://client.example.com/callback"],
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+      expect(registration.status).toBe(201);
+    } finally {
+      await server.stop();
+      auth.destroy();
+    }
+  });
+
   it("names a custom endpoint under a base path", async () => {
     const port = await allocateTestPort();
     const origin = `http://localhost:${port}`;

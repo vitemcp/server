@@ -48,6 +48,7 @@ import {
   EncryptedTokenStorage,
   MemoryTokenStorage,
 } from "./utils/tokenStore.js";
+import { withoutTrailingSlash } from "./utils/trailingSlash.js";
 
 /**
  * Authorization request parameters owned by the proxy. Entries in
@@ -104,6 +105,7 @@ export class OAuthProxy {
       upstreamRequestTimeoutMs: DEFAULT_UPSTREAM_REQUEST_TIMEOUT_MS,
       upstreamTokenEndpointAuthMethod: "client_secret_basic",
       ...config,
+      baseUrl: withoutTrailingSlash(config.baseUrl),
     };
 
     // Set up token storage with encryption by default (matches Python's secure defaults)

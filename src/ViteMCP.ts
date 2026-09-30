@@ -49,6 +49,7 @@ import type {
 } from "./auth/providers/AuthProvider.js";
 
 import { createOAuthRouter, OAUTH_PROXY_MAX_BODY_SIZE } from "./auth/router.js";
+import { withoutTrailingSlash } from "./auth/utils/trailingSlash.js";
 import { cancelResponseBody } from "./cancelResponseBody.js";
 import { formatBytes } from "./formatBytes.js";
 import {
@@ -1803,7 +1804,7 @@ const withEndpointAsResource = <
   ...config,
   protectedResource: {
     ...config.protectedResource,
-    resource: `${config.protectedResource.resource}${endpoint}`,
+    resource: `${withoutTrailingSlash(config.protectedResource.resource)}${endpoint}`,
   },
 });
 

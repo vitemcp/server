@@ -249,7 +249,7 @@ export interface OAuthProxyConfig {
   allowPlainPkce?: boolean;
   /** Authorization code TTL in seconds (default: 300) */
   authorizationCodeTtl?: number;
-  /** Base URL of this proxy server */
+  /** Base URL of this proxy server. A trailing slash is ignored. */
   baseUrl: string;
   /**
    * Client ID Metadata Document support (the mechanism that supersedes DCR).

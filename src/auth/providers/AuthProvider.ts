@@ -7,6 +7,7 @@ import type { ClientIdMetadataOptions } from "../clientIdMetadata.js";
 import type { TokenStorage, UpstreamTokenSet } from "../types.js";
 
 import { OAuthProxy } from "../OAuthProxy.js";
+import { withoutTrailingSlash } from "../utils/trailingSlash.js";
 
 /**
  * Configuration common to all OAuth providers.
@@ -29,7 +30,7 @@ export interface AuthProviderConfig {
    * client that cannot hash. See `OAuthProxyConfig.allowPlainPkce` first.
    */
   allowPlainPkce?: boolean;
-  /** Base URL where the MCP server is accessible */
+  /** Base URL where the MCP server is accessible. A trailing slash is ignored. */
   baseUrl: string;
   /** OAuth client ID */
   clientId: string;
@@ -123,7 +124,10 @@ export abstract class AuthProvider<
   private _proxy: OAuthProxy | undefined;
 
   constructor(config: AuthProviderConfig) {
-    this.config = config;
+    this.config = {
+      ...config,
+      baseUrl: withoutTrailingSlash(config.baseUrl),
+    };
     // Note: proxy is created lazily to allow subclass constructors to run first
   }
 
