@@ -2142,7 +2142,7 @@ Follow the guide https://modelcontextprotocol.io/quickstart/user and add the fol
 
 ### How to run ViteMCP behind a proxy?
 
-Refer to this [issue](https://github.com/vitemcp/server/issues/25#issuecomment-3004568732) for an example of using ViteMCP with `express` and `http-proxy-middleware`.
+Refer to this [issue](https://github.com/punkpeye/fastmcp/issues/25#issuecomment-3004568732) for an example with `express` and `http-proxy-middleware`. It was written for FastMCP, which ViteMCP continues.
 
 ## Showcase
 
