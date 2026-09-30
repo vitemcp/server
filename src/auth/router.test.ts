@@ -74,6 +74,34 @@ describe("OAuth router", () => {
       ).toBe("native");
     });
 
+    // `URL` keeps an IPv6 literal's brackets in `hostname`, so `[::1]` never
+    // equalled the bare `::1` it was compared with, and a client redirecting
+    // to IPv6 loopback was taken for a web application.
+    it("infers application_type native for an IPv6 loopback redirect URI", async () => {
+      const proxy = new OAuthProxy({
+        allowedRedirectUriPatterns: ["http://[::1]:*"],
+        baseUrl: "http://localhost:4200",
+        upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
+        upstreamClientId: "id",
+        upstreamClientSecret: "secret",
+        upstreamTokenEndpoint: "https://provider.com/oauth/token",
+      });
+      const app = createOAuthRouter({ proxy });
+
+      const response = await post(app, "/oauth/register", {
+        body: JSON.stringify({
+          redirect_uris: ["http://[::1]:3000/callback"],
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(201);
+      expect(
+        ((await response.json()) as Record<string, unknown>).application_type,
+      ).toBe("native");
+    });
+
     it("rejects a body over the size cap without parsing it", async () => {
       const app = createOAuthRouter({ proxy: makeProxy() });
 

@@ -21,6 +21,15 @@
 /** Hosts whose port may vary, per RFC 8252 §7.3 and RFC 6761 §6.3. */
 const LOOPBACK_HOSTS = new Set(["::1", "127.0.0.1", "localhost"]);
 
+/**
+ * Whether a `URL`'s hostname is a loopback host. `URL` keeps the brackets of an
+ * IPv6 literal in `hostname`, so they come off before the lookup: `[::1]` is
+ * not `::1` to a string comparison.
+ */
+export function isLoopbackHostname(hostname: string): boolean {
+  return LOOPBACK_HOSTS.has(hostname.replace(/^\[|\]$/g, ""));
+}
+
 const parse = (uri: string): null | URL => {
   try {
     return new URL(uri);
@@ -54,11 +63,7 @@ export function loopbackRedirectMatches(
     return false;
   }
 
-  // `URL` normalises `[::1]` to the bracketed form in `hostname`; strip the
-  // brackets so the set lookup sees the address itself.
-  const host = a.hostname.replace(/^\[|\]$/g, "");
-
-  if (!LOOPBACK_HOSTS.has(host) || a.hostname !== b.hostname) {
+  if (!isLoopbackHostname(a.hostname) || a.hostname !== b.hostname) {
     return false;
   }
 

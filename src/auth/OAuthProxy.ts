@@ -42,7 +42,10 @@ import {
 import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
 import { JWTIssuer } from "./utils/jwtIssuer.js";
-import { loopbackRedirectMatches } from "./utils/loopbackRedirect.js";
+import {
+  isLoopbackHostname,
+  loopbackRedirectMatches,
+} from "./utils/loopbackRedirect.js";
 import { PKCEUtils } from "./utils/pkce.js";
 import {
   EncryptedTokenStorage,
@@ -1978,7 +1981,7 @@ const isLoopbackRedirectUri = (uri: string): boolean => {
     const url = new URL(uri);
 
     if (url.protocol === "http:" || url.protocol === "https:") {
-      return ["::1", "127.0.0.1", "localhost"].includes(url.hostname);
+      return isLoopbackHostname(url.hostname);
     }
 
     // A private-use URI scheme (e.g. "com.example.app:/callback").
