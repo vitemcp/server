@@ -19,6 +19,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthorizationParams } from "./types.js";
 
 import { OAuthProxy } from "./OAuthProxy.js";
+import { issuerNamespace } from "./OAuthProxyStateStore.js";
+import { MemoryTokenStorage } from "./utils/tokenStore.js";
 
 // `vi.mock` is hoisted above module initialisation, so the document the factory
 // serves has to be hoisted with it.
@@ -265,5 +267,131 @@ describe("OAuthProxy CIMD client resolution across legs", () => {
     await expect(
       proxy.authorize(buildAuthParams(EPHEMERAL_REDIRECT)),
     ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+});
+
+/**
+ * A CIMD client is a public client: it holds no secret, and its identity is a
+ * URL anyone can name. PKCE is then the only thing binding an authorization
+ * code to whoever asked for it — so a flow that carried none, which the proxy
+ * used to complete, handed tokens to anyone holding the code and the public
+ * `client_id`.
+ */
+describe("OAuthProxy requires S256 PKCE of CIMD clients", () => {
+  let proxy: OAuthProxy;
+
+  beforeEach(() => {
+    served.cacheControl = undefined;
+    served.document = undefined;
+    proxy = new OAuthProxy({ ...baseConfig, encryptionKey: false });
+  });
+
+  afterEach(() => {
+    proxy.destroy();
+  });
+
+  it("refuses an authorization request that carries no code_challenge", async () => {
+    await expect(
+      proxy.authorize({
+        ...buildAuthParams(EPHEMERAL_REDIRECT),
+        code_challenge: undefined,
+        code_challenge_method: undefined,
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      description: expect.stringContaining("code_challenge is required"),
+    });
+  });
+
+  it("refuses `plain` even where allowPlainPkce permits it", async () => {
+    // The stricter rule has to come from the client being CIMD, not from the
+    // configuration: `allowPlainPkce` exists for clients that cannot hash,
+    // and one that publishes a metadata document is not among them.
+    const lenient = new OAuthProxy({
+      ...baseConfig,
+      allowPlainPkce: true,
+      encryptionKey: false,
+    });
+
+    try {
+      await expect(
+        lenient.authorize({
+          ...buildAuthParams(EPHEMERAL_REDIRECT),
+          code_challenge: "a-verifier-doubling-as-its-own-challenge",
+          code_challenge_method: "plain",
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_request",
+        description: expect.stringContaining("must be S256"),
+      });
+    } finally {
+      lenient.destroy();
+    }
+  });
+
+  it("still lets a DCR client authorize without PKCE", async () => {
+    const redirectUri = "http://localhost:3000/callback";
+    const registration = await proxy.registerClient({
+      redirect_uris: [redirectUri],
+    });
+
+    await expect(
+      proxy.authorize({
+        client_id: registration.client_id,
+        redirect_uri: redirectUri,
+        response_type: "code",
+        state: "state-123",
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it("refuses to redeem a code issued to a CIMD client without PKCE", async () => {
+    // Codes are persisted, so one can outlive the rules it was issued under:
+    // minted before an upgrade, or by an instance sharing this storage that
+    // has not been upgraded yet.
+    const tokenStorage = new MemoryTokenStorage();
+    const sharing = new OAuthProxy({
+      ...baseConfig,
+      encryptionKey: false,
+      tokenStorage,
+    });
+
+    try {
+      await tokenStorage.save(
+        `code:${issuerNamespace("https://provider.com")}:unbound-code`,
+        {
+          clientId: CLIENT_ID,
+          code: "unbound-code",
+          codeChallenge: "",
+          codeChallengeMethod: "",
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 60_000),
+          transactionId: "transaction",
+          upstreamTokens: {
+            accessToken: "upstream-access-token",
+            expiresIn: 3600,
+            issuedAt: new Date(),
+            scope: ["openid"],
+            tokenType: "Bearer",
+          },
+        },
+        60,
+      );
+
+      await expect(
+        sharing.exchangeAuthorizationCode({
+          client_id: CLIENT_ID,
+          code: "unbound-code",
+          grant_type: "authorization_code",
+          redirect_uri: EPHEMERAL_REDIRECT,
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_grant",
+        description: expect.stringContaining("PKCE is required"),
+      });
+    } finally {
+      sharing.destroy();
+      tokenStorage.destroy();
+    }
   });
 });

@@ -235,6 +235,29 @@ export class OAuthProxy {
       );
     }
 
+    // A CIMD client holds no secret and its identity is a URL anyone can name,
+    // so PKCE is the only thing binding the authorization code to whoever
+    // asked for it. `plain` puts the verifier in the same request as the
+    // challenge, which binds nothing, so S256 is required whatever
+    // `allowPlainPkce` says: that exists for clients that cannot hash, and one
+    // that publishes a metadata document is not among them. OAuth 2.1 and the
+    // MCP authorization spec both require this of public clients.
+    if (registeredClient.source === "cimd") {
+      if (!params.code_challenge) {
+        throw new OAuthProxyError(
+          "invalid_request",
+          "code_challenge is required for Client ID Metadata Document clients",
+        );
+      }
+
+      if (params.code_challenge_method !== "S256") {
+        throw new OAuthProxyError(
+          "invalid_request",
+          "code_challenge_method must be S256 for Client ID Metadata Document clients",
+        );
+      }
+    }
+
     // Create transaction
     const transaction = await this.createTransaction(params);
 
@@ -282,7 +305,7 @@ export class OAuthProxy {
     // RFC 6749 §5.2 - reject unknown clients. Only proxy-issued client_ids
     // (obtained via DCR) and, when enabled, resolved CIMD clients are
     // accepted, so stolen codes cannot be exchanged by arbitrary callers.
-    await this.resolveClient(request.client_id);
+    const client = await this.resolveClient(request.client_id);
 
     // Consume the code atomically: whoever takes it owns this exchange, so two
     // concurrent requests — on this instance or another one sharing the
@@ -314,6 +337,20 @@ export class OAuthProxy {
     // Validate client
     if (clientCode.clientId !== request.client_id) {
       throw new OAuthProxyError("invalid_client", "Client ID mismatch");
+    }
+
+    // Defence in depth: `authorize()` issues a CIMD client no code without
+    // S256 PKCE, so one that arrives here unbound was issued under other rules
+    // — by an older version, or by an instance sharing this storage. Refuse it
+    // rather than fall through to the path that checks nothing.
+    if (
+      client.source === "cimd" &&
+      (!clientCode.codeChallenge || clientCode.codeChallengeMethod !== "S256")
+    ) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "S256 PKCE is required for Client ID Metadata Document clients",
+      );
     }
 
     // Validate PKCE if used
@@ -1689,6 +1726,7 @@ export class OAuthProxy {
         } as ProxyDCRClient["metadata"],
         redirectUris: metadata.redirect_uris,
         registeredAt: new Date(),
+        source: "cimd",
       };
     }
 

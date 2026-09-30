@@ -844,6 +844,12 @@ Dynamic Client Registration works, but is **deprecated** as of protocol revision
 the client identifies itself with an HTTPS URL serving its own metadata and no
 registration step is needed.
 
+A CIMD client is a public client: it holds no secret, and its identity is a URL
+anyone can name. PKCE is then all that binds an authorization code to whoever
+asked for it, so the proxy requires `code_challenge` with
+`code_challenge_method=S256` from these clients and refuses the authorization
+request otherwise — whatever `allowPlainPkce` is set to.
+
 If you keep CIMD enabled, set `clientIdMetadata.allowedDomains` — otherwise the
 server will fetch client-supplied URLs. The providers take `clientIdMetadata`
 too:
@@ -946,6 +952,11 @@ redirect and sends the same one it derived the challenge from.
 **"Unsupported code_challenge_method"** — the client asked for `plain` or an
 unrecognised method. Have it use `S256`; if it truly cannot, set
 `allowPlainPkce: true` and read the warning above first.
+
+**"code_challenge is required for Client ID Metadata Document clients"** — a
+client that identifies itself with a metadata URL started a flow without PKCE,
+or with `plain`. It is a public client, so it must send `S256`; `allowPlainPkce`
+does not apply to it.
 
 **"Authorization response issuer does not match"** — the provider returned an
 `iss` that is not the one this transaction started against (RFC 9207). If the

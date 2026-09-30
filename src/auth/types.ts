@@ -243,6 +243,8 @@ export interface OAuthProxyConfig {
    *
    * Left as an escape hatch for the rare client that genuinely cannot hash.
    * Enabling it re-advertises `plain` in the authorization server metadata.
+   * It does not reach Client ID Metadata Document clients, which are held to
+   * S256 either way.
    */
   allowPlainPkce?: boolean;
   /** Authorization code TTL in seconds (default: 300) */
@@ -389,6 +391,14 @@ export interface ProxyDCRClient {
   redirectUris: string[];
   /** Client registration timestamp */
   registeredAt: Date;
+  /**
+   * How this client came to be known, where that changes the rules applied to
+   * it. `"cimd"` marks a public client resolved from a Client ID Metadata
+   * Document: it holds no secret and its identity is a URL anyone can name, so
+   * the proxy requires S256 PKCE of it. Absent for a Dynamic Client
+   * Registration.
+   */
+  source?: "cimd";
 }
 
 /**

@@ -722,6 +722,9 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
       const response = await proxy.authorize(
         buildAuthParams({
           client_id: CIMD_CLIENT_ID,
+          // A CIMD client is a public client, and is held to S256 PKCE.
+          code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+          code_challenge_method: "S256",
           redirect_uri: LEGIT_REDIRECT,
         }),
       );

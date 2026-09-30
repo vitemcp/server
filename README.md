@@ -1390,6 +1390,9 @@ document looks like this:
 }
 ```
 
+Such a client is a public one — it holds no secret — so the proxy requires
+`S256` PKCE from it, whatever `allowPlainPkce` is set to.
+
 > [!WARNING]
 >
 > Resolving a URL-formatted `client_id` means **your server fetches a URL an
