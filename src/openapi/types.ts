@@ -149,6 +149,8 @@ export type OpenApiDocument = {
   components?: {
     /** Reachable through a `$ref` on an operation; see `routes.ts`. */
     parameters?: Record<string, OpenApiParameter>;
+    /** OpenAPI 3.1. Reachable through a `$ref` on a path; see `routes.ts`. */
+    pathItems?: Record<string, OpenApiPathItem>;
     schemas?: Record<string, OpenApiSchema>;
   };
   info?: {
@@ -172,6 +174,16 @@ export type OpenApiParameter = {
   schema?: OpenApiSchema;
   style?: string;
 };
+
+/**
+ * A path's operations, or a `$ref` to another path item that carries them —
+ * with whatever is written beside the reference taking its place.
+ */
+export type OpenApiPathItem = {
+  $ref?: string;
+  parameters?: (OpenApiParameter | OpenApiRef)[];
+  servers?: OpenApiServer[];
+} & Partial<Record<HttpMethod, OpenApiOperation>>;
 
 export type OpenApiRef = { $ref: string };
 
@@ -222,10 +234,5 @@ type OpenApiOperation = {
   summary?: string;
   tags?: string[];
 };
-
-type OpenApiPathItem = {
-  parameters?: (OpenApiParameter | OpenApiRef)[];
-  servers?: OpenApiServer[];
-} & Partial<Record<HttpMethod, OpenApiOperation>>;
 
 type ParameterLocation = "cookie" | "header" | "path" | "query";

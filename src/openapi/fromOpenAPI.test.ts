@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import http from "node:http";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { ViteMCP } from "../ViteMCP.js";
@@ -393,6 +394,71 @@ describe("fromOpenAPI, end to end against a real API", () => {
     expect(client.getServerVersion()).toMatchObject({
       name: "Pets",
       version: "1.0.0",
+    });
+
+    await client.close();
+  });
+});
+
+describe("fromOpenAPI, a path item shared between paths", () => {
+  const fixture = (name: string) =>
+    fileURLToPath(
+      new URL(`./fixtures/shared-path-items/${name}`, import.meta.url),
+    );
+
+  // The bundler inlines the shared file at the first path and leaves the
+  // second as a pointer at it, which used to produce no tool at all.
+  it("makes a tool for every path that references the same external file", async () => {
+    const requested: string[] = [];
+    const client = await connect(
+      await fromOpenAPI({
+        fetch: (async (input) => {
+          requested.push(String(input));
+
+          return new Response("{}", {
+            headers: { "content-type": "application/json" },
+          });
+        }) as typeof fetch,
+        spec: fixture("root.yaml"),
+      }),
+    );
+
+    const names = (await client.listTools()).tools
+      .map((tool) => tool.name)
+      .sort();
+
+    expect(names).toEqual(["get_archived-pets_petId", "get_pets_petId"]);
+
+    for (const name of names) {
+      const result = await client.callTool({ arguments: { petId: 42 }, name });
+
+      expect(result.isError).toBeFalsy();
+    }
+
+    expect(requested.sort()).toEqual([
+      "https://api.example.com/archived-pets/42",
+      "https://api.example.com/pets/42",
+    ]);
+
+    await client.close();
+  });
+
+  it("gives each path only the parameters written beside its own reference", async () => {
+    const client = await connect(
+      await fromOpenAPI({ spec: fixture("sibling-parameters.yaml") }),
+    );
+    const { tools } = await client.listTools();
+
+    expect(
+      Object.fromEntries(
+        tools.map((tool) => [
+          tool.name,
+          Object.keys(tool.inputSchema.properties ?? {}),
+        ]),
+      ),
+    ).toEqual({
+      "get_archived-pets_archivedId": ["archivedId"],
+      get_pets_petId: ["petId"],
     });
 
     await client.close();

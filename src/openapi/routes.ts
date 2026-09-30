@@ -3,6 +3,7 @@ import type {
   HttpRoute,
   OpenApiDocument,
   OpenApiParameter,
+  OpenApiPathItem,
   OpenApiRef,
   OpenApiRequestBody,
   OpenApiResponse,
@@ -21,8 +22,8 @@ const MAX_REF_HOPS = 32;
 
 /**
  * Flattens a document's `paths` into a list of routes, resolving the
- * structural (non-schema) `$ref`s on parameters, request bodies and responses
- * — `#/components/parameters/Limit` and the like.
+ * structural (non-schema) `$ref`s on path items, parameters, request bodies
+ * and responses — `#/components/parameters/Limit` and the like.
  *
  * Every remaining `$ref` at this point is local (see `loadSpec`), so a plain
  * JSON Pointer lookup is enough. Schema `$ref`s are left alone: those are
@@ -32,10 +33,12 @@ const MAX_REF_HOPS = 32;
 export const extractRoutes = (document: OpenApiDocument): HttpRoute[] => {
   const routes: HttpRoute[] = [];
 
-  for (const [path, pathItem] of Object.entries(document.paths ?? {})) {
-    if (!pathItem || typeof pathItem !== "object") {
+  for (const [path, declared] of Object.entries(document.paths ?? {})) {
+    if (!declared || typeof declared !== "object") {
       continue;
     }
+
+    const pathItem = resolvePathItem(document, declared);
 
     const pathLevelParameters = (pathItem.parameters ?? []).map((parameter) =>
       resolve<OpenApiParameter>(document, parameter),
@@ -113,6 +116,41 @@ const mergeParameters = (
   ].filter((parameter) => parameter?.name && parameter.in);
 };
 
+/**
+ * A path item with its `$ref` followed, chains included.
+ *
+ * What a referring item writes beside its `$ref` replaces the same field of
+ * the item it points at, rather than merging with it. The bundler inlines a
+ * shared item at its first referrer — that referrer's own fields folded in —
+ * and turns each later referrer into a pointer at the first, so merging would
+ * hand every path sharing the item the first path's parameters.
+ *
+ * A reference that points at nothing, or round in a circle, resolves to an
+ * item with no operations and so to no routes, rather than throwing: one bad
+ * pointer should cost its own path, not the document.
+ */
+const resolvePathItem = (
+  document: OpenApiDocument,
+  pathItem: OpenApiPathItem,
+): OpenApiPathItem => {
+  const followed = new Set<string>();
+  let resolved = pathItem;
+
+  while (typeof resolved.$ref === "string" && !followed.has(resolved.$ref)) {
+    followed.add(resolved.$ref);
+
+    const { $ref, ...siblings } = resolved;
+    const target = dereference(document, $ref);
+
+    resolved = {
+      ...(target && typeof target === "object" ? target : {}),
+      ...siblings,
+    };
+  }
+
+  return resolved;
+};
+
 const resolve = <TValue>(
   document: OpenApiDocument,
   value: OpenApiRef | TValue,
@@ -124,20 +162,23 @@ const resolve = <TValue>(
       return node as TValue;
     }
 
-    const pointer = (node as OpenApiRef).$ref;
-
-    if (!pointer.startsWith("#")) {
-      // Bundling turns every external ref into a local one; reaching here
-      // means the bundler's output shape changed under us.
-      throw new Error(`Unresolved external $ref after bundling: ${pointer}`);
-    }
-
-    node = readPointer(document, pointer);
+    node = dereference(document, (node as OpenApiRef).$ref);
   }
 
   throw new Error(
     `$ref chain longer than ${MAX_REF_HOPS} hops, which a cyclic document is the only way to produce.`,
   );
+};
+
+/** Reads what a local `$ref` points at, or `undefined` when nothing is there. */
+const dereference = (document: OpenApiDocument, pointer: string): unknown => {
+  if (!pointer.startsWith("#")) {
+    // Bundling turns every external ref into a local one; reaching here
+    // means the bundler's output shape changed under us.
+    throw new Error(`Unresolved external $ref after bundling: ${pointer}`);
+  }
+
+  return readPointer(document, pointer);
 };
 
 /**

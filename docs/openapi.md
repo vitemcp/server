@@ -67,6 +67,10 @@ npm install @apidevtools/swagger-parser
 
 Without it, such a document fails with a message naming the package.
 
+A path item may itself be a `$ref` — to `components.pathItems`, or to a file
+several paths share. It is followed, and whatever is written beside the
+reference (`parameters`, say) applies to that path alone.
+
 Swagger 2.0 is not supported. Convert it first — <https://converter.swagger.io>
 does it in place.
 
