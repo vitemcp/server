@@ -143,9 +143,11 @@ async function compileSchema(
 }
 
 function toIssue(error: AjvErrorObject): StandardSchemaV1.Issue {
+  // Only the first split element is the empty string before the leading `/`.
+  // Any other empty segment is a property named "", which is a legal key.
   const path = error.instancePath
     .split("/")
-    .filter(Boolean)
+    .slice(1)
     // JSON Pointer escapes, per RFC 6901.
     .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"))
     .map((segment): number | string => {
