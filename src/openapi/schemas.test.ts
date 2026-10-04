@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { HttpRoute, OpenApiDocument, OpenApiSchema } from "./types.js";
+import type { ToolBinding } from "./schemas.js";
+import type {
+  HttpRoute,
+  OpenApiDocument,
+  OpenApiParameter,
+  OpenApiSchema,
+} from "./types.js";
 
 import { createSchemaNormalizer } from "./normalize.js";
 import { extractRoutes } from "./routes.js";
@@ -20,6 +26,17 @@ const jsonBody = (schema: Record<string, unknown>, required = true) => ({
   content: { "application/json": { schema } },
   required,
 });
+
+/** Where each argument goes: `body`, or its parameter's `location:name`. */
+const destinations = (binding: ToolBinding) =>
+  Object.fromEntries(
+    Object.entries(binding.parameters).map(([key, target]) => [
+      key,
+      target.kind === "body"
+        ? "body"
+        : `${target.parameter.in}:${target.parameter.name}`,
+    ]),
+  );
 
 describe("flattening parameters into a tool schema", () => {
   it("puts every location into one flat argument list", () => {
@@ -121,6 +138,129 @@ describe("flattening parameters into a tool schema", () => {
       "name__query",
     ]);
     expect(binding.parameters.name).toEqual({ kind: "body", name: "name" });
+  });
+
+  it.each([false, true])(
+    "moves a suffix aside when a parameter already has that name (reversed: %s)",
+    (reversed) => {
+      const parameters: OpenApiParameter[] = [
+        { in: "path", name: "id", schema: { type: "string" } },
+        {
+          explode: false,
+          in: "query",
+          name: "id",
+          schema: { items: { type: "string" }, type: "array" },
+        },
+        {
+          in: "query",
+          name: "id__query",
+          required: true,
+          schema: { type: "integer" },
+        },
+        { in: "header", name: "id__query_2", schema: { type: "boolean" } },
+      ];
+
+      const [{ binding }] = bind({
+        openapi: "3.0.3",
+        paths: {
+          "/items/{id}": {
+            get: {
+              parameters: reversed ? parameters.toReversed() : parameters,
+            },
+          },
+        },
+      });
+
+      expect(destinations(binding)).toEqual({
+        id__path: "path:id",
+        id__query: "query:id__query",
+        id__query_2: "header:id__query_2",
+        id__query_3: "query:id",
+      });
+      expect(binding.inputSchema.properties?.id__query_3).toEqual({
+        items: { type: "string" },
+        type: "array",
+      });
+      expect(binding.inputSchema.required).toEqual(["id__path", "id__query"]);
+    },
+  );
+
+  it.each(["path", "query", "header", "cookie"] as const)(
+    "moves a suffix aside when a body property already has that name (%s)",
+    (location) => {
+      const other = location === "query" ? "path" : "query";
+      const [{ binding }] = bind({
+        openapi: "3.0.3",
+        paths: {
+          "/items/{id}": {
+            post: {
+              parameters: [
+                { in: location, name: "id", schema: { type: "string" } },
+                { in: other, name: "id", schema: { type: "boolean" } },
+              ],
+              requestBody: jsonBody({
+                properties: { [`id__${location}`]: { type: "integer" } },
+                type: "object",
+              }),
+            },
+          },
+        },
+      });
+
+      expect(destinations(binding)).toEqual({
+        [`id__${location}_2`]: `${location}:id`,
+        [`id__${location}`]: "body",
+        [`id__${other}`]: `${other}:id`,
+      });
+    },
+  );
+
+  it("leaves a suffix alone when the parameter of that name is suffixed too", () => {
+    const [{ binding }] = bind({
+      openapi: "3.0.3",
+      paths: {
+        "/items/{id}": {
+          get: {
+            parameters: [
+              { in: "path", name: "id" },
+              { in: "query", name: "id" },
+              { in: "query", name: "id__path" },
+              { in: "header", name: "id__path" },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(destinations(binding)).toEqual({
+      id__path: "path:id",
+      id__path__header: "header:id__path",
+      id__path__query: "query:id__path",
+      id__query: "query:id",
+    });
+  });
+
+  it("gives a repeated name and location an argument each", () => {
+    // OpenAPI forbids the repeat, but nothing before this point removes it.
+    const [{ binding }] = bind({
+      openapi: "3.0.3",
+      paths: {
+        "/items": {
+          get: {
+            parameters: [
+              { in: "query", name: "x", required: true },
+              { in: "query", name: "x", schema: { type: "integer" } },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(binding.inputSchema.properties).toEqual({
+      x__query: { type: "string" },
+      x__query_2: { type: "integer" },
+    });
+    expect(binding.inputSchema.required).toEqual(["x__query"]);
   });
 
   it("carries a parameter's own description and deprecation into the schema", () => {

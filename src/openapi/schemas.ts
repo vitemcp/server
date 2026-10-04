@@ -40,7 +40,8 @@ type ParameterBinding =
  * four parameter locations and the body, so a colliding parameter is suffixed
  * with its location (`id__query`) while a body property always keeps the bare
  * name — the body is the part a model is most likely to name correctly
- * unprompted.
+ * unprompted. A suffixed name that is already taken gets a number as well
+ * (`id__query_2`), so no argument ever replaces another.
  */
 export const buildToolBinding = (
   route: HttpRoute,
@@ -61,11 +62,35 @@ export const buildToolBinding = (
     ]);
   }
 
-  for (const [name, occurrences] of byName) {
-    const collides = occurrences.length > 1 || body.properties.has(name);
+  const collides = (name: string, occurrences: OpenApiParameter[]) =>
+    occurrences.length > 1 || body.properties.has(name);
 
+  // Every name that stays bare is reserved before any suffix is handed out. A
+  // document may itself name a parameter or body property `id__query`; a
+  // suffix landing on it would give two destinations one argument, and
+  // whichever was written last would silently replace the other.
+  const takenKeys = new Set(body.properties.keys());
+
+  for (const [name, occurrences] of byName) {
+    if (!collides(name, occurrences)) {
+      takenKeys.add(name);
+    }
+  }
+
+  for (const [name, occurrences] of byName) {
     for (const parameter of occurrences) {
-      const key = collides ? `${name}__${parameter.in}` : name;
+      let key = name;
+
+      if (collides(name, occurrences)) {
+        const base = `${name}__${parameter.in}`;
+        key = base;
+
+        for (let suffix = 2; takenKeys.has(key); suffix++) {
+          key = `${base}_${suffix}`;
+        }
+
+        takenKeys.add(key);
+      }
 
       properties[key] = describeParameter(parameter, normalizer);
       parameters[key] = { kind: "parameter", parameter };

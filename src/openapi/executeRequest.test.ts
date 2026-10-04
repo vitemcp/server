@@ -225,6 +225,64 @@ describe("building the request", () => {
     expect(calls[0].headers.get("cookie")).toBe("session=abc%3B%20admin=true");
   });
 
+  it("delivers every argument when a suffixed name was already taken", async () => {
+    // `id__query` is the document's own query parameter and `id__path` its own
+    // body property, so the suffixes for the colliding `id`s move aside. Had
+    // they landed on those names, the path parameter would have no argument of
+    // its own and `{id}` would go out unsubstituted.
+    const { calls, client } = await withRecordedCalls({
+      info: { title: "Items", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/items/{id}": {
+          post: {
+            operationId: "updateItem",
+            parameters: [
+              { in: "path", name: "id", schema: { type: "string" } },
+              { in: "query", name: "id", schema: { type: "string" } },
+              { in: "header", name: "id", schema: { type: "string" } },
+              { in: "cookie", name: "id", schema: { type: "string" } },
+              { in: "query", name: "id__query", schema: { type: "integer" } },
+            ],
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    properties: { id__path: { type: "integer" } },
+                    type: "object",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.test" }],
+    });
+
+    const result = await client.callTool({
+      arguments: {
+        id__cookie: "cookie-value",
+        id__header: "header-value",
+        id__path: 31,
+        id__path_2: "path-value",
+        id__query: 17,
+        id__query_2: "query-value",
+      },
+      name: "updateItem",
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].url.pathname).toBe("/items/path-value");
+    expect(Object.fromEntries(calls[0].url.searchParams)).toEqual({
+      id: "query-value",
+      id__query: "17",
+    });
+    expect(calls[0].headers.get("id")).toBe("header-value");
+    expect(calls[0].headers.get("cookie")).toBe("id=cookie-value");
+    expect(calls[0].body).toBe('{"id__path":31}');
+  });
+
   it("sends a JSON body assembled from the flattened arguments", async () => {
     const { calls, client } = await withRecordedCalls({
       info: { title: "Pets", version: "1.0.0" },

@@ -183,6 +183,10 @@ petId          the request body's own property
 petId__query   the query parameter of the same name
 ```
 
+If the suffixed name is one the document already uses — a parameter or body
+property literally called `petId__query` — a number is appended as well
+(`petId__query_2`), so no argument ever replaces another.
+
 Path parameters are required whether or not the document says so, since the URL
 cannot be built without them. Each parameter's `description` and `deprecated`
 flag are folded into its schema, which is what the model reads when deciding
