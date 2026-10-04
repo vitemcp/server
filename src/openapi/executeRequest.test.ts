@@ -212,6 +212,25 @@ describe("building the request", () => {
     expect(calls[0].url.pathname).toBe("/v1/pets/..%2F..%2Fadmin");
   });
 
+  it("refuses a path placeholder the document declares no parameter for", async () => {
+    const { calls, client } = await withRecordedCalls({
+      ...petstore,
+      paths: { "/pets/{petId}": { get: { operationId: "getPet" } } },
+    });
+
+    const result = await client.callTool({ arguments: {}, name: "getPet" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([
+      {
+        text: "GET /pets/{petId} cannot be called: the OpenAPI document declares no path parameter for {petId}.",
+        type: "text",
+      },
+    ]);
+    // Sent, it would have gone to a literal `/v1/pets/%7BpetId%7D`.
+    expect(calls).toEqual([]);
+  });
+
   it("cannot be made to set a second cookie by an argument", async () => {
     const { calls, client } = await withRecordedCalls(petstore);
 

@@ -188,9 +188,11 @@ property literally called `petId__query` — a number is appended as well
 (`petId__query_2`), so no argument ever replaces another.
 
 Path parameters are required whether or not the document says so, since the URL
-cannot be built without them. Each parameter's `description` and `deprecated`
-flag are folded into its schema, which is what the model reads when deciding
-what to put there.
+cannot be built without them. A placeholder the document declares no parameter
+for has no argument to fill it, so calling that tool returns an error rather
+than requesting a literal `{petId}`. Each parameter's `description` and
+`deprecated` flag are folded into its schema, which is what the model reads when
+deciding what to put there.
 
 `style` and `explode` are honoured: `form` (exploded and not), `spaceDelimited`,
 `pipeDelimited` and `deepObject` for query parameters, `simple`, `label` and

@@ -115,7 +115,7 @@ export const executeRequest = async <T extends ViteMCPAuth>(
     setHeader(headers, name, value);
   }
 
-  const url = new URL(buildPath(route.path, pathValues), `${options.baseUrl}/`);
+  const url = new URL(buildPath(route, pathValues), `${options.baseUrl}/`);
   url.search = toQueryString(query);
 
   const response = await options.fetchImpl(url, {
@@ -266,9 +266,24 @@ const buildBody = (
  * Substitutes path parameters. Leading slash removed so the result is a
  * relative reference: resolved against a base of `https://host/api/v3/`, a
  * leading slash would discard the `/api/v3` prefix the document asked for.
+ *
+ * A placeholder nothing fills is refused rather than sent: the request would
+ * go to a literal `%7Bid%7D` and could still come back 2xx. That happens when
+ * the document names a placeholder it declares no path parameter for, which
+ * leaves the tool no argument to fill it with.
  */
-const buildPath = (template: string, values: Map<string, string>): string => {
-  let path = template;
+const buildPath = (route: HttpRoute, values: Map<string, string>): string => {
+  const unfilled = [...route.path.matchAll(/\{([^{}]*)\}/g)]
+    .filter(([, name]) => !values.has(name))
+    .map(([placeholder]) => placeholder);
+
+  if (unfilled.length > 0) {
+    throw new UserError(
+      `${route.method.toUpperCase()} ${route.path} cannot be called: the OpenAPI document declares no path parameter for ${unfilled.join(", ")}.`,
+    );
+  }
+
+  let path = route.path;
 
   for (const [name, value] of values) {
     path = path.replaceAll(`{${name}}`, value);
