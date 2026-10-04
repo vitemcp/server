@@ -197,7 +197,8 @@ deciding what to put there.
 `style` and `explode` are honoured: `form` (exploded and not), `spaceDelimited`,
 `pipeDelimited` and `deepObject` for query parameters, `simple`, `label` and
 `matrix` for path parameters. An array sent to an operation declaring
-`explode: false` arrives comma-joined, not repeated.
+`explode: false` arrives comma-joined, not repeated. An empty array or object is
+left out of the query, rather than sent as `tags=`.
 
 `components.schemas` referenced by an operation travel with it as `$defs` —
 only the ones it actually reaches, so `tools/list` does not carry the whole

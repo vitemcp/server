@@ -65,6 +65,25 @@ describe("query parameters", () => {
     expect(queryString({}, null)).toBe("");
   });
 
+  it.each([
+    { explode: true, style: "form" },
+    { explode: false, style: "form" },
+    { explode: false, style: "spaceDelimited" },
+    { explode: false, style: "pipeDelimited" },
+  ])(
+    "skips an empty array or object with style=$style, explode=$explode",
+    (overrides) => {
+      // Not `tags=`, which an API would read as a filter for the empty string.
+      expect(queryString(overrides, [])).toBe("");
+      expect(queryString(overrides, {})).toBe("");
+      expect(queryString(overrides, { colour: undefined })).toBe("");
+    },
+  );
+
+  it("still sends an empty string, which is a value", () => {
+    expect(queryString({ explode: false }, "")).toBe("tags=");
+  });
+
   it("sends a nested object as JSON rather than [object Object]", () => {
     expect(queryString({ name: "where" }, [{ id: 1 }])).toBe('where={"id":1}');
   });

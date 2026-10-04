@@ -59,20 +59,26 @@ export const appendQueryParameter = (
 
   const separator = DELIMITERS[style] ?? ",";
 
+  // An empty array or object is left out, as it is when exploded. RFC 6570,
+  // which OpenAPI's styles are modelled on, treats it as undefined; sent as
+  // `tags=`, it would reach the API as a filter for the empty string.
   if (Array.isArray(value)) {
-    query.append(name, value.map(stringify).join(separator));
+    if (value.length > 0) {
+      query.append(name, value.map(stringify).join(separator));
+    }
+
     return;
   }
 
   if (isRecord(value)) {
-    query.append(
-      name,
-      Object.entries(value)
-        .flatMap(([key, entry]) =>
-          entry === undefined ? [] : [key, stringify(entry)],
-        )
-        .join(separator),
+    const entries = Object.entries(value).flatMap(([key, entry]) =>
+      entry === undefined ? [] : [key, stringify(entry)],
     );
+
+    if (entries.length > 0) {
+      query.append(name, entries.join(separator));
+    }
+
     return;
   }
 
