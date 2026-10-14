@@ -257,6 +257,31 @@ describe("EdgeViteMCP", () => {
     expect(received).toEqual([{}]);
   });
 
+  // The same, for a tool's parameters: the call failed as an input validation
+  // error.
+  it("lets an optional tool parameter named like an Object.prototype member be left out", async () => {
+    const server = makeServer();
+    const received: unknown[] = [];
+
+    server.addTool({
+      description: "Deploy",
+      execute: async (args) => {
+        received.push(args);
+        return "ok";
+      },
+      name: "deploy",
+      parameters: z.object({ constructor: z.string().optional() }),
+    });
+
+    const got = await call(server, "tools/call", {
+      arguments: {},
+      name: "deploy",
+    });
+
+    expect(got.result).not.toHaveProperty("isError");
+    expect(received).toEqual([{}]);
+  });
+
   // Valibot carries no JSON Schema of its own, and the SDK refuses to list a
   // tool without one — which failed `tools/list` for every tool on the server,
   // not only the Valibot one.

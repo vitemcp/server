@@ -1,6 +1,8 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { JsonSchema } from "xsschema";
 
+import { withOwnKeysOnly } from "./ownKeysOnly.js";
+
 /**
  * Turns a Standard Schema that carries no JSON Schema into one. Which
  * libraries that can be done for depends on the runtime, so each entry point
@@ -12,12 +14,15 @@ export type JsonSchemaConverter = (
 ) => Promise<JsonSchema>;
 
 /**
- * Gives the SDK a JSON Schema for a schema that has none of its own. Zod v4
- * and ArkType emit JSON Schema natively and pass through; anything else
- * (Valibot, say) is converted, and the conversion is only what `tools/list`
- * advertises. Validation stays with the library the schema was written in:
- * the conversion drops what JSON Schema cannot say — a transform, a
- * `check()` — so validating against it instead would pass `execute`
+ * A tool's schema as the SDK registers it: one that validates by own keys only
+ * (see `withOwnKeysOnly`) and carries a JSON Schema. The schema itself is left
+ * as it was, since whoever wrote it may use it elsewhere.
+ *
+ * Zod v4 and ArkType emit JSON Schema natively, and theirs is kept; anything
+ * else (Valibot, say) is converted, and the conversion is only what
+ * `tools/list` advertises. Validation stays with the library the schema was
+ * written in: the conversion drops what JSON Schema cannot say — a transform,
+ * a `check()` — so validating against it instead would pass `execute`
  * arguments the schema never produced.
  *
  * Advertised inputs are closed with `strictInputSchema`. Outputs are left as
@@ -35,14 +40,16 @@ export const toSdkSchema = async (
     return undefined;
   }
 
-  const standard = (
-    schema as {
-      "~standard": { jsonSchema?: unknown } & StandardSchemaV1.Props;
-    }
-  )["~standard"];
+  const standard = withOwnKeysOnly(
+    (
+      schema as {
+        "~standard": { jsonSchema?: unknown } & StandardSchemaV1.Props;
+      }
+    )["~standard"],
+  );
 
   if (standard.jsonSchema) {
-    return schema;
+    return { "~standard": standard };
   }
 
   const json = await convert(schema as StandardSchemaV1, io);
@@ -50,10 +57,8 @@ export const toSdkSchema = async (
 
   return {
     "~standard": {
+      ...standard,
       jsonSchema: { input: () => advertised, output: () => advertised },
-      validate: (value: unknown) => standard.validate(value),
-      vendor: standard.vendor,
-      version: standard.version,
     },
   };
 };

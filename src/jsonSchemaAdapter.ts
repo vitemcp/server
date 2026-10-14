@@ -126,7 +126,10 @@ async function compileSchema(
     compile: (schema: unknown) => AjvValidateFunction;
   };
 
-  const ajv = new Ajv({ allErrors: true, strict: false });
+  // A key counts as present only if the data has it of its own. AJV otherwise
+  // reads `data[key]`, which finds `Object.prototype`'s members, so leaving
+  // out an optional `toString` or `constructor` failed as "must be string".
+  const ajv = new Ajv({ allErrors: true, ownProperties: true, strict: false });
 
   try {
     const formatsModule = await import("ajv-formats");

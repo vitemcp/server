@@ -155,6 +155,26 @@ test("validates nested objects", async () => {
   expect(invalid.issues?.length).toBeGreaterThan(0);
 });
 
+test("counts only the data's own keys as present", async () => {
+  const schema = jsonSchemaAdapter({
+    properties: {
+      constructor: { type: "string" },
+      toString: { type: "string" },
+      valueOf: { type: "string" },
+    },
+    required: ["valueOf"],
+    type: "object",
+  });
+
+  const result = await schema["~standard"].validate({});
+
+  // `constructor` and `toString` may be left out, and `valueOf` is missing,
+  // not the function `Object.prototype` has under that name.
+  expect(result.issues).toEqual([
+    { message: "must have required property 'valueOf'", path: ["valueOf"] },
+  ]);
+});
+
 test("enforces format keywords when ajv-formats is installed", async () => {
   const schema = jsonSchemaAdapter({
     properties: { email: { format: "email", type: "string" } },
