@@ -1125,7 +1125,12 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     }
 
     for (const template of resourceTemplates) {
-      const complete: Record<string, (value: string) => Promise<string[]>> = {};
+      // No prototype, because the SDK looks a variable's completer up here by
+      // name: on a plain object, asking to complete a variable called
+      // `constructor` or `toString` found `Object.prototype`'s, called it, and
+      // failed the request instead of answering with nothing.
+      const complete: Record<string, (value: string) => Promise<string[]>> =
+        Object.create(null);
       for (const arg of template.arguments ?? []) {
         const completer =
           arg.complete ??

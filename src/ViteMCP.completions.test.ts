@@ -119,6 +119,44 @@ describe("ViteMCP Completions", () => {
     });
   });
 
+  it("answers nothing for a template variable without a completer, whatever it is called", async () => {
+    // The SDK looks a variable's completer up by name, and one called
+    // `constructor` or `toString` used to find `Object.prototype`'s, which
+    // failed the request with an internal error.
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
+    server.addResourceTemplate({
+      arguments: [
+        { complete: async () => ({ values: ["1"] }), name: "id" },
+        { name: "constructor" },
+      ],
+      load: async () => ({ text: "content" }),
+      name: "test-resource",
+      uriTemplate: "test://resource/{constructor}/{id}",
+    });
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        for (const name of [
+          "constructor",
+          "toString",
+          "valueOf",
+          "__proto__",
+        ]) {
+          const result = await client.complete({
+            argument: { name, value: "" },
+            ref: {
+              type: "ref/resource",
+              uri: "test://resource/{constructor}/{id}",
+            },
+          });
+
+          expect(result.completion.values).toEqual([]);
+        }
+      },
+      server,
+    });
+  });
+
   it("throws error for unknown prompt", async () => {
     await runWithTestServer({
       run: async ({ client }) => {
