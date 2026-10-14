@@ -51,6 +51,7 @@ import { createOAuthRouter, OAUTH_PROXY_MAX_BODY_SIZE } from "./auth/router.js";
 import { withoutTrailingSlash } from "./auth/utils/trailingSlash.js";
 import { cancelResponseBody } from "./cancelResponseBody.js";
 import { formatBytes } from "./formatBytes.js";
+import { ownKeysOnly } from "./ownKeysOnly.js";
 import {
   type JsonSchemaConverter,
   toSdkSchema,
@@ -2094,7 +2095,7 @@ const promptArgsSchema = <T extends ViteMCPAuth>(prompt: Prompt<T>) => {
     shape[arg.name] = (arg.required ? base : base.optional()) as z.ZodType;
   }
 
-  return z.object(shape);
+  return ownKeysOnly(z.object(shape));
 };
 
 /** The `StructuredResult` wrapper and nothing else — see `normalizeToolResult`. */

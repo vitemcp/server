@@ -10,6 +10,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import { formatBytes } from "../formatBytes.js";
+import { ownKeysOnly } from "../ownKeysOnly.js";
 import {
   type JsonSchemaConverter,
   toSdkSchema,
@@ -325,7 +326,9 @@ export class EdgeViteMCP {
         shape[arg.name] = arg.required ? z.string() : z.string().optional();
       }
 
-      const argsSchema = prompt.arguments?.length ? z.object(shape) : undefined;
+      const argsSchema = prompt.arguments?.length
+        ? ownKeysOnly(z.object(shape))
+        : undefined;
 
       const load = async (args?: Record<string, string>) => {
         const text = await prompt.load(args ?? {});

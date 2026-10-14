@@ -232,6 +232,31 @@ describe("EdgeViteMCP", () => {
     expect(received).toEqual([{}]);
   });
 
+  // Zod reads an argument through the prototype chain, so one named like a
+  // member of `Object.prototype` arrived as a function when it was left out,
+  // and the request failed.
+  it("lets an optional prompt argument named like an Object.prototype member be left out", async () => {
+    const server = makeServer();
+    const received: unknown[] = [];
+
+    server.addPrompt({
+      arguments: [{ name: "toString" }],
+      load: async (args) => {
+        received.push(args);
+        return "Summarise the last deploy.";
+      },
+      name: "summary",
+    });
+
+    const got = await call(server, "prompts/get", {
+      arguments: {},
+      name: "summary",
+    });
+
+    expect(got.error).toBeUndefined();
+    expect(received).toEqual([{}]);
+  });
+
   // Valibot carries no JSON Schema of its own, and the SDK refuses to list a
   // tool without one — which failed `tools/list` for every tool on the server,
   // not only the Valibot one.
