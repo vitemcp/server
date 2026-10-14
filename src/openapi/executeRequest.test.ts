@@ -212,6 +212,106 @@ describe("building the request", () => {
     expect(calls[0].url.pathname).toBe("/v1/pets/..%2F..%2Fadmin");
   });
 
+  // Encoding leaves dots alone, and a URL resolves these segments as steps
+  // through the path rather than sending them.
+  describe("a path segment of . or ..", () => {
+    // One string parameter per placeholder in `path`.
+    const specFor = (path: string): OpenApiDocument => ({
+      ...petstore,
+      paths: {
+        [path]: {
+          get: {
+            operationId: "getPet",
+            parameters: [...path.matchAll(/\{(\w+)\}/g)].map(([, name]) => ({
+              in: "path" as const,
+              name,
+              schema: { type: "string" },
+            })),
+          },
+        },
+      },
+    });
+
+    it("is refused when an argument makes it, rather than sent somewhere else", async () => {
+      const { calls, client } = await withRecordedCalls(
+        specFor("/pets/{petId}/profile"),
+      );
+
+      // Sent, `..` would have requested `/v1/profile` and `.`
+      // `/v1/pets/profile`.
+      for (const petId of ["..", "."]) {
+        const result = await client.callTool({
+          arguments: { petId },
+          name: "getPet",
+        });
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toEqual([
+          {
+            text: `GET /pets/{petId}/profile cannot be called with a path segment of "${petId}": a URL resolves it as a step through the path, so the request would reach a different endpoint.`,
+            type: "text",
+          },
+        ]);
+      }
+
+      expect(calls).toEqual([]);
+    });
+
+    it("is refused at the front of the path, where it would leave the server's prefix", async () => {
+      const { calls, client } = await withRecordedCalls(specFor("/{petId}"));
+
+      // Sent, this would have requested `https://api.example.test/`.
+      const result = await client.callTool({
+        arguments: { petId: ".." },
+        name: "getPet",
+      });
+
+      expect(result.isError).toBe(true);
+      expect(calls).toEqual([]);
+    });
+
+    it("is refused when it takes more than one argument to make", async () => {
+      const { calls, client } = await withRecordedCalls(
+        specFor("/pets/{petId}.{format}"),
+      );
+
+      const result = await client.callTool({
+        arguments: { format: "", petId: "" },
+        name: "getPet",
+      });
+
+      expect(result.isError).toBe(true);
+      expect(calls).toEqual([]);
+    });
+
+    it("is not made by a value that merely contains dots", async () => {
+      const { calls, client } = await withRecordedCalls(
+        specFor("/pets/{petId}/profile"),
+      );
+
+      for (const petId of ["...", ".hidden", "v1.2", "%2e%2e"]) {
+        await client.callTool({ arguments: { petId }, name: "getPet" });
+      }
+
+      expect(calls.map((call) => call.url.pathname)).toEqual([
+        "/v1/pets/.../profile",
+        "/v1/pets/.hidden/profile",
+        "/v1/pets/v1.2/profile",
+        "/v1/pets/%252e%252e/profile",
+      ]);
+    });
+
+    it("is left alone when the document writes it itself", async () => {
+      const { calls, client } = await withRecordedCalls(
+        specFor("/pets/./{petId}"),
+      );
+
+      await client.callTool({ arguments: { petId: "7" }, name: "getPet" });
+
+      expect(calls[0].url.pathname).toBe("/v1/pets/7");
+    });
+  });
+
   it("refuses a path placeholder the document declares no parameter for", async () => {
     const { calls, client } = await withRecordedCalls({
       ...petstore,

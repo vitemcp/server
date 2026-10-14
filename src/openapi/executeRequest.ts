@@ -271,6 +271,14 @@ const buildBody = (
  * go to a literal `%7Bid%7D` and could still come back 2xx. That happens when
  * the document names a placeholder it declares no path parameter for, which
  * leaves the tool no argument to fill it with.
+ *
+ * So is a value that leaves a whole segment `.` or `..`. A URL resolves those
+ * as steps through the path instead of sending them: `/users/{id}/profile`
+ * with `id: ".."` would request `/profile`, and a `..` at the front would climb
+ * out of the `/api/v3` prefix too. Encoding cannot prevent it, since
+ * `encodeURIComponent` leaves dots alone and a URL reads `%2e` as a dot
+ * anyway. A dot segment the document writes into the path itself is left
+ * alone.
  */
 const buildPath = (route: HttpRoute, values: Map<string, string>): string => {
   const unfilled = [...route.path.matchAll(/\{([^{}]*)\}/g)]
@@ -287,6 +295,17 @@ const buildPath = (route: HttpRoute, values: Map<string, string>): string => {
 
   for (const [name, value] of values) {
     path = path.replaceAll(`{${name}}`, value);
+  }
+
+  const written = new Set(route.path.split("/").filter(isDotSegment));
+  const introduced = path
+    .split("/")
+    .find((segment) => isDotSegment(segment) && !written.has(segment));
+
+  if (introduced !== undefined) {
+    throw new UserError(
+      `${route.method.toUpperCase()} ${route.path} cannot be called with a path segment of "${introduced}": a URL resolves it as a step through the path, so the request would reach a different endpoint.`,
+    );
   }
 
   return path.replace(/^\//, "");
@@ -376,6 +395,10 @@ const encodeCookieValue = (value: string): string =>
   value.replace(/[\u0000-\u001F\u007F ",;\\]/g, (character) =>
     encodeURIComponent(character),
   );
+
+/** `.` or `..`, or a `%2e` spelling of either, which a URL reads the same. */
+const isDotSegment = (segment: string): boolean =>
+  /^(?:\.|%2e){1,2}$/i.test(segment);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
