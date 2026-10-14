@@ -656,7 +656,9 @@ server.addTool({
 
 #### Working with Resource Templates
 
-The `embedded()` method works seamlessly with resource templates:
+The `embedded()` method works seamlessly with resource templates. A URI reaches
+the same template, with the same arguments, as it would through
+`resources/read`:
 
 ```js
 // Define a resource template

@@ -38,7 +38,6 @@ import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import { setTimeout as delay } from "timers/promises";
 import { fetch } from "undici";
-import parseURITemplate from "uri-templates";
 import { toJsonSchema } from "xsschema";
 import { z } from "zod";
 
@@ -761,7 +760,12 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     }
 
     for (const template of this.#resourceTemplates) {
-      const params = parseURITemplate(template.uriTemplate).fromUri(uri);
+      // Matched as `resources/read` matches it, so a URI reaches the same
+      // template, with the same arguments, whichever way it is asked for. A
+      // matcher that let `{id}` take a `/` had `docs://{id}` claim
+      // `docs://x/history` from `docs://{id}/history`, and handed its loader a
+      // path it never declared.
+      const params = new UriTemplate(template.uriTemplate).match(uri);
 
       if (!params) {
         continue;
