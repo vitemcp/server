@@ -666,14 +666,15 @@ const authProxy = new OAuthProxy({
 ```
 
 `DiskStore` cleans up expired entries on its own interval, sanitizes keys
-against directory traversal, and claims entries with an atomic `rename()` — so
-several processes sharing one directory are safe. It is host-local, not a
-network-distributed store.
+against directory traversal, and both writes and claims entries with an atomic
+`rename()` — so several processes sharing one directory are safe. It is
+host-local, not a network-distributed store.
 
 It creates the directory `0700` and each entry `0600`, keeping codes and tokens
-off-limits to other users on the host. Those modes are applied at creation, so a
-directory carried over from an older release keeps whatever it has — run
-`chmod -R go-rwx` on it once when upgrading.
+off-limits to other users on the host. The directory's mode is applied when it
+is created and an entry's when it is written, so a directory carried over from
+an older release keeps whatever it has until then — run `chmod -R go-rwx` on it
+once when upgrading.
 
 ### Encryption
 

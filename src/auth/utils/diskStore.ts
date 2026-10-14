@@ -148,17 +148,27 @@ export class DiskStore implements TokenStorage {
       value,
     };
 
+    // Written beside the entry and renamed over it, because writeFile()
+    // truncates before it writes: a get() landing in between read an empty
+    // file and reported the key missing, and a cleanup() sweep deleted it as
+    // corrupt. rename() is atomic on POSIX filesystems, so a reader sees the
+    // old entry or the new one. The temporary name does not end in the
+    // extension, so cleanup() and size() pass over it.
+    const tempPath = `${filePath}.${randomUUID()}.tmp`;
+
     try {
       // 0o600: entries hold authorization codes, access and refresh tokens and
       // PKCE verifiers, so nothing outside the owning user should read them.
-      // Node only applies `mode` when it creates the file — overwriting one
-      // that predates this keeps the mode it already had, so a directory
-      // carried over from an earlier version needs a one-time chmod.
-      await writeFile(filePath, JSON.stringify(entry, null, 2), {
+      // Node only applies `mode` when it creates the file, and every save
+      // creates one, so an entry carried over from an earlier version with a
+      // looser mode is tightened the next time it is written.
+      await writeFile(tempPath, JSON.stringify(entry, null, 2), {
         encoding: "utf-8",
         mode: 0o600,
       });
+      await rename(tempPath, filePath);
     } catch (error) {
+      await rm(tempPath, { force: true });
       console.error(`Failed to save key ${key}:`, error);
       throw error;
     }

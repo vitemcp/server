@@ -1,4 +1,4 @@
-import { readdir, rm, stat } from "fs/promises";
+import { chmod, mkdir, readdir, rm, stat } from "fs/promises";
 import { join } from "path";
 import {
   afterAll,
@@ -248,6 +248,69 @@ describe("DiskStore", () => {
     store.destroy();
   });
 
+  // writeFile() truncates before it writes, so overwriting an entry in place
+  // left a moment in which the file was empty or half-written.
+  describe("overwriting an entry", () => {
+    // Large enough that the write is not over before a reader gets in.
+    const value = { blob: "x".repeat(100_000) };
+
+    it("should never report the key as missing to a concurrent get()", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+      await store.save("key", value);
+
+      const reads: unknown[] = [];
+
+      for (let i = 0; i < 20; i++) {
+        const [, read] = await Promise.all([
+          store.save("key", value),
+          store.get("key"),
+        ]);
+        reads.push(read);
+      }
+
+      expect(reads.filter((read) => read === null)).toHaveLength(0);
+
+      store.destroy();
+    });
+
+    it("should not be deleted as corrupt by a concurrent cleanup()", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+      await store.save("key", value);
+
+      for (let i = 0; i < 20; i++) {
+        await Promise.all([store.save("key", value), store.cleanup()]);
+
+        expect(await store.get("key")).toEqual(value);
+      }
+
+      store.destroy();
+    });
+
+    it("should not leave temporary files behind", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+      await store.save("key", "first");
+      await store.save("key", "second");
+
+      expect(await readdir(TEST_DIR)).toEqual(["key.json"]);
+
+      store.destroy();
+    });
+
+    it("should remove the temporary file when the entry cannot be replaced", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      // A directory where the entry belongs, which rename() cannot replace.
+      await mkdir(join(TEST_DIR, "key.json"), { recursive: true });
+
+      await expect(store.save("key", "value")).rejects.toThrow();
+      expect(await readdir(TEST_DIR)).toEqual(["key.json"]);
+
+      error.mockRestore();
+      store.destroy();
+    });
+  });
+
   it("should count stored items", async () => {
     const store = new DiskStore({ directory: TEST_DIR });
 
@@ -348,6 +411,21 @@ describe("DiskStore", () => {
 
       expect(directoryMode & 0o077).toBe(0);
       expect(fileMode & 0o077).toBe(0);
+
+      store.destroy();
+    });
+
+    it("should tighten an entry left with a looser mode when it is next written", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+      const file = join(TEST_DIR, "token-key.json");
+
+      // As an entry written by an earlier version would have been.
+      await store.save("token-key", { accessToken: "AT-old" });
+      await chmod(file, 0o644);
+
+      await store.save("token-key", { accessToken: "AT-new" });
+
+      expect((await stat(file)).mode & 0o077).toBe(0);
 
       store.destroy();
     });
