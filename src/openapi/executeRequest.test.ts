@@ -614,6 +614,92 @@ describe("reading the response", () => {
     ]);
   });
 
+  describe("telling JSON by its media type", () => {
+    const respondWith = (contentType: string) => () =>
+      new Response(JSON.stringify({ id: 7 }), {
+        headers: { "content-type": contentType },
+      });
+
+    it("recognises JSON whatever the case of the media type", async () => {
+      for (const contentType of [
+        "Application/JSON",
+        "APPLICATION/JSON; charset=utf-8",
+        "application/problem+JSON",
+      ]) {
+        const { client } = await withRecordedCalls(
+          petstore,
+          {},
+          respondWith(contentType),
+        );
+
+        const result = await client.callTool({
+          arguments: { petId: 7 },
+          name: "getPet",
+        });
+
+        expect(result.structuredContent).toEqual({ id: 7 });
+      }
+    });
+
+    it("does not fail a declared output schema over the case of the media type", async () => {
+      // With an output schema declared, a body not read as JSON is a tool error
+      // rather than text, so this cost the whole call, not only the structure.
+      const { client } = await withRecordedCalls(
+        {
+          ...petstore,
+          paths: {
+            "/pets/{petId}": {
+              get: {
+                operationId: "getPet",
+                parameters: [
+                  { in: "path", name: "petId", schema: { type: "integer" } },
+                ],
+                responses: {
+                  "200": {
+                    content: {
+                      "application/json": {
+                        schema: {
+                          properties: { id: { type: "integer" } },
+                          type: "object",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        { outputSchema: true },
+        respondWith("Application/JSON"),
+      );
+
+      const result = await client.callTool({
+        arguments: { petId: 7 },
+        name: "getPet",
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual({ id: 7 });
+    });
+
+    it("does not take a parameter that mentions json for a JSON media type", async () => {
+      const { client } = await withRecordedCalls(
+        petstore,
+        {},
+        respondWith("text/plain; profile=json"),
+      );
+
+      const result = await client.callTool({
+        arguments: { petId: 7 },
+        name: "getPet",
+      });
+
+      expect(result.structuredContent).toBeUndefined();
+      expect(result.content).toEqual([{ text: '{"id":7}', type: "text" }]);
+    });
+  });
+
   it("pretty-prints a JSON array, which structured content cannot carry", async () => {
     const { client } = await withRecordedCalls(
       petstore,
@@ -640,6 +726,26 @@ describe("reading the response", () => {
       () =>
         new Response(new Uint8Array([1, 2, 3]), {
           headers: { "content-type": "image/png" },
+        }),
+    );
+
+    const result = await client.callTool({
+      arguments: { petId: 7 },
+      name: "getPet",
+    });
+
+    expect(result.content).toEqual([
+      { data: "AQID", mimeType: "image/png", type: "image" },
+    ]);
+  });
+
+  it("returns an image whatever the case of its media type", async () => {
+    const { client } = await withRecordedCalls(
+      petstore,
+      {},
+      () =>
+        new Response(new Uint8Array([1, 2, 3]), {
+          headers: { "content-type": "Image/PNG" },
         }),
     );
 

@@ -328,6 +328,10 @@ const readResponse = async <T extends ViteMCPAuth>(
 ): Promise<ExecuteRequestResult> => {
   const { binding, maxResponseCharacters, route } = options;
   const contentType = response.headers.get("content-type") ?? "";
+  // Without its parameters, so `text/plain; profile=json` is not taken for
+  // JSON, and lowercased, since media types are case-insensitive: an API that
+  // answers `Application/JSON` has still answered JSON.
+  const mediaType = contentType.split(";")[0].trim().toLowerCase();
   const label = `${route.method.toUpperCase()} ${route.path}`;
 
   if (!response.ok) {
@@ -339,15 +343,13 @@ const readResponse = async <T extends ViteMCPAuth>(
     );
   }
 
-  if (/^(?:audio|image)\//.test(contentType) && !binding.outputSchema) {
+  if (/^(?:audio|image)\//.test(mediaType) && !binding.outputSchema) {
     const bytes = new Uint8Array(await response.arrayBuffer());
 
     if (bytes.byteLength <= MAX_INLINE_MEDIA_BYTES) {
-      const mimeType = contentType.split(";")[0].trim();
-
-      return contentType.startsWith("image/")
-        ? { data: toBase64(bytes), mimeType, type: "image" }
-        : { data: toBase64(bytes), mimeType, type: "audio" };
+      return mediaType.startsWith("image/")
+        ? { data: toBase64(bytes), mimeType: mediaType, type: "image" }
+        : { data: toBase64(bytes), mimeType: mediaType, type: "audio" };
     }
 
     throw new UserError(
@@ -356,7 +358,7 @@ const readResponse = async <T extends ViteMCPAuth>(
   }
 
   const text = await response.text();
-  const parsed = /\bjson\b/.test(contentType)
+  const parsed = /\bjson\b/.test(mediaType)
     ? tryParse(text.length <= maxResponseCharacters ? text : undefined)
     : undefined;
 
