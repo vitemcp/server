@@ -106,3 +106,61 @@ describe("a prompt argument named like a member of Object.prototype", () => {
     expect(received).toEqual([{ toString: "json" }]);
   });
 });
+
+// `prompts/get` may leave `arguments` out, and the SDK validates the map as it
+// was sent: a prompt whose arguments were all optional refused the request as
+// "expected object, received undefined".
+describe("a prompt called without an argument map", () => {
+  it("is handed an empty one", async () => {
+    const received: unknown[] = [];
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
+
+    server.addPrompt({
+      arguments: [{ name: "topic" }],
+      load: async (args) => {
+        received.push(args);
+        return `Outline ${args.topic ?? "anything"}.`;
+      },
+      name: "outline",
+    });
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        const result = await client.getPrompt({ name: "outline" });
+
+        expect(result.messages[0].content).toEqual({
+          text: "Outline anything.",
+          type: "text",
+        });
+      },
+      server,
+    });
+
+    expect(received).toEqual([{}]);
+  });
+
+  it("reports a required argument missing, rather than the map", async () => {
+    const load = vi.fn(async () => "ok");
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
+
+    server.addPrompt({
+      arguments: [{ name: "topic", required: true }],
+      load,
+      name: "outline",
+    });
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        await expect(
+          client.getPrompt({ name: "outline" }),
+        ).rejects.toMatchObject({
+          code: ProtocolErrorCode.InvalidParams,
+          message: expect.stringContaining("topic"),
+        });
+      },
+      server,
+    });
+
+    expect(load).not.toHaveBeenCalled();
+  });
+});

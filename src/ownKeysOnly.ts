@@ -9,11 +9,22 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
  * For the argument schemas `ViteMCP` and `EdgeViteMCP` build for their
  * prompts. A tool's schemas belong to whoever wrote the tool, so
  * `toSdkSchema` wraps them instead.
+ *
+ * An argument map the request left out validates as an empty one, as the SDK
+ * already arranges for a tool's. `prompts/get` may omit `arguments`, and the
+ * SDK validates the map as it was sent, so a prompt whose arguments are all
+ * optional refused the request as "expected object, received undefined".
  */
-export const ownKeysOnly = <S extends StandardSchemaV1>(schema: S): S =>
-  Object.defineProperty(schema, "~standard", {
-    value: withOwnKeysOnly(schema["~standard"]),
+export const ownKeysOnly = <S extends StandardSchemaV1>(schema: S): S => {
+  const standard = withOwnKeysOnly(schema["~standard"]);
+
+  return Object.defineProperty(schema, "~standard", {
+    value: {
+      ...standard,
+      validate: (value: unknown) => standard.validate(value ?? {}),
+    },
   });
+};
 
 /**
  * `standard`, with a `validate` that sees only the keys an object has of its

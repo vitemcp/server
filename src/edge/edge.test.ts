@@ -257,6 +257,27 @@ describe("EdgeViteMCP", () => {
     expect(received).toEqual([{}]);
   });
 
+  // `prompts/get` may leave `arguments` out, and the SDK validates the map as
+  // it was sent: a prompt whose arguments were all optional refused the call.
+  it("hands a prompt called without an argument map an empty one", async () => {
+    const server = makeServer();
+    const received: unknown[] = [];
+
+    server.addPrompt({
+      arguments: [{ name: "topic" }],
+      load: async (args) => {
+        received.push(args);
+        return "Summarise the last deploy.";
+      },
+      name: "summary",
+    });
+
+    const got = await call(server, "prompts/get", { name: "summary" });
+
+    expect(got.error).toBeUndefined();
+    expect(received).toEqual([{}]);
+  });
+
   // The same, for a tool's parameters: the call failed as an input validation
   // error.
   it("lets an optional tool parameter named like an Object.prototype member be left out", async () => {
