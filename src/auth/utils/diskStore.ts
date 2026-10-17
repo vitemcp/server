@@ -14,6 +14,7 @@ import {
   writeFile,
 } from "fs/promises";
 import { join } from "path";
+import { setTimeout as delay } from "timers/promises";
 
 import type { TokenStorage } from "../types.js";
 
@@ -166,7 +167,7 @@ export class DiskStore implements TokenStorage {
         encoding: "utf-8",
         mode: 0o600,
       });
-      await rename(tempPath, filePath);
+      await renameIntoPlace(tempPath, filePath);
     } catch (error) {
       await rm(tempPath, { force: true });
       console.error(`Failed to save key ${key}:`, error);
@@ -294,3 +295,41 @@ export class DiskStore implements TokenStorage {
     }
   }
 }
+
+/** What a Windows rename fails with while another handle has the file open. */
+const TRANSIENT_RENAME_CODES = new Set(["EACCES", "EBUSY", "EPERM"]);
+
+/**
+ * rename(), tried again while Windows refuses it for a moment.
+ *
+ * Windows can refuse to replace a file another handle has open, which POSIX
+ * never does: a get() or cleanup() reading the entry at that instant failed
+ * the save with EPERM, EACCES or EBUSY. The reader lets go within
+ * milliseconds, so the same rename is tried five more times, over 310ms. The
+ * entry is never removed to make room, since that would hand a concurrent
+ * get() the missing key the rename is there to prevent. Any other error fails
+ * at once, as does any error on another platform.
+ */
+const renameIntoPlace = async (
+  source: string,
+  destination: string,
+): Promise<void> => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(source, destination);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+
+      if (
+        process.platform !== "win32" ||
+        attempt >= 5 ||
+        !TRANSIENT_RENAME_CODES.has(code)
+      ) {
+        throw error;
+      }
+
+      await delay(10 * 2 ** attempt);
+    }
+  }
+};

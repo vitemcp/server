@@ -23,6 +23,15 @@ const readdirGate = vi.hoisted(() => ({
   onCall: null as (() => void) | null,
 }));
 
+/**
+ * Codes the next renames fail with instead of reaching the real `fs/promises`,
+ * as a Windows rename does while another handle has the entry open.
+ */
+const renameFailures = vi.hoisted(() => ({
+  calls: 0,
+  codes: [] as string[],
+}));
+
 vi.mock("fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs/promises")>();
 
@@ -37,6 +46,17 @@ vi.mock("fs/promises", async (importOriginal) => {
       }
 
       return actual.readdir(...args);
+    },
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      renameFailures.calls += 1;
+
+      const code = renameFailures.codes.shift();
+
+      if (code) {
+        throw Object.assign(new Error(`${code}: rename`), { code });
+      }
+
+      return actual.rename(...args);
     },
   };
 });
@@ -57,6 +77,8 @@ describe("DiskStore", () => {
     readdirGate.blocked = null;
     readdirGate.count = 0;
     readdirGate.onCall = null;
+    renameFailures.calls = 0;
+    renameFailures.codes = [];
   });
 
   afterEach(async () => {
@@ -308,6 +330,91 @@ describe("DiskStore", () => {
 
       error.mockRestore();
       store.destroy();
+    });
+
+    // Windows can refuse to replace a file another handle has open, so a get()
+    // or cleanup() reading the entry at that instant failed the save outright.
+    describe("when Windows refuses the rename for a moment", () => {
+      const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+
+      const runOn = (value: NodeJS.Platform) =>
+        Object.defineProperty(process, "platform", { ...platform, value });
+
+      afterEach(() => {
+        Object.defineProperty(process, "platform", platform);
+      });
+
+      it.each(["EPERM", "EACCES", "EBUSY"])(
+        "should replace the entry once %s passes",
+        async (code) => {
+          runOn("win32");
+          const store = new DiskStore({ directory: TEST_DIR });
+          await store.save("key", "first");
+
+          renameFailures.calls = 0;
+          renameFailures.codes = [code, code];
+          await store.save("key", "second");
+
+          expect(renameFailures.calls).toBe(3);
+          expect(await store.get("key")).toBe("second");
+          expect(await readdir(TEST_DIR)).toEqual(["key.json"]);
+
+          store.destroy();
+        },
+      );
+
+      it("should give up after five retries, leaving the entry in place", async () => {
+        runOn("win32");
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        const store = new DiskStore({ directory: TEST_DIR });
+        await store.save("key", "first");
+
+        renameFailures.calls = 0;
+        renameFailures.codes = new Array<string>(6).fill("EPERM");
+
+        await expect(store.save("key", "second")).rejects.toMatchObject({
+          code: "EPERM",
+        });
+        expect(renameFailures.calls).toBe(6);
+        expect(await store.get("key")).toBe("first");
+        expect(await readdir(TEST_DIR)).toEqual(["key.json"]);
+
+        error.mockRestore();
+        store.destroy();
+      });
+
+      it("should not retry an error that will not pass", async () => {
+        runOn("win32");
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        const store = new DiskStore({ directory: TEST_DIR });
+
+        renameFailures.codes = ["ENOSPC"];
+
+        await expect(store.save("key", "value")).rejects.toMatchObject({
+          code: "ENOSPC",
+        });
+        expect(renameFailures.calls).toBe(1);
+        expect(await readdir(TEST_DIR)).toEqual([]);
+
+        error.mockRestore();
+        store.destroy();
+      });
+
+      it("should not retry on another platform", async () => {
+        runOn("linux");
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        const store = new DiskStore({ directory: TEST_DIR });
+
+        renameFailures.codes = ["EPERM"];
+
+        await expect(store.save("key", "value")).rejects.toMatchObject({
+          code: "EPERM",
+        });
+        expect(renameFailures.calls).toBe(1);
+
+        error.mockRestore();
+        store.destroy();
+      });
     });
   });
 
