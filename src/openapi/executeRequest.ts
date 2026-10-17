@@ -227,7 +227,12 @@ const buildBody = (
 ): string | undefined => {
   const encoding = binding.bodyEncoding;
 
-  if (!encoding || Object.keys(values).length === 0) {
+  // A JSON body the operation requires is sent as `{}` when no argument went
+  // into it: every property in it may be optional, but the body itself is
+  // not, and a server that requires one refuses a request that has none.
+  const sendEmpty = encoding?.kind === "json" && binding.bodyRequired;
+
+  if (!encoding || (Object.keys(values).length === 0 && !sendEmpty)) {
     return undefined;
   }
 

@@ -8,6 +8,8 @@ import { collectDefinitions } from "./normalize.js";
 export type ToolBinding = {
   /** How to encode the request body, when the operation takes one. */
   bodyEncoding?: BodyEncoding;
+  /** Whether the operation requires its request body — see `buildBody`. */
+  bodyRequired?: boolean;
   /** A note about the operation, when part of it could not be modelled. */
   caveat?: string;
   inputSchema: JsonSchemaObject;
@@ -127,6 +129,7 @@ export const buildToolBinding = (
 
   return {
     bodyEncoding: body.encoding,
+    bodyRequired: body.required,
     caveat: body.caveat,
     inputSchema,
     outputSchema: withOutputSchema
@@ -143,6 +146,7 @@ type DescribedBody = {
   caveat?: string;
   encoding?: BodyEncoding;
   properties: Map<string, BodyProperty>;
+  required?: boolean;
   wholeBodyKey?: string;
 };
 
@@ -183,11 +187,11 @@ const describeBody = (
 
   if (kind === "text") {
     properties.set("body", { required, schema: schema ?? { type: "string" } });
-    return { encoding, properties, wholeBodyKey: "body" };
+    return { encoding, properties, required, wholeBodyKey: "body" };
   }
 
   if (!schema) {
-    return { encoding, properties };
+    return { encoding, properties, required };
   }
 
   const object = flattenObject(schema, normalizer.definitions);
@@ -205,7 +209,7 @@ const describeBody = (
       });
     }
 
-    return { encoding, properties };
+    return { encoding, properties, required };
   }
 
   // An array body, a dictionary, or one the document describes only by `$ref`
@@ -213,7 +217,7 @@ const describeBody = (
   // becomes one argument.
   properties.set("body", { required, schema });
 
-  return { encoding, properties, wholeBodyKey: "body" };
+  return { encoding, properties, required, wholeBodyKey: "body" };
 };
 
 /**

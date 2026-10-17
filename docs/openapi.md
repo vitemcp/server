@@ -175,6 +175,11 @@ flattened too. A body with no properties to flatten — an array, a scalar, or a
 dictionary that only declares `additionalProperties` — becomes a single `body`
 argument instead.
 
+A JSON body the operation marks `required` is sent as `{}` when no argument
+fills it: one whose properties are all optional, called with only a path
+parameter, or one the document gives no schema. An optional body that nothing
+fills is left out.
+
 Names can collide between the four locations and the body. A colliding
 parameter is suffixed with its location; the body keeps the bare name:
 

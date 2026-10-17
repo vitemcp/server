@@ -3,7 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vitest";
 
 import type { ViteMCP } from "../ViteMCP.js";
-import type { OpenApiDocument } from "./types.js";
+import type { OpenApiDocument, OpenApiRequestBody } from "./types.js";
 
 import { resolveBaseUrl } from "./executeRequest.js";
 import { fromOpenAPI } from "./fromOpenAPI.js";
@@ -440,6 +440,87 @@ describe("building the request", () => {
     expect(JSON.parse(calls[0].body ?? "")).toEqual({
       name: "Rex",
       tag: "dog",
+    });
+  });
+
+  // An update body is typically all optional properties, so a call can fill
+  // none of them — and a server that requires the body refuses a request that
+  // arrives without one.
+  describe("a required JSON body no argument fills", () => {
+    const updateUser = (
+      requestBody: OpenApiRequestBody,
+      openapi = "3.0.3",
+    ): OpenApiDocument => ({
+      components: {
+        schemas: {
+          UserUpdate: {
+            properties: { email: { type: "string" }, name: { type: "string" } },
+            type: "object",
+          },
+        },
+      },
+      info: { title: "Users", version: "1.0.0" },
+      openapi,
+      paths: {
+        "/users/{id}": {
+          patch: {
+            operationId: "updateUser",
+            parameters: [
+              { in: "path", name: "id", schema: { type: "string" } },
+            ],
+            requestBody,
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.test" }],
+    });
+
+    const userUpdate = {
+      "application/json": {
+        schema: { $ref: "#/components/schemas/UserUpdate" },
+      },
+    };
+
+    it.each(["3.0.3", "3.1.0"])(
+      "is sent as {} (OpenAPI %s)",
+      async (openapi) => {
+        const { calls, client } = await withRecordedCalls(
+          updateUser({ content: userUpdate, required: true }, openapi),
+        );
+
+        const sent = await client.callTool({
+          arguments: { id: "42" },
+          name: "updateUser",
+        });
+
+        expect(sent.isError).toBeFalsy();
+        expect(calls[0].method).toBe("PATCH");
+        expect(calls[0].url.pathname).toBe("/users/42");
+        expect(calls[0].headers.get("content-type")).toBe("application/json");
+        expect(calls[0].body).toBe("{}");
+      },
+    );
+
+    it("is sent as {} when the document gives it no schema", async () => {
+      const { calls, client } = await withRecordedCalls(
+        updateUser({ content: { "application/json": {} }, required: true }),
+      );
+
+      await client.callTool({ arguments: { id: "42" }, name: "updateUser" });
+
+      expect(calls[0].headers.get("content-type")).toBe("application/json");
+      expect(calls[0].body).toBe("{}");
+    });
+
+    it("is left out when the operation does not require it", async () => {
+      const { calls, client } = await withRecordedCalls(
+        updateUser({ content: userUpdate }),
+      );
+
+      await client.callTool({ arguments: { id: "42" }, name: "updateUser" });
+
+      expect(calls[0].headers.has("content-type")).toBe(false);
+      expect(calls[0].body).toBeUndefined();
     });
   });
 
