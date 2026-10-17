@@ -7,10 +7,8 @@ import { ViteMCP } from "./ViteMCP.js";
 
 describe("HTTPS support", () => {
   let server: ViteMCP;
-  let port: number;
 
   beforeEach(() => {
-    port = Math.floor(Math.random() * 10000) + 50000;
     server = new ViteMCP({
       name: "HTTPS Test Server",
       version: "1.0.0",
@@ -42,14 +40,18 @@ describe("HTTPS support", () => {
       "src/fixtures/certs/server-key.pem",
     );
 
+    // Port 0, so the OS assigns one that is free as the server binds it. A
+    // number picked in advance could already be taken or, on Windows, reserved.
     await server.start({
       httpStream: {
-        port,
+        port: 0,
         sslCert: certPath,
         sslKey: keyPath,
       },
       transportType: "httpStream",
     });
+
+    const port = server.port!;
 
     // Test that the server responds to HTTPS requests
     const response = await new Promise<{ statusCode?: number; text: string }>(
@@ -84,13 +86,13 @@ describe("HTTPS support", () => {
   test("starts server with HTTP when no SSL options provided", async () => {
     await server.start({
       httpStream: {
-        port,
+        port: 0,
       },
       transportType: "httpStream",
     });
 
     // Test that the server responds to HTTP requests
-    const response = await fetch(`http://localhost:${port}/health`);
+    const response = await fetch(`http://localhost:${server.port}/health`);
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("ok");
   });
