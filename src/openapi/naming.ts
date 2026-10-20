@@ -51,11 +51,17 @@ const baseNameFor = (
   route: HttpRoute,
   override: FromOpenAPIToolNames,
 ): string => {
+  // A record is read by its own keys only. Read through the prototype, an
+  // `operationId` of `toString` or `constructor` found `Object.prototype`'s
+  // function rather than no override, and building the server failed with
+  // "value.replace is not a function".
   const explicit =
     typeof override === "function"
       ? override(toOperationSummary(route))
-      : route.operationId
-        ? override?.[route.operationId]
+      : route.operationId &&
+          override &&
+          Object.hasOwn(override, route.operationId)
+        ? override[route.operationId]
         : undefined;
 
   if (explicit) {

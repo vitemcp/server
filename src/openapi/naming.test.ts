@@ -75,6 +75,21 @@ describe("tool naming", () => {
     ).toEqual(["pets_list"]);
   });
 
+  it("reads an override record by its own keys only", () => {
+    // Read through the prototype, `toString` found `Object.prototype`'s
+    // function rather than no override, and building the server failed.
+    const routes = ["toString", "constructor", "valueOf"].map((operationId) =>
+      route({ operationId }),
+    );
+
+    expect(namesOf(routes, {})).toEqual(["toString", "constructor", "valueOf"]);
+    expect(namesOf(routes, { valueOf: "get_value" })).toEqual([
+      "toString",
+      "constructor",
+      "get_value",
+    ]);
+  });
+
   it("takes an override function, falling back when it returns nothing", () => {
     expect(
       namesOf(
