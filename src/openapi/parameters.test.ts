@@ -134,6 +134,16 @@ describe("path parameters", () => {
       ),
     ).toBe(";tags=a;tags=b");
   });
+
+  it("percent-encodes the keys of an exploded matrix object", () => {
+    // Left as written, a key holding `/` added a path segment.
+    expect(
+      serializePathParameter(
+        parameter({ explode: true, in: "path", style: "matrix" }),
+        { "a/b": "c d" },
+      ),
+    ).toBe(";a%2Fb=c%20d");
+  });
 });
 
 describe("header and cookie parameters", () => {

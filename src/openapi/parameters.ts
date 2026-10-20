@@ -190,8 +190,12 @@ const serializeSimple = (
       ([, entry]) => entry !== undefined,
     );
 
+    // Keys are encoded as well as values: they are the caller's too, and left
+    // as written, a key holding `/` added a path segment.
     if (style === "matrix" && explode) {
-      return entries.map(([key, entry]) => `;${key}=${encode(entry)}`).join("");
+      return entries
+        .map(([key, entry]) => `;${encodeURIComponent(key)}=${encode(entry)}`)
+        .join("");
     }
 
     if (explode) {
