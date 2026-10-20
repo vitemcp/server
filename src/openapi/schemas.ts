@@ -40,10 +40,11 @@ type ParameterBinding =
  * argument list gets it right far more often than one asked to nest a body
  * under `body` and parameters under `params`. Names can collide across the
  * four parameter locations and the body, so a colliding parameter is suffixed
- * with its location (`id__query`) while a body property always keeps the bare
- * name — the body is the part a model is most likely to name correctly
- * unprompted. A suffixed name that is already taken gets a number as well
- * (`id__query_2`), so no argument ever replaces another.
+ * with its location (`id__query`) while a body property keeps the bare name —
+ * the body is the part a model is most likely to name correctly unprompted. A
+ * suffixed name that is already taken gets a number as well (`id__query_2`),
+ * so no argument ever replaces another. `__proto__` is suffixed wherever it
+ * appears; see `collides`.
  */
 export const buildToolBinding = (
   route: HttpRoute,
@@ -64,8 +65,13 @@ export const buildToolBinding = (
     ]);
   }
 
+  // `__proto__` is suffixed as though it collided, and so is a body property of
+  // that name, below. No argument called `__proto__` reaches a tool: Zod, which
+  // the SDK parses every message with, drops the key, from the schema
+  // `tools/list` sends as well as from a call's arguments. Left bare, the tool
+  // offered no such argument, and one that required it refused every call.
   const collides = (name: string, occurrences: OpenApiParameter[]) =>
-    occurrences.length > 1 || body.properties.has(name);
+    name === "__proto__" || occurrences.length > 1 || body.properties.has(name);
 
   // Every name that stays bare is reserved before any suffix is handed out. A
   // document may itself name a parameter or body property `id__query`; a
@@ -79,20 +85,24 @@ export const buildToolBinding = (
     }
   }
 
+  /** The first of `base`, `base_2`, `base_3`, … not yet taken, now taken. */
+  const claimKey = (base: string): string => {
+    let key = base;
+
+    for (let suffix = 2; takenKeys.has(key); suffix++) {
+      key = `${base}_${suffix}`;
+    }
+
+    takenKeys.add(key);
+
+    return key;
+  };
+
   for (const [name, occurrences] of byName) {
     for (const parameter of occurrences) {
-      let key = name;
-
-      if (collides(name, occurrences)) {
-        const base = `${name}__${parameter.in}`;
-        key = base;
-
-        for (let suffix = 2; takenKeys.has(key); suffix++) {
-          key = `${base}_${suffix}`;
-        }
-
-        takenKeys.add(key);
-      }
+      const key = collides(name, occurrences)
+        ? claimKey(`${name}__${parameter.in}`)
+        : name;
 
       properties[key] = describeParameter(parameter, normalizer);
       parameters[key] = { kind: "parameter", parameter };
@@ -106,11 +116,13 @@ export const buildToolBinding = (
   }
 
   for (const [name, property] of body.properties) {
-    properties[name] = property.schema;
-    parameters[name] = { kind: "body", name };
+    const key = name === "__proto__" ? claimKey(`${name}__body`) : name;
+
+    properties[key] = property.schema;
+    parameters[key] = { kind: "body", name };
 
     if (property.required) {
-      required.push(name);
+      required.push(key);
     }
   }
 
@@ -332,7 +344,9 @@ const flattenObject = (
   }
 
   if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
-    const properties: Record<string, OpenApiSchema> = {};
+    // No prototype, so that `Object.assign` copies a property called
+    // `__proto__` instead of making it this object's prototype.
+    const properties: Record<string, OpenApiSchema> = Object.create(null);
     const required = new Set<string>();
 
     for (const branch of schema.allOf) {

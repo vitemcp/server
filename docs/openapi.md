@@ -192,6 +192,11 @@ If the suffixed name is one the document already uses — a parameter or body
 property literally called `petId__query` — a number is appended as well
 (`petId__query_2`), so no argument ever replaces another.
 
+A parameter or body property called `__proto__` is suffixed the same way —
+`__proto____path`, `__proto____body` — even when nothing collides with it: the
+MCP SDK drops a key by that name from every message it parses, so no argument
+could reach it otherwise. The request still uses the name `__proto__`.
+
 Path parameters are required whether or not the document says so, since the URL
 cannot be built without them. A placeholder the document declares no parameter
 for has no argument to fill it, so calling that tool returns an error rather

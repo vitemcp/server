@@ -429,6 +429,53 @@ describe("building the request", () => {
     expect(calls[0].body).toBe('{"id__path":31}');
   });
 
+  it("sends a parameter and a body property called __proto__ by that name", async () => {
+    const { calls, client } = await withRecordedCalls({
+      info: { title: "Items", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/items": {
+          post: {
+            operationId: "addItem",
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    properties: { ["__proto__"]: { type: "string" } },
+                    type: "object",
+                  },
+                },
+              },
+            },
+          },
+        },
+        "/items/{__proto__}": {
+          get: {
+            operationId: "getItem",
+            parameters: [
+              { in: "path", name: "__proto__", schema: { type: "string" } },
+            ],
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.test" }],
+    });
+
+    await client.callTool({
+      arguments: { __proto____path: "path-value" },
+      name: "getItem",
+    });
+    await client.callTool({
+      arguments: { __proto____body: "body-value" },
+      name: "addItem",
+    });
+
+    expect(calls[0].url.pathname).toBe("/items/path-value");
+    // Assigned on an ordinary object, `__proto__` set no property, and the
+    // request went out with no body at all.
+    expect(calls[1].body).toBe('{"__proto__":"body-value"}');
+  });
+
   it("sends a JSON body assembled from the flattened arguments", async () => {
     const { calls, client } = await withRecordedCalls({
       info: { title: "Pets", version: "1.0.0" },

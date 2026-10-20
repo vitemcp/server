@@ -263,6 +263,54 @@ describe("flattening parameters into a tool schema", () => {
     expect(binding.inputSchema.required).toEqual(["x__query"]);
   });
 
+  it("suffixes a parameter called __proto__, which no argument could reach", () => {
+    // The SDK's Zod parsing drops a `__proto__` key from the schema and from
+    // the arguments alike, so under the bare name the path could not be built.
+    const [{ binding }] = bind({
+      openapi: "3.0.3",
+      paths: {
+        "/items/{__proto__}": {
+          get: {
+            parameters: [
+              { in: "path", name: "__proto__", schema: { type: "string" } },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(destinations(binding)).toEqual({
+      __proto____path: "path:__proto__",
+    });
+    expect(binding.inputSchema.required).toEqual(["__proto____path"]);
+  });
+
+  it("suffixes a body property called __proto__, past a name already taken", () => {
+    const [{ binding }] = bind({
+      openapi: "3.0.3",
+      paths: {
+        "/items": {
+          post: {
+            requestBody: jsonBody({
+              properties: {
+                ["__proto__"]: { type: "string" },
+                __proto____body: { type: "integer" },
+              },
+              required: ["__proto__"],
+              type: "object",
+            }),
+          },
+        },
+      },
+    });
+
+    expect(binding.parameters).toEqual({
+      __proto____body: { kind: "body", name: "__proto____body" },
+      __proto____body_2: { kind: "body", name: "__proto__" },
+    });
+    expect(binding.inputSchema.required).toEqual(["__proto____body_2"]);
+  });
+
   it("carries a parameter's own description and deprecation into the schema", () => {
     const [{ binding }] = bind({
       openapi: "3.0.3",
@@ -341,6 +389,34 @@ describe("request bodies", () => {
       kind: "json",
     });
     expect(binding.inputSchema.required).toEqual(["name"]);
+  });
+
+  it("keeps a __proto__ property that an allOf branch contributes", () => {
+    // Merged onto an ordinary object by `Object.assign`, it became that
+    // object's prototype, and the tool never offered the argument.
+    const [{ binding }] = bind({
+      openapi: "3.0.3",
+      paths: {
+        "/items": {
+          post: {
+            requestBody: jsonBody({
+              allOf: [
+                {
+                  properties: { ["__proto__"]: { type: "string" } },
+                  type: "object",
+                },
+                { properties: { name: { type: "string" } }, type: "object" },
+              ],
+            }),
+          },
+        },
+      },
+    });
+
+    expect(destinations(binding)).toEqual({
+      __proto____body: "body",
+      name: "body",
+    });
   });
 
   it("exposes a non-object body as a single argument", () => {

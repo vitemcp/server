@@ -49,7 +49,10 @@ export const executeRequest = async <T extends ViteMCPAuth>(
   // `Content-Type` and one this function sets as `content-type` are recognised
   // as the same header instead of being sent twice.
   const headers = new Headers();
-  const bodyValues: Record<string, unknown> = {};
+  // No prototype, so a body property called `__proto__` is set like any other.
+  // On an ordinary object the assignment set no property, and the value never
+  // reached the body.
+  const bodyValues: Record<string, unknown> = Object.create(null);
 
   for (const [key, value] of Object.entries(args)) {
     const binder = binding.parameters[key];
