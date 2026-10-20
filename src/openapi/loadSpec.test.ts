@@ -65,6 +65,18 @@ describe("loadSpec", () => {
     expect(origin).toBe(url);
   });
 
+  it("fetches a document whose URL spells the scheme in capitals", async () => {
+    // Compared as written, `HTTP://` was read as a file path: ENOENT.
+    const url = (await serve(JSON.stringify(minimalDocument))).replace(
+      /^http/,
+      "HTTP",
+    );
+    const { document, origin } = await loadSpec(url);
+
+    expect(document.info?.title).toBe("Pets");
+    expect(origin).toBe(url);
+  });
+
   it("releases the response body when the fetch fails", async () => {
     let cancelled = false;
     const body = new ReadableStream({

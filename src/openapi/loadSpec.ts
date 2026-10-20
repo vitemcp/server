@@ -134,8 +134,9 @@ const hasExternalRef = (root: unknown): boolean => {
   return false;
 };
 
-const isHttpUrl = (value: string): boolean =>
-  value.startsWith("http://") || value.startsWith("https://");
+// Case-insensitive, as a scheme is: compared as written, `HTTPS://` was read as
+// a file path and failed to load with ENOENT.
+const isHttpUrl = (value: string): boolean => /^https?:\/\//i.test(value);
 
 const parseJson = (text: string): Record<string, unknown> | undefined => {
   try {
