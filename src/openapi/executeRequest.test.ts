@@ -331,6 +331,33 @@ describe("building the request", () => {
     expect(calls).toEqual([]);
   });
 
+  it("writes a matrix parameter's name into the path as it is spelled", async () => {
+    // Matrix style puts the name in the path unencoded, and substituted as a
+    // replacement string, `$$` arrived as `$`.
+    const { calls, client } = await withRecordedCalls({
+      ...petstore,
+      paths: {
+        "/items/{$$}": {
+          get: {
+            operationId: "getItem",
+            parameters: [
+              {
+                in: "path",
+                name: "$$",
+                schema: { type: "string" },
+                style: "matrix",
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    await client.callTool({ arguments: { $$: "x" }, name: "getItem" });
+
+    expect(calls[0].url.pathname).toBe("/v1/items/;$$=x");
+  });
+
   it("cannot be made to set a second cookie by an argument", async () => {
     const { calls, client } = await withRecordedCalls(petstore);
 
@@ -965,6 +992,28 @@ describe("resolveBaseUrl", () => {
         undefined,
       ),
     ).toBe("https://eu.example.test/v2");
+  });
+
+  it.each([
+    ["$&", "https://api.example.test/$&/v1"],
+    ["$$", "https://api.example.test/$$/v1"],
+    ["$`", "https://api.example.test/$%60/v1"],
+    ["$'", "https://api.example.test/$'/v1"],
+  ])("substitutes a server variable default of %s as written", (value, url) => {
+    // Read as a replacement pattern, `$$` arrived as `$`, `$&` put the
+    // placeholder back, and `` $` `` and `$'` spliced in the URL around it.
+    expect(
+      resolveBaseUrl(
+        [
+          {
+            url: "https://api.example.test/{base}/v1",
+            variables: { base: { default: value } },
+          },
+        ],
+        undefined,
+        undefined,
+      ),
+    ).toBe(url);
   });
 
   it("resolves a relative server URL against where the document came from", () => {

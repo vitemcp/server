@@ -158,8 +158,11 @@ export const resolveBaseUrl = (
 
   let url = server.url;
 
+  // Replaced by a function rather than a string, which `replaceAll` reads for
+  // patterns: a default of `$$` arrived as `$`, and `$&` put the placeholder
+  // back.
   for (const [name, variable] of Object.entries(server.variables ?? {})) {
-    url = url.replaceAll(`{${name}}`, variable.default);
+    url = url.replaceAll(`{${name}}`, () => variable.default);
   }
 
   try {
@@ -298,8 +301,10 @@ const buildPath = (route: HttpRoute, values: Map<string, string>): string => {
 
   let path = route.path;
 
+  // By a function, as in `resolveBaseUrl`: a matrix-style value carries the
+  // parameter's name unencoded, and a name holding `$$` arrived as `$`.
   for (const [name, value] of values) {
-    path = path.replaceAll(`{${name}}`, value);
+    path = path.replaceAll(`{${name}}`, () => value);
   }
 
   const written = new Set(route.path.split("/").filter(isDotSegment));
