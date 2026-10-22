@@ -98,6 +98,49 @@ export class UnexpectedStateError extends ViteMCPError {
  */
 export class UserError extends UnexpectedStateError {}
 
+/**
+ * What may come before an SVG's root element: a processing instruction — the
+ * XML declaration, or one such as `<?xml-stylesheet?>` — a comment, or a
+ * doctype, internal subset included, as Illustrator writes one.
+ */
+const XML_PROLOG_ITEM =
+  /^(?:<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE\s[^[>]*(?:\[[\s\S]*?\])?\s*>)/;
+
+/** Whether `data` is an SVG document: past any prolog, its root is `<svg>`. */
+const isSvg = (data: Buffer): boolean => {
+  // `trimStart` drops a byte order mark as well: U+FEFF is whitespace to it.
+  let text = data.toString("utf8").trimStart();
+  let item = XML_PROLOG_ITEM.exec(text);
+
+  while (item) {
+    text = text.slice(item[0].length).trimStart();
+    item = XML_PROLOG_ITEM.exec(text);
+  }
+
+  return /^<svg[\s/>]/.test(text);
+};
+
+/**
+ * The MIME type of a `kind` media block, from what `file-type` sniffed in
+ * `data`. It reads binary signatures only, so it finds nothing in an SVG, or
+ * `application/xml` in one that opens with an XML declaration.
+ */
+const mediaTypeOf = (
+  data: Buffer,
+  kind: "audio" | "image",
+  sniffed: string | undefined,
+): string => {
+  if (sniffed?.startsWith(`${kind}/`)) {
+    return sniffed;
+  }
+
+  if (kind === "image" && isSvg(data)) {
+    return "image/svg+xml";
+  }
+
+  return sniffed ?? (kind === "image" ? "image/png" : "audio/mpeg");
+};
+
 const readMedia = async (
   source: MediaSource,
   kind: "audio" | "image",
@@ -148,11 +191,11 @@ const readMedia = async (
   }
 
   const { fileTypeFromBuffer } = await import("file-type");
-  const mimeType = await fileTypeFromBuffer(rawData);
+  const sniffed = await fileTypeFromBuffer(rawData);
 
   return {
     data: rawData.toString("base64"),
-    mimeType: mimeType?.mime ?? (kind === "image" ? "image/png" : "audio/mpeg"),
+    mimeType: mediaTypeOf(rawData, kind, sniffed?.mime),
   };
 };
 
