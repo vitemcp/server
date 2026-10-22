@@ -121,14 +121,23 @@ const isSvg = (data: Buffer): boolean => {
 };
 
 /**
- * The MIME type of a `kind` media block, from what `file-type` sniffed in
- * `data`. It reads binary signatures only, so it finds nothing in an SVG, or
- * `application/xml` in one that opens with an XML declaration.
+ * The MIME type of a `kind` media block. What `file-type` sniffed in `data`
+ * wins when it is of that kind, but it reads binary signatures only:
+ *
+ * - an SVG is text, so it sniffs as nothing, or as `application/xml` after an
+ *   XML declaration;
+ * - WebM and MP4 sniff as video whatever they hold, though a browser's
+ *   MediaRecorder writes audio-only ones;
+ * - headerless audio, such as raw PCM, sniffs as nothing.
+ *
+ * Past those, `declared` — the `Content-Type` a URL answered with — is used
+ * when it is of the block's kind. A path or a buffer declares nothing.
  */
 const mediaTypeOf = (
   data: Buffer,
   kind: "audio" | "image",
   sniffed: string | undefined,
+  declared: null | string,
 ): string => {
   if (sniffed?.startsWith(`${kind}/`)) {
     return sniffed;
@@ -136,6 +145,23 @@ const mediaTypeOf = (
 
   if (kind === "image" && isSvg(data)) {
     return "image/svg+xml";
+  }
+
+  // Ahead of `declared`: the container is certain, and the caller has said
+  // that what it holds is audio.
+  if (
+    kind === "audio" &&
+    (sniffed === "video/mp4" || sniffed === "video/webm")
+  ) {
+    return sniffed.replace("video/", "audio/");
+  }
+
+  // Without its parameters, since `audio/webm; codecs=opus` is still WebM, and
+  // lowercased, since media types are case-insensitive.
+  const declaredType = declared?.split(";")[0].trim().toLowerCase();
+
+  if (declaredType?.startsWith(`${kind}/`)) {
+    return declaredType;
   }
 
   return sniffed ?? (kind === "image" ? "image/png" : "audio/mpeg");
@@ -146,6 +172,7 @@ const readMedia = async (
   kind: "audio" | "image",
 ): Promise<{ data: string; mimeType: string }> => {
   let rawData: Buffer;
+  let declared: null | string = null;
 
   try {
     if ("url" in source) {
@@ -159,6 +186,7 @@ const readMedia = async (
         throw new Error(`Server responded with status: ${response.status}`);
       }
 
+      declared = response.headers.get("content-type");
       rawData = Buffer.from(await response.arrayBuffer());
     } else if ("path" in source) {
       rawData = await readFile(source.path);
@@ -195,7 +223,7 @@ const readMedia = async (
 
   return {
     data: rawData.toString("base64"),
-    mimeType: mediaTypeOf(rawData, kind, sniffed?.mime),
+    mimeType: mediaTypeOf(rawData, kind, sniffed?.mime, declared),
   };
 };
 

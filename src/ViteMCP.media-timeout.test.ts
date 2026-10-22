@@ -92,10 +92,7 @@ describe("imageContent/audioContent fetch timeout", () => {
   });
 
   it("imageContent passes an AbortSignal to the fetch", async () => {
-    mediaFetchMock.mockResolvedValue({
-      arrayBuffer: async () => new Uint8Array(PNG_BUFFER).buffer,
-      ok: true,
-    });
+    mediaFetchMock.mockResolvedValue(new Response(new Uint8Array(PNG_BUFFER)));
 
     await imageContent({ url: "https://media.example.com/pixel.png" });
 
@@ -107,10 +104,7 @@ describe("imageContent/audioContent fetch timeout", () => {
   });
 
   it("imageContent uses the caller's timeoutMs for URL fetches", async () => {
-    mediaFetchMock.mockResolvedValue({
-      arrayBuffer: async () => new Uint8Array(PNG_BUFFER).buffer,
-      ok: true,
-    });
+    mediaFetchMock.mockResolvedValue(new Response(new Uint8Array(PNG_BUFFER)));
 
     await imageContent({
       timeoutMs: 125,
@@ -121,10 +115,7 @@ describe("imageContent/audioContent fetch timeout", () => {
   });
 
   it("audioContent passes an AbortSignal to the fetch", async () => {
-    mediaFetchMock.mockResolvedValue({
-      arrayBuffer: async () => new Uint8Array(WAV_BUFFER).buffer,
-      ok: true,
-    });
+    mediaFetchMock.mockResolvedValue(new Response(new Uint8Array(WAV_BUFFER)));
 
     await audioContent({ url: "https://media.example.com/beep.wav" });
 
@@ -136,10 +127,7 @@ describe("imageContent/audioContent fetch timeout", () => {
   });
 
   it("audioContent uses the caller's timeoutMs for URL fetches", async () => {
-    mediaFetchMock.mockResolvedValue({
-      arrayBuffer: async () => new Uint8Array(WAV_BUFFER).buffer,
-      ok: true,
-    });
+    mediaFetchMock.mockResolvedValue(new Response(new Uint8Array(WAV_BUFFER)));
 
     await audioContent({
       timeoutMs: 250,
