@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { runWithTestServer, withoutEnvelope } from "./testHarness.js";
 import { ViteMCP } from "./ViteMCP.js";
 
 // Suppress AbortError from MCP SDK during test cleanup
@@ -66,27 +67,6 @@ describe("ViteMCP Batch Methods", () => {
       ];
 
       expect(() => server.addPrompts(prompts)).not.toThrow();
-    });
-
-    it("should handle duplicate prompt names by replacing existing prompts", async () => {
-      const server = createTestServer();
-
-      const prompt1 = {
-        description: "First version",
-        load: async () => "First response",
-        name: "duplicate",
-      };
-
-      const prompt2 = {
-        description: "Second version",
-        load: async () => "Second response",
-        name: "duplicate",
-      };
-
-      expect(() => {
-        server.addPrompt(prompt1);
-        server.addPrompts([prompt2]);
-      }).not.toThrow();
     });
   });
 
@@ -320,6 +300,115 @@ describe("ViteMCP Batch Methods", () => {
       expect(() =>
         server.removeResourceTemplates(["template1", "template3"]),
       ).not.toThrow();
+    });
+  });
+
+  // The SDK refuses to register a name or URI twice, and the server is built
+  // for every request, so an entry added again — in a batch or on its own —
+  // failed every request with a 500, not only requests for that entry.
+  describe("adding an entry again under the same key", () => {
+    it("replaces a tool of the same name", async () => {
+      const server = createTestServer();
+      const tool = (version: string) => ({
+        description: version,
+        execute: async () => version,
+        name: "greet",
+      });
+
+      server.addTools([tool("v1"), tool("v2")]);
+      server.addTool(tool("v3"));
+
+      await runWithTestServer({
+        run: async ({ client }) => {
+          const { tools } = await client.listTools();
+          expect(tools.map((listed) => listed.description)).toEqual(["v3"]);
+
+          expect(
+            withoutEnvelope(await client.callTool({ name: "greet" })),
+          ).toEqual({ content: [{ text: "v3", type: "text" }] });
+        },
+        server,
+      });
+    });
+
+    it("replaces a prompt of the same name", async () => {
+      const server = createTestServer();
+      const prompt = (version: string) => ({
+        description: version,
+        load: async () => version,
+        name: "brief",
+      });
+
+      server.addPrompts([prompt("v1"), prompt("v2")]);
+      server.addPrompt(prompt("v3"));
+
+      await runWithTestServer({
+        run: async ({ client }) => {
+          const { prompts } = await client.listPrompts();
+          expect(prompts.map((listed) => listed.description)).toEqual(["v3"]);
+
+          const { messages } = await client.getPrompt({ name: "brief" });
+          expect(messages).toEqual([
+            { content: { text: "v3", type: "text" }, role: "user" },
+          ]);
+        },
+        server,
+      });
+    });
+
+    // By URI, since that is what the SDK registers a resource by: a resource
+    // that only shares a name is a different resource.
+    it("replaces a resource of the same URI", async () => {
+      const server = createTestServer();
+      const resource = (version: string) => ({
+        load: async () => ({ text: version }),
+        name: version,
+        uri: "test://greeting",
+      });
+
+      server.addResources([resource("v1"), resource("v2")]);
+      server.addResource(resource("v3"));
+
+      await runWithTestServer({
+        run: async ({ client }) => {
+          const { resources } = await client.listResources();
+          expect(resources.map((listed) => listed.name)).toEqual(["v3"]);
+
+          const { contents } = await client.readResource({
+            uri: "test://greeting",
+          });
+          expect(contents).toEqual([{ text: "v3", uri: "test://greeting" }]);
+        },
+        server,
+      });
+    });
+
+    it("replaces a resource template of the same name", async () => {
+      const server = createTestServer();
+      const template = (version: string) => ({
+        arguments: [{ name: "id", required: true }],
+        load: async () => ({ text: version }),
+        name: "greeting",
+        uriTemplate: `test://${version}/{id}`,
+      });
+
+      server.addResourceTemplates([template("v1"), template("v2")]);
+      server.addResourceTemplate(template("v3"));
+
+      await runWithTestServer({
+        run: async ({ client }) => {
+          const { resourceTemplates } = await client.listResourceTemplates();
+          expect(resourceTemplates.map((listed) => listed.uriTemplate)).toEqual(
+            ["test://v3/{id}"],
+          );
+
+          const { contents } = await client.readResource({
+            uri: "test://v3/1",
+          });
+          expect(contents).toEqual([{ text: "v3", uri: "test://v3/1" }]);
+        },
+        server,
+      });
     });
   });
 });

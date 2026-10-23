@@ -206,19 +206,26 @@ export class EdgeViteMCP {
     this.#mcpPath = options.mcpPath ?? "/mcp";
   }
 
+  // As on `ViteMCP`, an entry added under a key already in use replaces the
+  // one there, since the SDK refuses to register a key twice and a duplicate
+  // failed every request. A resource's key is its URI, a prompt's or tool's
+  // its name.
   addPrompt(prompt: EdgePrompt): this {
+    this.#prompts = this.#prompts.filter((p) => p.name !== prompt.name);
     this.#prompts.push(prompt);
     this.#handler = null;
     return this;
   }
 
   addResource(resource: EdgeResource): this {
+    this.#resources = this.#resources.filter((r) => r.uri !== resource.uri);
     this.#resources.push(resource);
     this.#handler = null;
     return this;
   }
 
   addTool<TParams>(tool: EdgeTool<TParams>): this {
+    this.#tools = this.#tools.filter((t) => t.name !== tool.name);
     this.#tools.push(tool as EdgeTool);
     this.#handler = null;
     return this;

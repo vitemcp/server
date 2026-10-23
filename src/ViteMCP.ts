@@ -731,37 +731,51 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     this.#honoApp = this.#freshApp();
   }
 
+  // An entry added under a key already in use replaces the one there: the SDK
+  // refuses to register a key twice, and as the server is rebuilt for every
+  // request, a duplicate failed every request, not only its own. Keys are the
+  // SDK's — a resource's URI, and every other entry's name.
   public addPrompt(prompt: Prompt<T>) {
+    this.#prompts = this.#prompts.filter((p) => p.name !== prompt.name);
     this.#prompts.push(prompt);
     this.#notifyListChanged("prompts");
   }
 
   public addPrompts(prompts: Prompt<T>[]) {
     for (const prompt of prompts) {
+      this.#prompts = this.#prompts.filter((p) => p.name !== prompt.name);
       this.#prompts.push(prompt);
     }
     this.#notifyListChanged("prompts");
   }
 
   public addResource(resource: Resource<T>) {
+    this.#resources = this.#resources.filter((r) => r.uri !== resource.uri);
     this.#resources.push(resource);
     this.#notifyListChanged("resources");
   }
 
   public addResources(resources: Resource<T>[]) {
     for (const resource of resources) {
+      this.#resources = this.#resources.filter((r) => r.uri !== resource.uri);
       this.#resources.push(resource);
     }
     this.#notifyListChanged("resources");
   }
 
   public addResourceTemplate(template: ResourceTemplate<T>) {
+    this.#resourceTemplates = this.#resourceTemplates.filter(
+      (r) => r.name !== template.name,
+    );
     this.#resourceTemplates.push(template);
     this.#notifyListChanged("resources");
   }
 
   public addResourceTemplates(templates: ResourceTemplate<T>[]) {
     for (const template of templates) {
+      this.#resourceTemplates = this.#resourceTemplates.filter(
+        (r) => r.name !== template.name,
+      );
       this.#resourceTemplates.push(template);
     }
     this.#notifyListChanged("resources");
@@ -773,6 +787,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   >(tool: Tool<T, Params, OutputParams>) {
     assertStandardSchema(tool.parameters, tool.name, "parameters");
     assertStandardSchema(tool.outputSchema, tool.name, "outputSchema");
+    this.#tools = this.#tools.filter((t) => t.name !== tool.name);
     this.#tools.push(tool as unknown as Tool<T>);
     this.#notifyListChanged("tools");
   }
@@ -784,6 +799,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     for (const tool of tools) {
       assertStandardSchema(tool.parameters, tool.name, "parameters");
       assertStandardSchema(tool.outputSchema, tool.name, "outputSchema");
+      this.#tools = this.#tools.filter((t) => t.name !== tool.name);
       this.#tools.push(tool as unknown as Tool<T>);
     }
     this.#notifyListChanged("tools");

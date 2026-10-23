@@ -195,6 +195,77 @@ describe("EdgeViteMCP", () => {
     expect(messages[0].content.text).toBe("Tell me about otters");
   });
 
+  // The SDK refuses to register a name or URI twice, and the server is built
+  // for every request, so adding one again failed every request with a 500.
+  it("replaces a tool added again under the same name", async () => {
+    const server = makeServer();
+
+    for (const version of ["v1", "v2"]) {
+      server.addTool({
+        description: version,
+        execute: async () => version,
+        name: "greet",
+      });
+    }
+
+    const listed = await call(server, "tools/list");
+    const tools = (listed.result as { tools: { description: string }[] }).tools;
+    expect(tools.map((tool) => tool.description)).toEqual(["v2"]);
+
+    const called = await call(server, "tools/call", {
+      arguments: {},
+      name: "greet",
+    });
+    const content = (called.result as { content: { text: string }[] }).content;
+    expect(content.map((block) => block.text)).toEqual(["v2"]);
+  });
+
+  it("replaces a prompt added again under the same name", async () => {
+    const server = makeServer();
+
+    for (const version of ["v1", "v2"]) {
+      server.addPrompt({
+        description: version,
+        load: async () => version,
+        name: "brief",
+      });
+    }
+
+    const listed = await call(server, "prompts/list");
+    const prompts = (listed.result as { prompts: { description: string }[] })
+      .prompts;
+    expect(prompts.map((prompt) => prompt.description)).toEqual(["v2"]);
+
+    const got = await call(server, "prompts/get", { name: "brief" });
+    const messages = (
+      got.result as { messages: { content: { text: string } }[] }
+    ).messages;
+    expect(messages.map((message) => message.content.text)).toEqual(["v2"]);
+  });
+
+  it("replaces a resource added again under the same URI", async () => {
+    const server = makeServer();
+
+    for (const version of ["v1", "v2"]) {
+      server.addResource({
+        load: async () => version,
+        name: version,
+        uri: "test://greeting",
+      });
+    }
+
+    const listed = await call(server, "resources/list");
+    const resources = (listed.result as { resources: { name: string }[] })
+      .resources;
+    expect(resources.map((resource) => resource.name)).toEqual(["v2"]);
+
+    const read = await call(server, "resources/read", {
+      uri: "test://greeting",
+    });
+    const contents = (read.result as { contents: { text: string }[] }).contents;
+    expect(contents.map((body) => body.text)).toEqual(["v2"]);
+  });
+
   // The SDK calls a handler that declares no schema with its request context
   // alone, which used to reach `execute` and `load` as their arguments.
   it("hands a tool without parameters no arguments", async () => {
