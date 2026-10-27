@@ -176,6 +176,116 @@ test("takes a schema for additionalProperties, as a dictionary is written", asyn
   await expect(toJsonSchema(schema)).resolves.toEqual(dictionary);
 });
 
+// A 2020-12 tuple: two items, a string then a number, and no more.
+const pairSchema = {
+  properties: {
+    pair: {
+      items: false,
+      prefixItems: [{ type: "string" }, { type: "number" }],
+      type: "array",
+    },
+  },
+  required: ["pair"],
+  type: "object",
+};
+
+test.each([
+  "https://json-schema.org/draft/2020-12/schema",
+  "https://json-schema.org/draft/2020-12/schema#",
+  "http://json-schema.org/draft/2020-12/schema",
+  "http://json-schema.org/draft/2020-12/schema#",
+])("validates a schema declaring 2020-12 (%s)", async ($schema) => {
+  const schema = jsonSchemaAdapter({
+    ...pairSchema,
+    $schema,
+    unevaluatedProperties: false,
+  });
+
+  expect(
+    (await schema["~standard"].validate({ pair: ["answer", 42] })).issues,
+  ).toBeUndefined();
+
+  for (const input of [
+    { pair: [42, "answer"] },
+    { pair: ["answer", 42, true] },
+    { extra: true, pair: ["answer", 42] },
+  ]) {
+    expect(
+      (await schema["~standard"].validate(input)).issues?.length,
+    ).toBeGreaterThan(0);
+  }
+
+  // Advertised as written: `$schema` is dropped only from the compiled copy.
+  await expect(toJsonSchema(schema)).resolves.toMatchObject({ $schema });
+});
+
+test("validates a schema declaring no dialect as 2020-12, as clients read it", async () => {
+  const schema = jsonSchemaAdapter({ ...pairSchema });
+
+  // Draft-07 knows no `prefixItems`, and read `items: false` as "no items".
+  expect(
+    (await schema["~standard"].validate({ pair: ["answer", 42] })).issues,
+  ).toBeUndefined();
+  expect(
+    (await schema["~standard"].validate({ pair: ["answer", 42, true] })).issues,
+  ).toEqual([{ message: "must NOT have more than 2 items", path: ["pair"] }]);
+});
+
+test.each([
+  "http://json-schema.org/draft-07/schema#",
+  "https://json-schema.org/draft-07/schema",
+  "http://json-schema.org/draft-06/schema#",
+])("validates a schema declaring %s as draft-07", async ($schema) => {
+  const schema = jsonSchemaAdapter({
+    $schema,
+    properties: {
+      pair: {
+        additionalItems: false,
+        items: [{ type: "string" }, { type: "number" }],
+        type: "array",
+      },
+    },
+    required: ["pair"],
+    type: "object",
+  });
+
+  expect(
+    (await schema["~standard"].validate({ pair: ["answer", 42] })).issues,
+  ).toBeUndefined();
+  expect(
+    (await schema["~standard"].validate({ pair: ["answer", 42, true] })).issues
+      ?.length,
+  ).toBeGreaterThan(0);
+});
+
+test("validates a schema declaring 2019-09", async () => {
+  const schema = jsonSchemaAdapter({
+    $schema: "https://json-schema.org/draft/2019-09/schema",
+    allOf: [{ properties: { name: { type: "string" } } }],
+    type: "object",
+    unevaluatedProperties: false,
+  });
+
+  expect(
+    (await schema["~standard"].validate({ name: "Alice" })).issues,
+  ).toBeUndefined();
+  expect(
+    (await schema["~standard"].validate({ age: 30, name: "Alice" })).issues
+      ?.length,
+  ).toBeGreaterThan(0);
+});
+
+test("names the dialects it supports when a schema declares another", async () => {
+  const schema = jsonSchemaAdapter({
+    ...personSchema,
+    $schema: "http://json-schema.org/draft-04/schema#",
+  });
+
+  await expect(schema["~standard"].validate({ name: "Alice" })).rejects.toThrow(
+    "validates 2020-12, 2019-09, draft-07 and draft-06",
+  );
+});
+
 test("counts only the data's own keys as present", async () => {
   const schema = jsonSchemaAdapter({
     properties: {
@@ -348,26 +458,37 @@ test("rejects a tool call whose arguments do not match", async () => {
   });
 });
 
-test("explains what to install when ajv is missing", async () => {
-  vi.doMock("ajv", () => {
-    throw new Error("Cannot find module 'ajv'");
-  });
-  vi.resetModules();
+// Each dialect's engine is a module of its own, and each has to be reported.
+test.each([
+  { $schema: undefined, module: "ajv/dist/2020.js" },
+  {
+    $schema: "https://json-schema.org/draft/2019-09/schema",
+    module: "ajv/dist/2019.js",
+  },
+  { $schema: "http://json-schema.org/draft-07/schema#", module: "ajv" },
+])(
+  "explains what to install when $module is missing",
+  async ({ $schema, module }) => {
+    vi.doMock(module, () => {
+      throw new Error(`Cannot find module '${module}'`);
+    });
+    vi.resetModules();
 
-  const { jsonSchemaAdapter: freshAdapter } =
-    await import("./jsonSchemaAdapter.js");
-  const schema = freshAdapter({ ...personSchema });
+    const { jsonSchemaAdapter: freshAdapter } =
+      await import("./jsonSchemaAdapter.js");
+    const schema = freshAdapter({ ...personSchema, $schema });
 
-  await expect(schema["~standard"].validate({ name: "Alice" })).rejects.toThrow(
-    /npm install ajv/,
-  );
+    await expect(
+      schema["~standard"].validate({ name: "Alice" }),
+    ).rejects.toThrow(/npm install ajv/);
 
-  // The failure is not cached, so installing ajv and retrying works without
-  // rebuilding the schema.
-  await expect(schema["~standard"].validate({ name: "Alice" })).rejects.toThrow(
-    /npm install ajv/,
-  );
+    // The failure is not cached, so installing ajv and retrying works without
+    // rebuilding the schema.
+    await expect(
+      schema["~standard"].validate({ name: "Alice" }),
+    ).rejects.toThrow(/npm install ajv/);
 
-  vi.doUnmock("ajv");
-  vi.resetModules();
-});
+    vi.doUnmock(module);
+    vi.resetModules();
+  },
+);

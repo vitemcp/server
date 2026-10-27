@@ -104,13 +104,56 @@ export function jsonSchemaAdapter(
   };
 }
 
+/**
+ * The JSON Schema dialect a schema is validated in, read from its `$schema` as
+ * the MCP SDK reads it: 2020-12 when there is none (SEP-1613), and draft-07 for
+ * draft-06, which draft-07 only added to.
+ *
+ * Clients validate structured content in that dialect, so validating in
+ * another has the two disagree. AJV's default engine is draft-07's, which read
+ * 2020-12's `items: false` beside `prefixItems` as "no items at all", and
+ * failed to compile a schema declaring 2020-12.
+ */
+const dialectOf = ($schema: unknown): "2019-09" | "2020-12" | "draft-07" => {
+  if (typeof $schema !== "string") {
+    return "2020-12";
+  }
+
+  switch ($schema.replace(/^https?:\/\//, "").replace(/#$/, "")) {
+    case "json-schema.org/draft-06/schema":
+    case "json-schema.org/draft-07/schema":
+      return "draft-07";
+    case "json-schema.org/draft/2019-09/schema":
+      return "2019-09";
+    case "json-schema.org/draft/2020-12/schema":
+      return "2020-12";
+  }
+
+  throw new Error(
+    `JSON Schema declares an unsupported dialect ("$schema": "${$schema}"). ` +
+      "jsonSchemaAdapter validates 2020-12, 2019-09, draft-07 and draft-06.",
+  );
+};
+
 async function compileSchema(
   schema: JsonSchemaObject,
 ): Promise<AjvValidateFunction> {
+  // `$schema` picks the engine, and the engine checks the schema against its
+  // own dialect's meta-schema. Left in, `$schema` would have to use the scheme
+  // AJV registered that meta-schema under — `http:` for draft-07, `https:` for
+  // the rest — or compiling fails as "no schema with key or ref". What is
+  // advertised is `schema`, `$schema` and all.
+  const { $schema, ...body } = schema;
+  const dialect = dialectOf($schema);
   let ajvModule;
 
   try {
-    ajvModule = await import("ajv");
+    ajvModule =
+      dialect === "2020-12"
+        ? await import("ajv/dist/2020.js")
+        : dialect === "2019-09"
+          ? await import("ajv/dist/2019.js")
+          : await import("ajv");
   } catch {
     throw new Error(
       'The "ajv" package is required to validate JSON Schema tool parameters. ' +
@@ -142,7 +185,7 @@ async function compileSchema(
     // ajv-formats is optional; `format` keywords are simply not enforced.
   }
 
-  return ajv.compile(schema);
+  return ajv.compile(body);
 }
 
 function toIssue(error: AjvErrorObject): StandardSchemaV1.Issue {

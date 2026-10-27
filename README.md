@@ -268,6 +268,10 @@ object, except where a record or rest schema (`v.record()`,
 left as they are. A tool whose schema cannot be converted at all is left out of
 the server and reported through the logger.
 
+A plain JSON Schema is validated in the dialect its `$schema` declares —
+2020-12, 2019-09, draft-07 or draft-06 — and as 2020-12 when it declares none,
+which is how MCP clients read it.
+
 Unlike the schema libraries above, a plain JSON Schema carries no TypeScript
 types, so `execute` receives `unknown` arguments. Cast or narrow them yourself.
 
