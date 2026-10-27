@@ -142,6 +142,39 @@ describe("ViteMCP Batch Methods", () => {
 
       expect(() => server.addTools(tools)).not.toThrow();
     });
+
+    it.each(["parameters", "outputSchema"] as const)(
+      "adds none of a batch holding a tool whose %s is not a Standard Schema",
+      async (field) => {
+        const server = createTestServer();
+
+        server.addTool({ execute: async () => "original", name: "replace" });
+
+        expect(() =>
+          server.addTools([
+            { execute: async () => "added", name: "added" },
+            { execute: async () => "replacement", name: "replace" },
+            {
+              execute: async () => "invalid",
+              [field]: {} as never,
+              name: "invalid",
+            },
+          ]),
+        ).toThrow(`Tool 'invalid' ${field} must implement Standard Schema`);
+
+        await runWithTestServer({
+          run: async ({ client }) => {
+            const { tools } = await client.listTools();
+            expect(tools.map((listed) => listed.name)).toEqual(["replace"]);
+
+            expect(
+              withoutEnvelope(await client.callTool({ name: "replace" })),
+            ).toEqual({ content: [{ text: "original", type: "text" }] });
+          },
+          server,
+        });
+      },
+    );
   });
 
   describe("removeTools", () => {

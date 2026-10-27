@@ -796,9 +796,14 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     Params extends ToolParameters,
     OutputParams extends ToolParameters = ToolParameters,
   >(tools: Tool<T, Params, OutputParams>[]) {
+    // All checked before any is added: a batch that throws leaves the tools as
+    // they were, rather than serving those ahead of the one it threw over.
     for (const tool of tools) {
       assertStandardSchema(tool.parameters, tool.name, "parameters");
       assertStandardSchema(tool.outputSchema, tool.name, "outputSchema");
+    }
+
+    for (const tool of tools) {
       this.#tools = this.#tools.filter((t) => t.name !== tool.name);
       this.#tools.push(tool as unknown as Tool<T>);
     }
