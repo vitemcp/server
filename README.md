@@ -1622,6 +1622,10 @@ server.addTool({
 });
 ```
 
+A second argument, `new UserError(message, extras)`, is sent as the error's
+`structuredContent` — for a tool with an `outputSchema`, only when it matches
+the schema, since clients may check it against the schema even on an error.
+
 ### Progress
 
 Tools can report progress by calling `reportProgress` in the context object:

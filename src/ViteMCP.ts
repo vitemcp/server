@@ -1169,10 +1169,20 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
           return normalizeToolResult(result, tool.outputSchema !== undefined);
         } catch (error) {
           if (error instanceof UserError) {
+            // The SDK checks a success's structured content against the
+            // output schema, not an error's, but a client may check both — the
+            // v1 SDK's does. Extras that did not match had that client throw
+            // the message away, as a -32602, so they are sent only if they do.
+            const structuredContent =
+              error.extras &&
+              (await matchesOutputSchema(schemas.outputSchema, error.extras))
+                ? error.extras
+                : undefined;
+
             return {
               content: [{ text: error.message, type: "text" }],
               isError: true,
-              ...(error.extras ? { structuredContent: error.extras } : {}),
+              ...(structuredContent ? { structuredContent } : {}),
             };
           }
           throw error;
@@ -2145,6 +2155,29 @@ const assertStandardSchema = (
       `Tool '${toolName}' ${field} must implement Standard Schema. If you are using Zod, upgrade to version 3.24 or later.`,
       { toolName },
     );
+  }
+};
+
+/**
+ * Whether `value` passes a tool's output schema, as the SDK registered it. No
+ * schema passes anything, and one that throws passes nothing.
+ */
+const matchesOutputSchema = async (
+  schema: unknown,
+  value: unknown,
+): Promise<boolean> => {
+  if (!schema) {
+    return true;
+  }
+
+  try {
+    const result = await (schema as StandardSchemaV1)["~standard"].validate(
+      value,
+    );
+
+    return !result.issues;
+  } catch {
+    return false;
   }
 };
 

@@ -460,6 +460,56 @@ test("handles UserError errors with extras", async () => {
   });
 });
 
+// Structured content has to match the output schema, error or not: a client
+// that checks it on an error, as the v1 SDK's does, threw the message away
+// over extras that did not.
+test.each([
+  {
+    extras: { code: "E1" },
+    name: "extras that do not match",
+    structuredContent: undefined,
+  },
+  {
+    extras: { ok: false },
+    name: "extras that match",
+    structuredContent: { ok: false },
+  },
+  { extras: undefined, name: "no extras", structuredContent: undefined },
+])(
+  "sends UserError extras only if they match the output schema ($name)",
+  async ({ extras, structuredContent }) => {
+    await runWithTestServer({
+      run: async ({ client }) => {
+        await client.listTools();
+
+        expect(
+          withoutEnvelope(
+            await client.callTool({ arguments: {}, name: "fail" }),
+          ),
+        ).toEqual({
+          content: [{ text: "Something went wrong", type: "text" }],
+          isError: true,
+          ...(structuredContent ? { structuredContent } : {}),
+        });
+      },
+      server: async () => {
+        const server = new ViteMCP({ name: "Test", version: "1.0.0" });
+
+        server.addTool({
+          execute: async () => {
+            throw new UserError("Something went wrong", extras);
+          },
+          name: "fail",
+          outputSchema: z.object({ ok: z.boolean() }),
+          parameters: z.object({}),
+        });
+
+        return server;
+      },
+    });
+  },
+);
+
 test("calling an unknown tool throws ProtocolError with InvalidParams code", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
