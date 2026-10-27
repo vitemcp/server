@@ -1,3 +1,4 @@
+import { createConnection } from "node:net";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -100,6 +101,42 @@ describe("regressions", () => {
 
     expect(server.serverState).toBe(ServerState.Running);
     await server.stop();
+  });
+
+  // `stop()` closes the listener it holds, and a second start replaced it, so
+  // the first went on listening after `stop()` returned.
+  it("refuses to start HTTP again while it is running", async () => {
+    const isListening = (port: number) =>
+      new Promise<boolean>((resolve) => {
+        const socket = createConnection({ host: "127.0.0.1", port });
+        socket.once("connect", () => {
+          socket.destroy();
+          resolve(true);
+        });
+        socket.once("error", () => resolve(false));
+      });
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
+
+    await server.start({
+      httpStream: { port: 0 },
+      transportType: "httpStream",
+    });
+    const port = server.port!;
+
+    await expect(
+      server.start({
+        httpStream: { port: 0 },
+        transportType: "httpStream",
+      }),
+    ).rejects.toThrow("ViteMCP is already running on HTTP");
+
+    expect(server.port).toBe(port);
+    expect(server.serverState).toBe(ServerState.Running);
+    expect(await isListening(port)).toBe(true);
+
+    await server.stop();
+
+    expect(await isListening(port)).toBe(false);
   });
 
   it("enforces Tool.timeoutMs", async () => {

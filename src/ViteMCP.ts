@@ -973,6 +973,19 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         }
       | { transportType: "stdio" },
   ): Promise<void> {
+    // Starting a transport again replaced its handle, and `stop()` closes only
+    // the handle it holds: the first went on running after `stop()` returned —
+    // an HTTP listener holding its port, and the process, open.
+    if (
+      options.transportType === "stdio" ? this.#stdioHandle : this.#httpServer
+    ) {
+      throw new UnexpectedStateError(
+        `ViteMCP is already running on ${
+          options.transportType === "stdio" ? "stdio" : "HTTP"
+        }; call stop() before starting it again`,
+      );
+    }
+
     this.#serverState = ServerState.Starting;
 
     try {

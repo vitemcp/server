@@ -27,6 +27,22 @@ describe("stdio transport lifecycle", () => {
     expect(server.serverState).toBe(ServerState.Stopped);
   });
 
+  it("refuses to start again while it is running", async () => {
+    const server = new ViteMCP({ name: "Test", version: "1.0.0" });
+
+    await server.start({ transportType: "stdio" });
+
+    // A second reader on stdin would have answered every request twice, and
+    // `stop()` would have closed only one of them.
+    await expect(server.start({ transportType: "stdio" })).rejects.toThrow(
+      "ViteMCP is already running on stdio",
+    );
+    expect(server.serverState).toBe(ServerState.Running);
+
+    await server.stop();
+    expect(server.serverState).toBe(ServerState.Stopped);
+  });
+
   it("stop() is safe to call without a prior start", async () => {
     const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 
