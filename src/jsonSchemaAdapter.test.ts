@@ -3,7 +3,10 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { expect, test, vi } from "vitest";
 import { toJsonSchema } from "xsschema";
 
-import { jsonSchemaAdapter } from "./jsonSchemaAdapter.js";
+import {
+  jsonSchemaAdapter,
+  type JsonSchemaObject,
+} from "./jsonSchemaAdapter.js";
 import { ViteMCP } from "./ViteMCP.js";
 
 const personSchema = {
@@ -153,6 +156,24 @@ test("validates nested objects", async () => {
     address: { zip: "12345" },
   });
   expect(invalid.issues?.length).toBeGreaterThan(0);
+});
+
+test("takes a schema for additionalProperties, as a dictionary is written", async () => {
+  // Typed, rather than inferred, so the type accepts a schema here: it took
+  // only a boolean, and a dictionary could not be written without a cast.
+  const dictionary: JsonSchemaObject = {
+    additionalProperties: { type: "string" },
+    type: "object",
+  };
+  const schema = jsonSchemaAdapter(dictionary);
+
+  expect(
+    (await schema["~standard"].validate({ team: "infra" })).issues,
+  ).toBeUndefined();
+  expect((await schema["~standard"].validate({ team: 42 })).issues).toEqual([
+    { message: "must be string", path: ["team"] },
+  ]);
+  await expect(toJsonSchema(schema)).resolves.toEqual(dictionary);
 });
 
 test("counts only the data's own keys as present", async () => {
