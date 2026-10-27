@@ -101,13 +101,20 @@ export const valibotToJsonSchema: JsonSchemaConverter = async (schema, io) => {
  * object's rest schema, arrives as `additionalProperties`; replacing it with
  * `false` would tell clients the tool takes none of those keys, so a
  * `v.record()` argument could only ever be sent as `{}`.
+ *
+ * Nor is an object closed whose keys its `allOf`, `anyOf` or `oneOf` branches
+ * declare — a `v.intersect()`, `v.union()` or `v.variant()`.
+ * `additionalProperties` sees only the `properties` beside it, so closing one
+ * refused every key the branches declare, and every argument with them.
  */
 const strictInputSchema = (schema: JsonSchema): JsonSchema => ({
   ...schema,
-  additionalProperties:
-    typeof schema.additionalProperties === "object"
-      ? schema.additionalProperties
-      : false,
+  ...(!(schema.allOf ?? schema.anyOf ?? schema.oneOf) && {
+    additionalProperties:
+      typeof schema.additionalProperties === "object"
+        ? schema.additionalProperties
+        : false,
+  }),
   ...(schema.properties && {
     properties: Object.fromEntries(
       Object.entries(schema.properties).map(([key, value]) => [

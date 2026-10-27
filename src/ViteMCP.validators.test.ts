@@ -1,3 +1,4 @@
+import { Ajv } from "ajv";
 import { type } from "arktype";
 import * as v from "valibot";
 import { describe, expect, it, vi } from "vitest";
@@ -435,6 +436,64 @@ describe("Valibot schemas converted to JSON Schema", () => {
       server,
     });
   });
+
+  // `additionalProperties` sees only the `properties` beside it, so closing an
+  // object whose keys its branches declare refused every argument.
+  const kindA = v.object({ kind: v.literal("a"), n: v.number() });
+  const kindB = v.object({ kind: v.literal("b"), s: v.string() });
+
+  it.each([
+    {
+      args: { kind: "b", s: "ok" },
+      name: "union",
+      parameters: v.union([kindA, kindB]),
+    },
+    {
+      args: { kind: "b", s: "ok" },
+      name: "variant",
+      parameters: v.variant("kind", [kindA, kindB]),
+    },
+    {
+      args: { x: "one", y: 2 },
+      name: "intersect",
+      parameters: v.intersect([
+        v.object({ x: v.string() }),
+        v.object({ y: v.number() }),
+      ]),
+    },
+  ])(
+    "leaves open an input whose keys its branches declare ($name)",
+    async ({ args, parameters }) => {
+      const server = new ViteMCP({ name: "Test", version: "1.0.0" });
+
+      server.addTool({
+        execute: async (input) => JSON.stringify(input),
+        name: "branches",
+        parameters,
+      });
+
+      await runWithTestServer({
+        run: async ({ client }) => {
+          const [tool] = (await client.listTools()).tools;
+
+          expect(tool.inputSchema.additionalProperties).toBeUndefined();
+          // What clients are told the tool takes includes what it does take.
+          expect(
+            new Ajv({ strict: false }).validate(tool.inputSchema, args),
+          ).toBe(true);
+
+          expect(
+            withoutEnvelope(
+              await client.callTool({ arguments: args, name: "branches" }),
+            ),
+          ).toEqual({
+            content: [{ text: JSON.stringify(args), type: "text" }],
+          });
+        },
+        server,
+      });
+    },
+  );
 
   it("leaves output schemas as converted, so a record result is not a tool error", async () => {
     const server = new ViteMCP({ name: "Test", version: "1.0.0" });

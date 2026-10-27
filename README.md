@@ -264,8 +264,9 @@ are still validated by the library itself, so a `v.transform()` reaches
 `execute` and a `v.check()` is enforced even though JSON Schema can express
 neither. Converted input schemas get `additionalProperties: false` on every
 object, except where a record or rest schema (`v.record()`,
-`v.objectWithRest()`) describes the extra keys; converted output schemas are
-left as they are. A tool whose schema cannot be converted at all is left out of
+`v.objectWithRest()`) describes the extra keys, or where the keys are declared
+in the branches of a `v.union()`, `v.variant()` or `v.intersect()`; converted
+output schemas are left as they are. A tool whose schema cannot be converted at all is left out of
 the server and reported through the logger.
 
 A plain JSON Schema is validated in the dialect its `$schema` declares —
