@@ -61,8 +61,19 @@ const STANDALONE_COMPILER_OPTIONS = {
  * demands that every file the server imports be listed as a root, and only the
  * server file is; `incremental` writes a `.tsbuildinfo` named after the
  * throwaway config into the project.
+ *
+ * `composite` also implies `declaration`, which `declarationMap`,
+ * `emitDeclarationOnly` and `isolatedDeclarations` each require, so a composite
+ * project may set them without it — and with `composite` off, its check failed
+ * with TS5069. Nothing is emitted, so they are switched off as well.
  */
-const PROJECT_OVERRIDES = { composite: false, incremental: false };
+const PROJECT_OVERRIDES = {
+  composite: false,
+  declarationMap: false,
+  emitDeclarationOnly: false,
+  incremental: false,
+  isolatedDeclarations: false,
+};
 
 /**
  * Build the argv for the structure check.

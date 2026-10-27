@@ -63,7 +63,13 @@ describe("buildTypeCheckConfig", () => {
     expect(
       JSON.parse(buildTypeCheckConfig("/p/src/server.ts", "/p/tsconfig.json")),
     ).toEqual({
-      compilerOptions: { composite: false, incremental: false },
+      compilerOptions: {
+        composite: false,
+        declarationMap: false,
+        emitDeclarationOnly: false,
+        incremental: false,
+        isolatedDeclarations: false,
+      },
       extends: "/p/tsconfig.json",
       files: ["/p/src/server.ts"],
       include: [],
@@ -106,7 +112,10 @@ describe("runTypeCheck", { timeout: 60_000 }, () => {
    * `tsc <file>` would fall back to ES5 and reject its top-level await, and
    * checking the whole project would report `unrelated.ts`.
    */
-  const makeProject = async (server: string): Promise<string> => {
+  const makeProject = async (
+    server: string,
+    compilerOptions: Record<string, unknown> = {},
+  ): Promise<string> => {
     const project = join(await makeDir(), AWKWARD_NAME);
     await writeFiles(project, {
       "greeting.ts": 'export const greeting = "hi";\n',
@@ -122,6 +131,7 @@ describe("runTypeCheck", { timeout: 60_000 }, () => {
           module: "nodenext",
           strict: true,
           target: "es2022",
+          ...compilerOptions,
         },
         // Inherited unless overridden, and would pull in `unrelated.ts`.
         include: ["*.ts"],
@@ -159,6 +169,29 @@ describe("runTypeCheck", { timeout: 60_000 }, () => {
     expect(formatCommandFailure(result)).toContain("error TS2322");
     expect(formatCommandFailure(result)).not.toContain("unrelated.ts");
   });
+
+  // Each requires `declaration`, which this project has only by way of
+  // `composite` — and the check switches `composite` off.
+  it.each(["declarationMap", "emitDeclarationOnly", "isolatedDeclarations"])(
+    "checks a composite project that sets %s without declaration",
+    async (option) => {
+      const passing = await makeProject("export const port = 8080;\n", {
+        [option]: true,
+      });
+      const passed = await runTypeCheck(join(passing, "server.ts"));
+
+      expect(passed.failed, formatCommandFailure(passed)).toBe(false);
+
+      const failing = await makeProject(
+        'export const port: number = "8080";\n',
+        { [option]: true },
+      );
+      const failed = await runTypeCheck(join(failing, "server.ts"));
+
+      expect(formatCommandFailure(failed)).toContain("error TS2322");
+      expect(formatCommandFailure(failed)).not.toContain("TS5069");
+    },
+  );
 
   it.skipIf(findTsconfig(tmpdir()) !== undefined)(
     "checks a file no tsconfig.json governs against a modern runtime",
