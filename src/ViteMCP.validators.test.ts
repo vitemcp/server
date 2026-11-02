@@ -438,7 +438,7 @@ describe("Valibot schemas converted to JSON Schema", () => {
   });
 
   // `additionalProperties` sees only the `properties` beside it, so closing an
-  // object whose keys its branches declare refused every argument.
+  // object whose keys its branches or a `$ref` declare refused every argument.
   const kindA = v.object({ kind: v.literal("a"), n: v.number() });
   const kindB = v.object({ kind: v.literal("b"), s: v.string() });
 
@@ -461,8 +461,14 @@ describe("Valibot schemas converted to JSON Schema", () => {
         v.object({ y: v.number() }),
       ]),
     },
+    {
+      args: { x: "one" },
+      name: "lazy",
+      // Converted as a `$ref` to the object, placed in `$defs`.
+      parameters: v.lazy(() => v.object({ x: v.string() })),
+    },
   ])(
-    "leaves open an input whose keys its branches declare ($name)",
+    "leaves open an input whose keys its branches or a reference declare ($name)",
     async ({ args, parameters }) => {
       const server = new ViteMCP({ name: "Test", version: "1.0.0" });
 

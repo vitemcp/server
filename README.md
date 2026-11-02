@@ -265,9 +265,10 @@ are still validated by the library itself, so a `v.transform()` reaches
 neither. Converted input schemas get `additionalProperties: false` on every
 object, except where a record or rest schema (`v.record()`,
 `v.objectWithRest()`) describes the extra keys, or where the keys are declared
-in the branches of a `v.union()`, `v.variant()` or `v.intersect()`; converted
-output schemas are left as they are. A tool whose schema cannot be converted at all is left out of
-the server and reported through the logger.
+in the branches of a `v.union()`, `v.variant()` or `v.intersect()`, or behind
+the `$ref` a `v.lazy()` becomes; converted output schemas are left as they
+are. A tool whose schema cannot be converted at all is left out of the server
+and reported through the logger.
 
 A plain JSON Schema is validated in the dialect its `$schema` declares —
 2020-12, 2019-09, draft-07 or draft-06 — and as 2020-12 when it declares none,
