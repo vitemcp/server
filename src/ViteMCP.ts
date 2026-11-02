@@ -1444,7 +1444,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
    *
    * `timeoutSignal` is folded into `context.signal` for a tool that declares
    * `timeoutMs`; everything else mirrors the SDK's request signal alone. Call
-   * `release()` once the handler has settled — see {@link requestScope}.
+   * `release()` once the handler has settled — see {@link requestScope}. It
+   * also ends the context's notifications, as an abort does.
    */
   #makeContext(
     auth: T | undefined,
@@ -1469,6 +1470,21 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
       };
     };
     const mcpReq = ctx?.mcpReq;
+    const scope = requestScope(mcpReq?.signal, timeoutSignal);
+    let settled = false;
+
+    // A request's notifications stop with it: once it is cancelled, times out
+    // or has been answered, nothing is left for them to belong to. One sent
+    // anyway reached a client that had let its progress token go, which
+    // reports it as unknown; over HTTP the request's stream is gone, and the
+    // send threw "Not connected" into the handler.
+    const notify = async (notification: unknown): Promise<void> => {
+      if (settled || scope.signal.aborted) {
+        return;
+      }
+
+      await mcpReq?.notify?.(notification);
+    };
 
     // The spec forbids `notifications/message` for a request that did not opt
     // in via `_meta`, and the level it opts in with is a floor: a client that
@@ -1488,15 +1504,11 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         return;
       }
 
-      void mcpReq
-        ?.notify?.({
-          method: "notifications/message",
-          params: { data: { context: data, message }, level },
-        })
-        ?.catch(() => {});
+      void notify({
+        method: "notifications/message",
+        params: { data: { context: data, message }, level },
+      }).catch(() => {});
     };
-
-    const scope = requestScope(mcpReq?.signal, timeoutSignal);
 
     return {
       context: {
@@ -1530,7 +1542,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
             return;
           }
 
-          await mcpReq?.notify?.({
+          await notify({
             method: "notifications/progress",
             params: {
               message: progress.message,
@@ -1546,7 +1558,10 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         requestState: mcpReq?.requestState?.<string>(),
         signal: scope.signal,
       },
-      release: scope.release,
+      release: () => {
+        settled = true;
+        scope.release();
+      },
     };
   }
 

@@ -12,11 +12,13 @@
  * never fires, so a disconnect was invisible on Node while edge runtimes,
  * which supply their own, saw it.
  */
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { runWithTestServer } from "./testHarness.js";
-import { ViteMCP } from "./ViteMCP.js";
+import { type Context, ViteMCP, type ViteMCPAuth } from "./ViteMCP.js";
 
 const MODERN_PROTOCOL_VERSION = "2026-07-28";
 
@@ -236,5 +238,152 @@ describe("context.signal", () => {
     // adopt — the placeholder must still be a real, unaborted AbortSignal.
     expect(observed).toBeInstanceOf(AbortSignal);
     expect(observed!.aborted).toBe(false);
+  });
+});
+
+/**
+ * A request's notifications end with it. Over a transport that outlives the
+ * request — stdio, or `connect()` — one sent after the call ended went out
+ * anyway, and the client reported a progress update whose token it had let go
+ * of as unknown.
+ */
+describe("notifications after a call ends", () => {
+  const connectInMemory = async (server: ViteMCP) => {
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const client = new Client(
+      { name: "test-client", version: "0.0.0" },
+      // Without it the client speaks the 2025 era, which cannot opt in to logs.
+      { versionNegotiation: { mode: "auto" } },
+    );
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    return client;
+  };
+
+  it.each(["times out", "is cancelled", "returns"] as const)(
+    "are dropped once the call %s",
+    async (ending) => {
+      const finish = deferred<void>();
+      let context: Context<ViteMCPAuth> | undefined;
+
+      const server = new ViteMCP({ name: "Notifications", version: "1.0.0" });
+
+      server.addTool({
+        execute: async (_args, toolContext) => {
+          context = toolContext;
+          // Logged first: the progress report is what the cancelling client
+          // aborts on.
+          toolContext.log.info("during");
+          await toolContext.reportProgress({ progress: 0, total: 1 });
+
+          // Still running once its caller has stopped waiting, unless it is
+          // the one that ended the call.
+          if (ending !== "returns") {
+            await finish.promise;
+          }
+
+          return "done";
+        },
+        name: "work",
+        parameters: z.object({}),
+        ...(ending === "times out" && { timeoutMs: 50 }),
+      });
+
+      const client = await connectInMemory(server);
+      const controller = new AbortController();
+      const errors: string[] = [];
+      const logs: unknown[] = [];
+      const progress: number[] = [];
+
+      client.onerror = (error) => errors.push(error.message);
+      client.setNotificationHandler("notifications/message", ({ params }) => {
+        logs.push(params.data);
+      });
+
+      await client
+        .callTool(
+          {
+            _meta: { "io.modelcontextprotocol/logLevel": "debug" },
+            arguments: {},
+            name: "work",
+          },
+          {
+            onprogress: (update) => {
+              progress.push(update.progress);
+
+              if (ending === "is cancelled") {
+                controller.abort();
+              }
+            },
+            signal: controller.signal,
+          },
+        )
+        .catch(() => undefined);
+
+      // The client stops waiting before the server hears of the cancellation.
+      if (!context!.signal.aborted && ending === "is cancelled") {
+        await abortReason(context!.signal);
+      }
+
+      await context!.reportProgress({ progress: 1, total: 1 });
+      context!.log.info("after");
+      // Long enough for a notification to cross the in-memory transport.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(progress).toEqual([0]);
+      expect(logs).toEqual([{ message: "during" }]);
+      expect(errors).toEqual([]);
+
+      finish.resolve();
+      await client.close();
+    },
+  );
+
+  it("resolves a progress report sent after an HTTP call ended, instead of throwing", async () => {
+    const finish = deferred<void>();
+    const late = deferred<unknown>();
+
+    const server = new ViteMCP({ name: "Notifications", version: "1.0.0" });
+
+    server.addTool({
+      execute: async (_args, context) => {
+        await finish.promise;
+        late.resolve(
+          await context.reportProgress({ progress: 1, total: 1 }).then(
+            () => "resolved",
+            (error: unknown) => error,
+          ),
+        );
+
+        return "done";
+      },
+      name: "slow",
+      parameters: z.object({}),
+      timeoutMs: 50,
+    });
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        // With `onprogress` the client asks for progress, and sends a token.
+        const result = await client.callTool(
+          { arguments: {}, name: "slow" },
+          { onprogress: () => {} },
+        );
+
+        expect(JSON.stringify(result)).toContain("timed out after 50ms");
+
+        finish.resolve();
+
+        // The request's stream closed with the result, so the send threw
+        // "Not connected".
+        expect(await late.promise).toBe("resolved");
+      },
+      server,
+    });
   });
 });

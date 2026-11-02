@@ -1669,6 +1669,8 @@ await reportProgress({
 
 Progress notifications are only emitted when the client opts in by supplying a `progressToken` on the tool call; otherwise `reportProgress` is a no-op. `notifications/progress` is part of the specification, so this is the portable way to send incremental updates during a long-running tool call.
 
+`reportProgress` and `log` are no-ops as well once the call has ended — answered, cancelled, or past its `timeoutMs` — so work still running after its caller stopped waiting sends nothing for a request that is gone.
+
 ### Health-check Endpoint
 
 When you run ViteMCP with the `httpStream` transport you can optionally expose a
