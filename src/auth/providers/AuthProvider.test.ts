@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { UpstreamTokenSet } from "../types.js";
 import type { AuthProviderConfig } from "./AuthProvider.js";
 
+import { PKCEUtils } from "../utils/pkce.js";
 import { AzureProvider } from "./AzureProvider.js";
 import { GitHubProvider } from "./GitHubProvider.js";
 import { GoogleProvider } from "./GoogleProvider.js";
@@ -479,5 +481,100 @@ describe("options forwarded to the proxy", () => {
 
       provider.destroy();
     }
+  });
+});
+
+describe("session expiresAt", () => {
+  const config = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
+    authorizationEndpoint: "https://auth.example.com/authorize",
+    baseUrl: "http://localhost:8000",
+    clientId: "test-client-id",
+    clientSecret: "test-client-secret",
+    tokenEndpoint: "https://auth.example.com/token",
+  };
+
+  /** Hands `createSession` a token set as a custom storage might return it. */
+  class SessionProbe extends OAuthProvider {
+    public sessionFor(upstreamTokens: UpstreamTokenSet) {
+      return this.createSession(upstreamTokens);
+    }
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("counts from when the upstream token was issued, not from the request", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const issuedAt = new Date("2026-01-01T10:00:00Z");
+    vi.setSystemTime(issuedAt);
+
+    const provider = new OAuthProvider(config);
+    const proxy = provider.getProxy();
+    // The upstream login needs a browser; the proxy's own steps stand in for
+    // it, as they do in OAuthProxy.token-swap.test.ts.
+    const steps = proxy as unknown as {
+      createTransaction: (params: Record<string, string>) => Promise<unknown>;
+      generateAuthorizationCode: (
+        transaction: unknown,
+        upstreamTokens: UpstreamTokenSet,
+      ) => Promise<string>;
+    };
+    const client = await proxy.registerClient({
+      redirect_uris: ["https://client.example.com/callback"],
+    });
+    const pkce = PKCEUtils.generatePair("S256");
+    const transaction = await steps.createTransaction({
+      client_id: client.client_id,
+      code_challenge: pkce.challenge,
+      code_challenge_method: "S256",
+      redirect_uri: "https://client.example.com/callback",
+      response_type: "code",
+      scope: "openid",
+    });
+    const code = await steps.generateAuthorizationCode(transaction, {
+      accessToken: "upstream-access-token",
+      expiresIn: 3600,
+      issuedAt,
+      scope: ["openid"],
+      tokenType: "Bearer",
+    });
+    const { access_token } = await proxy.exchangeAuthorizationCode({
+      client_id: client.client_id,
+      code,
+      code_verifier: pkce.verifier,
+      grant_type: "authorization_code",
+      redirect_uri: "https://client.example.com/callback",
+    });
+
+    // Fifty minutes on, the token has ten left. The default storage is
+    // encrypted, so `issuedAt` comes back out of it as a string.
+    vi.setSystemTime(new Date("2026-01-01T10:50:00Z"));
+
+    const session = await provider.authenticate(
+      new Request("http://localhost:8000/mcp", {
+        headers: { authorization: `Bearer ${access_token}` },
+      }),
+    );
+
+    expect(session?.expiresAt).toBe(Date.parse("2026-01-01T11:00:00Z") / 1000);
+
+    provider.destroy();
+  });
+
+  it("counts from now for a token set without a readable issuedAt", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-01T10:50:00Z"));
+
+    // A custom TokenStorage may drop a field it does not know about.
+    const session = new SessionProbe(config).sessionFor({
+      accessToken: "upstream-access-token",
+      expiresIn: 3600,
+      scope: ["openid"],
+      tokenType: "Bearer",
+    } as unknown as UpstreamTokenSet);
+
+    expect(session.expiresAt).toBe(Date.parse("2026-01-01T11:50:00Z") / 1000);
   });
 });

@@ -223,10 +223,18 @@ export abstract class AuthProvider<
    * Override in subclasses to add provider-specific session data.
    */
   protected createSession(upstreamTokens: UpstreamTokenSet): TSession {
+    // Counted from when the upstream token was issued. This runs on every
+    // request, so counting from now put `expiresAt` a full lifetime away each
+    // time, and a token minutes from lapsing looked freshly minted. Storage
+    // that round-trips through JSON — the default encrypted one does — hands
+    // `issuedAt` back as a string, which `Date` reads as well; a token set
+    // without a readable one is counted from now, rather than to `NaN`.
+    const issuedAt = new Date(upstreamTokens.issuedAt).getTime() || Date.now();
+
     return {
       accessToken: upstreamTokens.accessToken,
       expiresAt: upstreamTokens.expiresIn
-        ? Math.floor(Date.now() / 1000) + upstreamTokens.expiresIn
+        ? Math.floor(issuedAt / 1000) + upstreamTokens.expiresIn
         : undefined,
       idToken: upstreamTokens.idToken,
       refreshToken: upstreamTokens.refreshToken,
