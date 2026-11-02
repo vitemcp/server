@@ -11,6 +11,8 @@ import { buildDevCommand, buildDevConfig } from "./devCommand.js";
 import {
   buildStructureCheckCommand,
   formatCommandFailure,
+  missingTsxHint,
+  resolveTsxLoader,
   runTypeCheck,
 } from "./validateCommand.js";
 
@@ -203,8 +205,11 @@ await yargs(hideBin(process.argv))
 
         console.log("[ViteMCP] ✓ TypeScript compilation successful");
 
-        const [structureCommand, ...structureArgs] =
-          buildStructureCheckCommand(filePath);
+        const tsxLoader = resolveTsxLoader(filePath);
+        const [structureCommand, ...structureArgs] = buildStructureCheckCommand(
+          filePath,
+          { tsxLoader },
+        );
         const structureCheck = await execa(structureCommand, structureArgs, {
           reject: false,
         });
@@ -222,6 +227,12 @@ await yargs(hideBin(process.argv))
             console.error(
               "Make sure the file properly imports and uses ViteMCP",
             );
+          }
+
+          const hint = missingTsxHint(filePath, tsxLoader);
+
+          if (hint) {
+            console.error(hint);
           }
 
           process.exit(1);

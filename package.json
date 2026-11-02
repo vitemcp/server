@@ -86,7 +86,8 @@
     "@valibot/to-json-schema": "^1.0.0",
     "ajv": "^8.0.0",
     "ajv-formats": "^3.0.0",
-    "jose": "^5.0.0 || ^6.0.0"
+    "jose": "^5.0.0 || ^6.0.0",
+    "tsx": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "@apidevtools/swagger-parser": {
@@ -102,6 +103,9 @@
       "optional": true
     },
     "jose": {
+      "optional": true
+    },
+    "tsx": {
       "optional": true
     }
   },
@@ -153,6 +157,7 @@
     "prettier": "^3.7.4",
     "semantic-release": "^25.0.2",
     "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.48.1",
     "valibot": "^1.2.0",

@@ -2134,6 +2134,16 @@ Another way is to use the official [`MCP Inspector`](https://modelcontextprotoco
 npx @vitemcp/server inspect server.ts
 ```
 
+### Validate with `vitemcp validate`
+
+To check that a server file type-checks and loads:
+
+```bash
+npx @vitemcp/server validate server.ts
+```
+
+The file is loaded with [`tsx`](https://tsx.is) when your project has it installed, the way `vitemcp dev` runs it. Without tsx it is loaded with plain Node, which rejects `.js` imports of `.ts` files and syntax such as enums; install tsx (`npm install --save-dev tsx`) to validate those files.
+
 ## FAQ
 
 ### How to use with Claude Desktop?

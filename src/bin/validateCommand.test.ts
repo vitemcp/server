@@ -1,8 +1,8 @@
 import { execa } from "execa";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { pathToFileURL } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { afterAll, describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +11,8 @@ import {
   buildTypeCheckConfig,
   findTsconfig,
   formatCommandFailure,
+  missingTsxHint,
+  resolveTsxLoader,
   runTypeCheck,
   STRUCTURE_CHECK_SCRIPT,
 } from "./validateCommand.js";
@@ -230,6 +232,65 @@ describe("buildStructureCheckCommand", () => {
     expect(url).toContain("%20");
     expect(url).toContain("%23");
   });
+
+  it("imports the file through the tsx loader it is given", () => {
+    const loader = "file:///project/node_modules/tsx/dist/loader.mjs";
+    const [, ...args] = buildStructureCheckCommand("/project/server.ts", {
+      tsxLoader: loader,
+    });
+
+    expect(args).toEqual([
+      "--disable-warning=DEP0205",
+      "--import",
+      loader,
+      "-e",
+      STRUCTURE_CHECK_SCRIPT,
+      pathToFileURL("/project/server.ts").href,
+    ]);
+  });
+});
+
+describe("resolveTsxLoader", () => {
+  it("finds the tsx of the project the file belongs to", async () => {
+    const project = join(await makeDir(), AWKWARD_NAME);
+    const loader = "node_modules/tsx/dist/loader.mjs";
+    await writeFiles(project, {
+      [loader]: "",
+      "node_modules/tsx/package.json": JSON.stringify({
+        exports: "./dist/loader.mjs",
+        name: "tsx",
+      }),
+    });
+
+    expect(resolveTsxLoader(join(project, "src/server.ts"))).toBe(
+      pathToFileURL(await realpath(join(project, loader))).href,
+    );
+  });
+
+  it("is undefined when the project has no tsx", async () => {
+    expect(
+      resolveTsxLoader(join(await makeDir(), "server.ts")),
+    ).toBeUndefined();
+  });
+});
+
+describe("missingTsxHint", () => {
+  const loader = "file:///project/node_modules/tsx/dist/loader.mjs";
+
+  it("suggests tsx for a TypeScript file loaded without it", () => {
+    expect(missingTsxHint("/project/server.ts", undefined)).toContain(
+      "npm install --save-dev tsx",
+    );
+    expect(missingTsxHint("/project/server.mts", undefined)).toBeDefined();
+  });
+
+  it("says nothing once the file was loaded through tsx", () => {
+    expect(missingTsxHint("/project/server.ts", loader)).toBeUndefined();
+  });
+
+  it("says nothing for a JavaScript file, which plain Node loads as tsx would", () => {
+    expect(missingTsxHint("/project/server.mjs", undefined)).toBeUndefined();
+  });
 });
 
 describe("the structure check script", { timeout: 30_000 }, () => {
@@ -255,9 +316,16 @@ describe("the structure check script", { timeout: 30_000 }, () => {
     return project;
   };
 
-  const check = async (project: string, file: string, server: string) => {
+  const check = async (
+    project: string,
+    file: string,
+    server: string,
+    tsxLoader?: string,
+  ) => {
     await writeFiles(project, { [file]: server });
-    const [command, ...args] = buildStructureCheckCommand(join(project, file));
+    const [command, ...args] = buildStructureCheckCommand(join(project, file), {
+      tsxLoader,
+    });
 
     return execa(command, args, {
       cwd: project,
@@ -299,6 +367,67 @@ describe("the structure check script", { timeout: 30_000 }, () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Server structure validation failed: boom");
+  });
+
+  describe("through the project's tsx", () => {
+    // This repository's own tsx, standing in for the one a project installs.
+    const tsxLoader = resolveTsxLoader(fileURLToPath(import.meta.url));
+
+    it("is installed here", () => {
+      expect(tsxLoader).toMatch(/^file:.*\/tsx\//);
+    });
+
+    it("follows a `.js` import to the `.ts` file beside it", async () => {
+      // Plain Node looks for a `tools.js` on disk and fails the check, though
+      // `vitemcp dev` runs the file fine.
+      const project = await makeProject();
+      await writeFiles(project, {
+        [`${AWKWARD_NAME}/tools.ts`]:
+          "export const add = (a: number, b: number): number => a + b;\n",
+      });
+
+      const result = await check(
+        project,
+        `${AWKWARD_NAME}/server.ts`,
+        'import { add } from "./tools.js";\n\nexport const sum: number = add(1, 2);\n',
+        tsxLoader,
+      );
+
+      expect(result.exitCode, formatCommandFailure(result)).toBe(0);
+      expect(result.stdout).toContain("Server structure validation passed");
+    });
+
+    it("runs syntax that plain Node cannot strip", async () => {
+      const result = await check(
+        await makeProject(),
+        "server.ts",
+        [
+          "enum Transport { Stdio, Http }",
+          "class Server { constructor(private readonly transport: Transport) {} }",
+          "export const server = new Server(Transport.Stdio);",
+          "",
+        ].join("\n"),
+        tsxLoader,
+      );
+
+      expect(result.exitCode, formatCommandFailure(result)).toBe(0);
+    });
+
+    it("still reports why a server file could not be imported", async () => {
+      const result = await check(
+        await makeProject(),
+        "broken.ts",
+        "throw new Error('boom');\n",
+        tsxLoader,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Server structure validation failed: boom",
+      );
+      // tsx's own deprecation warning, which would read as the file's.
+      expect(result.stderr).not.toContain("DEP0205");
+    });
   });
 });
 

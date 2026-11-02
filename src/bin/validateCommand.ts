@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { execa } from "execa";
 import { existsSync } from "fs";
 import { rm, writeFile } from "fs/promises";
+import { createRequire } from "module";
 import { dirname, join } from "path";
 import { pathToFileURL } from "url";
 
@@ -82,12 +83,22 @@ const PROJECT_OVERRIDES = {
  * has to be quoted. The file is converted to a `file:` URL here, so the child
  * imports it as given and never has to build the URL itself; and the child is
  * the Node binary running this CLI, so no PATH lookup is involved.
+ *
+ * Given the project's tsx loader (see `resolveTsxLoader`), the child imports
+ * the file through it, so the file loads the way `vitemcp dev` runs it. tsx
+ * registers itself with `module.register()`, which Node 26 deprecates
+ * (DEP0205); that warning alone is switched off, because it would otherwise be
+ * replayed with a failure as though the file had caused it.
  */
 export const buildStructureCheckCommand = (
   file: string,
-  execPath: string = process.execPath,
+  {
+    execPath = process.execPath,
+    tsxLoader,
+  }: { execPath?: string; tsxLoader?: string } = {},
 ): [string, ...string[]] => [
   execPath,
+  ...(tsxLoader ? ["--disable-warning=DEP0205", "--import", tsxLoader] : []),
   "-e",
   STRUCTURE_CHECK_SCRIPT,
   pathToFileURL(file).href,
@@ -169,6 +180,53 @@ export const formatCommandFailure = (result: {
     .map((output) => (typeof output === "string" ? output.trim() : ""))
     .filter(Boolean)
     .join("\n");
+
+/**
+ * What to add when the structure check fails without tsx. Plain Node rejects
+ * TypeScript that tsx runs, so the failure may be the loader's rather than the
+ * file's. Nothing for a JavaScript file, which loads the same either way.
+ */
+export const missingTsxHint = (
+  file: string,
+  tsxLoader: string | undefined,
+): string | undefined =>
+  tsxLoader || !/\.[cm]?tsx?$/i.test(file)
+    ? undefined
+    : "[ViteMCP] tsx is not installed in this project, so the file was loaded with plain Node, which rejects `.js` imports of `.ts` files and syntax such as enums. Install tsx to validate the file the way `vitemcp dev` runs it: npm install --save-dev tsx";
+
+/**
+ * The project's tsx loader, as a `file:` URL for `--import`, or `undefined`
+ * when the project does not have tsx installed.
+ *
+ * `vitemcp dev` runs a server file with tsx, but plain Node only strips types:
+ * it rejects a `.js` import of a `.ts` file, and syntax it would have to
+ * transform, such as an enum. So without tsx, a file `dev` ran fine failed the
+ * check.
+ *
+ * Looked up in the `node_modules` at or above the file, as an `import` from the
+ * file would look, so it is the tsx of the project the file belongs to.
+ * `require.resolve` alone also searches `NODE_PATH`, which can point outside
+ * the project: pnpm's bin shims set it to a store. A URL, because `--import`
+ * takes a specifier, which a Windows path is not.
+ */
+export const resolveTsxLoader = (file: string): string | undefined => {
+  for (let current = dirname(file); ; current = dirname(current)) {
+    const manifest = join(current, "node_modules", "tsx", "package.json");
+
+    if (existsSync(manifest)) {
+      try {
+        return pathToFileURL(createRequire(manifest).resolve("tsx")).href;
+      } catch {
+        // Installed, but without the loader `--import tsx` would load.
+        return undefined;
+      }
+    }
+
+    if (dirname(current) === current) {
+      return undefined;
+    }
+  }
+};
 
 /**
  * Type-check `file` under the compiler options of the project it belongs to.
