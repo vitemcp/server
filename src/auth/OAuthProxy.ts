@@ -3,7 +3,7 @@
  * Provides DCR-compatible interface for non-DCR OAuth providers
  */
 
-import { randomBytes } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { z } from "zod";
 
 import type {
@@ -16,6 +16,7 @@ import type {
   OAuthTransaction,
   ProxyDCRClient,
   RefreshRequest,
+  TokenEndpointAuthMethod,
   TokenRequest,
   TokenResponse,
   TokenStorage,
@@ -38,6 +39,7 @@ import {
   DEFAULT_REFRESH_TOKEN_TTL,
   DEFAULT_TRANSACTION_TTL,
   DEFAULT_UPSTREAM_REQUEST_TIMEOUT_MS,
+  TOKEN_ENDPOINT_AUTH_METHODS,
 } from "./types.js";
 import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
@@ -67,6 +69,29 @@ const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
   "scope",
   "state",
 ]);
+
+/**
+ * The client a token request came from, and whether it proved it.
+ *
+ * `authenticated` is true only when the client presented the secret it was
+ * issued. Anyone can register through DCR, so a valid secret proves only that
+ * the caller is *some* client: every grant is still checked against the client
+ * it was issued to.
+ */
+type TokenEndpointClient = {
+  authenticated: boolean;
+  client: ProxyDCRClient;
+};
+
+/**
+ * Which client a passthrough-mode upstream refresh token was issued to. Swap
+ * mode keeps this in its token mapping; passthrough hands the client the
+ * upstream token itself, so the proxy records it separately.
+ */
+const passthroughRefreshBindingSchema = z.object({
+  clientAuthenticated: z.boolean(),
+  clientId: z.string(),
+});
 
 /**
  * OAuth 2.1 Proxy
@@ -240,25 +265,27 @@ export class OAuthProxy {
       );
     }
 
-    // A CIMD client holds no secret and its identity is a URL anyone can name,
-    // so PKCE is the only thing binding the authorization code to whoever
-    // asked for it. `plain` puts the verifier in the same request as the
-    // challenge, which binds nothing, so S256 is required whatever
-    // `allowPlainPkce` says: that exists for clients that cannot hash, and one
-    // that publishes a metadata document is not among them. OAuth 2.1 and the
-    // MCP authorization spec both require this of public clients.
-    if (registeredClient.source === "cimd") {
+    // A public client — resolved from a metadata document, or registered with
+    // token_endpoint_auth_method "none" — holds no secret, so PKCE is the only
+    // thing binding the authorization code to whoever asked for it. `plain`
+    // puts the verifier in the same request as the challenge, which binds
+    // nothing, so S256 is required whatever `allowPlainPkce` says: that exists
+    // for clients that cannot hash, and none of these is among them. OAuth 2.1
+    // and the MCP authorization spec both require this of public clients.
+    if (isPublicClient(registeredClient)) {
+      const kind = describeUnauthenticatedClient(registeredClient);
+
       if (!params.code_challenge) {
         throw new OAuthProxyError(
           "invalid_request",
-          "code_challenge is required for Client ID Metadata Document clients",
+          `code_challenge is required for ${kind}`,
         );
       }
 
       if (params.code_challenge_method !== "S256") {
         throw new OAuthProxyError(
           "invalid_request",
-          "code_challenge_method must be S256 for Client ID Metadata Document clients",
+          `code_challenge_method must be S256 for ${kind}`,
         );
       }
     }
@@ -307,10 +334,11 @@ export class OAuthProxy {
       );
     }
 
-    // RFC 6749 §5.2 - reject unknown clients. Only proxy-issued client_ids
-    // (obtained via DCR) and, when enabled, resolved CIMD clients are
-    // accepted, so stolen codes cannot be exchanged by arbitrary callers.
-    const client = await this.resolveClient(request.client_id);
+    // RFC 6749 §3.2.1 - identify the client and check its secret before the
+    // code is touched: a caller that fails authentication must not be able to
+    // spend a code it presents. Only proxy-issued client_ids (obtained via
+    // DCR) and, when enabled, resolved CIMD clients are accepted.
+    const { authenticated, client } = await this.authenticateClient(request);
 
     // Consume the code atomically: whoever takes it owns this exchange, so two
     // concurrent requests — on this instance or another one sharing the
@@ -339,22 +367,31 @@ export class OAuthProxy {
 
     const clientCode = consumed.clientCode;
 
-    // Validate client
-    if (clientCode.clientId !== request.client_id) {
-      throw new OAuthProxyError("invalid_client", "Client ID mismatch");
+    // RFC 6749 §5.2: a code issued to another client is an invalid grant. The
+    // caller authenticated as itself, so this is not a client failure — and
+    // the code stays spent: presented by the wrong client, it has leaked.
+    if (clientCode.clientId !== client.clientId) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "Authorization code was issued to another client",
+      );
     }
 
-    // Defence in depth: `authorize()` issues a CIMD client no code without
-    // S256 PKCE, so one that arrives here unbound was issued under other rules
-    // — by an older version, or by an instance sharing this storage. Refuse it
-    // rather than fall through to the path that checks nothing.
+    // Without client authentication, PKCE is all that binds the code to
+    // whoever asked for it, so an unauthenticated exchange must redeem an
+    // S256-bound code. `authorize()` already insists on that from public
+    // clients, so for them this is defence in depth against a code issued
+    // under other rules — by an older version, or by an instance sharing this
+    // storage. For a registration that predates recorded auth methods it is
+    // the rule itself: such a client may leave out its secret only for a code
+    // PKCE protects.
     if (
-      client.source === "cimd" &&
+      !authenticated &&
       (!clientCode.codeChallenge || clientCode.codeChallengeMethod !== "S256")
     ) {
       throw new OAuthProxyError(
         "invalid_grant",
-        "S256 PKCE is required for Client ID Metadata Document clients",
+        `S256 PKCE is required for ${describeUnauthenticatedClient(client)}`,
       );
     }
 
@@ -384,6 +421,7 @@ export class OAuthProxy {
       return await this.issueSwappedTokens(
         clientCode.clientId,
         clientCode.upstreamTokens,
+        authenticated,
       );
     } else {
       // Pass-through pattern: return upstream tokens directly
@@ -394,6 +432,12 @@ export class OAuthProxy {
       };
 
       if (clientCode.upstreamTokens.refreshToken) {
+        await this.savePassthroughRefreshBinding(
+          clientCode.upstreamTokens.refreshToken,
+          { clientAuthenticated: authenticated, clientId: client.clientId },
+          clientCode.upstreamTokens.refreshExpiresIn,
+        );
+
         response.refresh_token = clientCode.upstreamTokens.refreshToken;
       }
 
@@ -420,13 +464,18 @@ export class OAuthProxy {
       );
     }
 
+    // RFC 6749 §6: authenticate the client, then make sure the refresh token
+    // was issued to it. Done before the token is looked at, so a caller that
+    // fails authentication learns nothing about it and cannot spend it.
+    const caller = await this.authenticateClient(request);
+
     // Check for swap mode
     if (this.config.enableTokenSwap && this.jwtIssuer) {
-      return await this.handleSwapModeRefresh(request);
+      return await this.handleSwapModeRefresh(request, caller);
     }
 
     // Passthrough mode: forward refresh token directly to upstream
-    return await this.handlePassthroughRefresh(request);
+    return await this.handlePassthroughRefresh(request, caller);
   }
 
   /**
@@ -469,16 +518,12 @@ export class OAuthProxy {
       responseTypesSupported: ["code"],
       scopesSupported: this.config.scopes || [],
       tokenEndpoint: `${this.config.baseUrl}/oauth/token`,
-      // RFC 8414 §2. A CIMD client is a public client: it has no registration
-      // response to carry a secret, and authenticates the exchange with PKCE
-      // alone. A client that reads this list to pick an auth method finds
-      // nothing it can use unless "none" is advertised alongside the
-      // confidential methods DCR clients use.
-      tokenEndpointAuthMethodsSupported: [
-        "client_secret_basic",
-        "client_secret_post",
-        ...(this.clientIdMetadata.enabled ? ["none"] : []),
-      ],
+      // RFC 8414 §2. "none" is a public client: a CIMD client, which has no
+      // registration response to carry a secret, or a DCR client that asked
+      // for no secret. Either authenticates the exchange with S256 PKCE alone.
+      // A client that reads this list to pick an auth method finds nothing it
+      // can use unless "none" is advertised alongside the confidential methods.
+      tokenEndpointAuthMethodsSupported: [...TOKEN_ENDPOINT_AUTH_METHODS],
     };
   }
 
@@ -642,6 +687,13 @@ export class OAuthProxy {
       return null;
     }
 
+    // Only an access token is a bearer credential. A refresh token has a
+    // mapping of its own, so without this check it would authenticate a
+    // request too.
+    if (result.claims.token_use !== "access") {
+      return null;
+    }
+
     // Look up token mapping
     const mapping = (await this.tokenStorage.get(
       `mapping:${this.issuerNs}:${result.claims.jti}`,
@@ -707,8 +759,27 @@ export class OAuthProxy {
       );
     }
 
+    // RFC 7591 §2: the default is client_secret_basic. Recorded, because it
+    // decides what the token endpoint demands of this client. A method the
+    // token endpoint cannot verify is refused here rather than accepted and
+    // then never checked.
+    const tokenEndpointAuthMethod =
+      request.token_endpoint_auth_method || "client_secret_basic";
+
+    if (!isTokenEndpointAuthMethod(tokenEndpointAuthMethod)) {
+      throw new OAuthProxyError(
+        "invalid_client_metadata",
+        `Unsupported token_endpoint_auth_method: ${tokenEndpointAuthMethod}. Supported: ${TOKEN_ENDPOINT_AUTH_METHODS.join(", ")}`,
+      );
+    }
+
     const proxyClientId = randomBytes(16).toString("hex");
-    const proxyClientSecret = randomBytes(32).toString("base64url");
+    // A public client is issued no secret: it could not keep one, and one it
+    // was never meant to use would only be mistaken for an authenticator.
+    const proxyClientSecret =
+      tokenEndpointAuthMethod === "none"
+        ? undefined
+        : randomBytes(32).toString("base64url");
 
     const client: ProxyDCRClient = {
       callbackUrl: request.redirect_uris[0],
@@ -730,6 +801,7 @@ export class OAuthProxy {
       },
       redirectUris: request.redirect_uris,
       registeredAt: new Date(),
+      tokenEndpointAuthMethod,
     };
 
     // Persisted before it is cached: a write that fails must not leave behind
@@ -746,7 +818,8 @@ export class OAuthProxy {
       // Echo back optional metadata
       client_name: request.client_name,
       client_secret: proxyClientSecret,
-      client_secret_expires_at: 0, // Never expires
+      // RFC 7591 §3.2.1: required alongside a secret, and only then.
+      client_secret_expires_at: proxyClientSecret ? 0 : undefined, // 0: never
       client_uri: request.client_uri,
       contacts: request.contacts,
       grant_types: request.grant_types || [
@@ -762,12 +835,63 @@ export class OAuthProxy {
       scope: request.scope,
       software_id: request.software_id,
       software_version: request.software_version,
-      token_endpoint_auth_method:
-        request.token_endpoint_auth_method || "client_secret_basic",
+      token_endpoint_auth_method: tokenEndpointAuthMethod,
       tos_uri: request.tos_uri,
     };
 
     return response;
+  }
+
+  /**
+   * RFC 6749 §2.3 / §3.2.1: identify the client behind a token request and,
+   * when it presents a secret, authenticate it.
+   *
+   * A client registered with a secret method must present its secret. A
+   * public client must not present one: it was issued none. A registration
+   * that predates recorded auth methods may do either — it was issued a
+   * secret whatever it asked for — and is treated as unauthenticated when it
+   * leaves it out, which the grants then hold it to.
+   *
+   * Throws `invalid_client` on any failure. Nothing here touches grant state,
+   * so a caller that fails cannot spend a code or refresh token.
+   */
+  private async authenticateClient(request: {
+    client_id?: string;
+    client_secret?: string;
+  }): Promise<TokenEndpointClient> {
+    if (!request.client_id) {
+      throw new OAuthProxyError("invalid_client", "client_id is required");
+    }
+
+    const client = await this.resolveClient(request.client_id);
+
+    // An empty secret identifies rather than authenticates: it is how a public
+    // client sends HTTP Basic (`client_id:`).
+    if (request.client_secret) {
+      if (
+        !client.clientSecret ||
+        !secretsMatch(request.client_secret, client.clientSecret)
+      ) {
+        throw new OAuthProxyError(
+          "invalid_client",
+          "Client authentication failed",
+        );
+      }
+
+      return { authenticated: true, client };
+    }
+
+    if (
+      client.tokenEndpointAuthMethod === "client_secret_basic" ||
+      client.tokenEndpointAuthMethod === "client_secret_post"
+    ) {
+      throw new OAuthProxyError(
+        "invalid_client",
+        "Client authentication failed: client_secret is required",
+      );
+    }
+
+    return { authenticated: false, client };
   }
 
   /**
@@ -1068,7 +1192,40 @@ export class OAuthProxy {
    */
   private async handlePassthroughRefresh(
     request: RefreshRequest,
+    caller: TokenEndpointClient,
   ): Promise<TokenResponse> {
+    // The upstream refresh token was issued to the proxy's own upstream
+    // client, on behalf of every MCP client, so the upstream cannot tell whose
+    // it is — and the proxy attaches its upstream credentials to whatever it
+    // forwards. Client authentication alone would not help: anyone can
+    // register a client. Only the record of which client this token went to
+    // stops a stolen one being redeemed here.
+    const bindingKey = this.passthroughRefreshKey(request.refresh_token);
+    const binding = passthroughRefreshBindingSchema.safeParse(
+      await this.tokenStorage.get(bindingKey),
+    );
+
+    if (!binding.success) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "Invalid or expired refresh token",
+      );
+    }
+
+    if (binding.data.clientId !== caller.client.clientId) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "Refresh token was issued to another client",
+      );
+    }
+
+    if (binding.data.clientAuthenticated && !caller.authenticated) {
+      throw new OAuthProxyError(
+        "invalid_client",
+        "Client authentication failed: client_secret is required",
+      );
+    }
+
     const useBasicAuth =
       this.config.upstreamTokenEndpointAuthMethod === "client_secret_basic";
 
@@ -1114,6 +1271,28 @@ export class OAuthProxy {
 
     const tokens = await this.parseTokenResponse(tokenResponse);
 
+    // The client goes on to use either the rotated token or, when the upstream
+    // did not rotate, the one it already holds; bind whichever that is. A
+    // fresh lifetime matches swap mode, where every refresh issues a new
+    // refresh token with its own.
+    await this.savePassthroughRefreshBinding(
+      tokens.refresh_token || request.refresh_token,
+      {
+        clientAuthenticated: caller.authenticated,
+        clientId: caller.client.clientId,
+      },
+      tokens.refresh_expires_in,
+    );
+
+    // Only once the new binding is written: a failure in between must not
+    // leave the client holding a token the proxy no longer recognises.
+    if (
+      tokens.refresh_token &&
+      tokens.refresh_token !== request.refresh_token
+    ) {
+      await this.tokenStorage.delete(bindingKey);
+    }
+
     return {
       access_token: tokens.access_token,
       expires_in: tokens.expires_in || 3600,
@@ -1129,28 +1308,48 @@ export class OAuthProxy {
    */
   private async handleSwapModeRefresh(
     request: RefreshRequest,
+    caller: TokenEndpointClient,
   ): Promise<TokenResponse> {
     if (!this.jwtIssuer) {
       throw new Error("JWT issuer not initialized");
     }
 
     const verifyResult = await this.jwtIssuer.verify(request.refresh_token);
-    if (!verifyResult.valid) {
+    if (!verifyResult.valid || !verifyResult.claims) {
       throw new OAuthProxyError(
         "invalid_grant",
         "Invalid or expired refresh token",
       );
     }
 
-    const jti = verifyResult.claims?.jti;
+    // An access token verifies under the same key and has a mapping of its
+    // own, so without this a one-hour bearer token could be swapped for a
+    // refresh token. Tokens issued before `token_use` existed carry neither
+    // value and are refused, so their holders sign in again.
+    if (verifyResult.claims.token_use !== "refresh") {
+      throw new OAuthProxyError("invalid_grant", "Not a refresh token");
+    }
+
+    const jti = verifyResult.claims.jti;
     if (!jti) {
       throw new OAuthProxyError("invalid_grant", "Refresh token missing JTI");
+    }
+
+    // RFC 6749 §6: the token must have been issued to the client presenting
+    // it. Checked against the signed claim before the mapping is claimed, so
+    // another client presenting a stolen token cannot spend it either.
+    if (verifyResult.claims.client_id !== caller.client.clientId) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "Refresh token was issued to another client",
+      );
     }
 
     // Claim the mapping atomically: whoever takes it owns this rotation, so two
     // concurrent refreshes — on this instance or another one sharing the
     // storage — cannot both redeem the same single-use refresh token.
     const mapping = (await this.takeMapping(jti)) as {
+      clientAuthenticated?: boolean;
       clientId: string;
       expiresAt?: Date | string;
       scope: string[];
@@ -1165,6 +1364,24 @@ export class OAuthProxy {
     }
 
     try {
+      // Defence in depth: the mapping is the proxy's own record of the holder.
+      if (mapping.clientId !== caller.client.clientId) {
+        throw new OAuthProxyError(
+          "invalid_grant",
+          "Refresh token was issued to another client",
+        );
+      }
+
+      // A token issued to a client that authenticated is only redeemed by one
+      // that does, or leaving out the secret would turn it back into a bearer
+      // token. Only an explicit `false` waives it.
+      if (mapping.clientAuthenticated !== false && !caller.authenticated) {
+        throw new OAuthProxyError(
+          "invalid_client",
+          "Client authentication failed: client_secret is required",
+        );
+      }
+
       const upstreamTokens = (await this.tokenStorage.get(
         `upstream:${this.issuerNs}:${mapping.upstreamTokenKey}`,
       )) as null | UpstreamTokenSet;
@@ -1211,13 +1428,16 @@ export class OAuthProxy {
         mapping.clientId,
         refreshedUpstreamTokens,
         mapping.upstreamTokenKey,
+        caller.authenticated,
       );
     } catch (error) {
       // No tokens reached the client, so hand the refresh token back rather
-      // than logging the user out over a transient upstream failure. Restoring
-      // cannot allow a double redemption: any concurrent attempt was already
-      // rejected, and a rotation that throws returns nothing the caller can
-      // use, even when it failed partway through issuance.
+      // than logging the user out over a transient upstream failure — or over
+      // a caller that failed the checks above, which must not be able to spend
+      // a token it could not redeem. Restoring cannot allow a double
+      // redemption: any concurrent attempt was already rejected, and a
+      // rotation that throws returns nothing the caller can use, even when it
+      // failed partway through issuance.
       try {
         await this.restoreMapping(jti, mapping);
       } catch (restoreError) {
@@ -1239,6 +1459,7 @@ export class OAuthProxy {
   private async issueSwappedTokens(
     clientId: string,
     upstreamTokens: UpstreamTokenSet,
+    clientAuthenticated: boolean,
   ): Promise<TokenResponse> {
     if (!this.jwtIssuer) {
       throw new Error("JWT issuer not initialized");
@@ -1322,6 +1543,7 @@ export class OAuthProxy {
       await this.tokenStorage.save(
         `mapping:${this.issuerNs}:${refreshJti}`,
         {
+          clientAuthenticated,
           clientId,
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + refreshTokenTtl * 1000),
@@ -1345,6 +1567,7 @@ export class OAuthProxy {
     clientId: string,
     upstreamTokens: UpstreamTokenSet,
     upstreamTokenKey: string,
+    clientAuthenticated: boolean,
   ): Promise<TokenResponse> {
     if (!this.jwtIssuer) {
       throw new Error("JWT issuer not initialized");
@@ -1396,9 +1619,13 @@ export class OAuthProxy {
       );
       const refreshJti = await this.extractJti(refreshToken);
 
+      // A client that authenticated keeps having to: the flag only rises.
+      // `handleSwapModeRefresh` refuses an unauthenticated caller when the
+      // previous token was issued to an authenticated one.
       await this.tokenStorage.save(
         `mapping:${this.issuerNs}:${refreshJti}`,
         {
+          clientAuthenticated,
           clientId,
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + refreshTokenTtl * 1000),
@@ -1556,6 +1783,19 @@ export class OAuthProxy {
     // Default to JSON parsing
     const rawJson = await response.json();
     return tokenResponseSchema.parse(rawJson);
+  }
+
+  /**
+   * Storage key for the client binding of a passthrough-mode upstream refresh
+   * token. Keyed by its hash: storage keys are not encrypted, and the token
+   * itself is a live upstream credential.
+   */
+  private passthroughRefreshKey(refreshToken: string): string {
+    const digest = createHash("sha256")
+      .update(refreshToken)
+      .digest("base64url");
+
+    return `passthrough-refresh:${this.issuerNs}:${digest}`;
   }
 
   /**
@@ -1779,6 +2019,25 @@ export class OAuthProxy {
   }
 
   /**
+   * Record which client a passthrough-mode upstream refresh token was handed
+   * to. It lives as long as the upstream says the token does, or as the
+   * configured refresh-token lifetime when it does not say.
+   */
+  private async savePassthroughRefreshBinding(
+    refreshToken: string,
+    binding: z.infer<typeof passthroughRefreshBindingSchema>,
+    refreshExpiresIn: number | undefined,
+  ): Promise<void> {
+    await this.tokenStorage.save(
+      this.passthroughRefreshKey(refreshToken),
+      binding,
+      refreshExpiresIn ??
+        this.config.refreshTokenTtl ??
+        DEFAULT_REFRESH_TOKEN_TTL,
+    );
+  }
+
+  /**
    * Start periodic cleanup of expired transactions and codes
    */
   private startCleanup(): void {
@@ -1990,6 +2249,46 @@ const isLoopbackRedirectUri = (uri: string): boolean => {
     return false;
   }
 };
+
+/**
+ * A client that holds no secret: one resolved from a Client ID Metadata
+ * Document, or one registered with `token_endpoint_auth_method: "none"`.
+ *
+ * A registration that predates recorded auth methods is not one of these. It
+ * was issued a secret and may still use it, so it is held to the public-client
+ * rules only when it leaves that secret out.
+ */
+const isPublicClient = (client: ProxyDCRClient): boolean =>
+  client.source === "cimd" || client.tokenEndpointAuthMethod === "none";
+
+/** How an error message names a client that has not authenticated. */
+const describeUnauthenticatedClient = (client: ProxyDCRClient): string => {
+  if (client.source === "cimd") {
+    return "Client ID Metadata Document clients";
+  }
+
+  if (client.tokenEndpointAuthMethod === "none") {
+    return 'clients registered with token_endpoint_auth_method "none"';
+  }
+
+  return "clients that do not authenticate with their client_secret";
+};
+
+const isTokenEndpointAuthMethod = (
+  value: string,
+): value is TokenEndpointAuthMethod =>
+  (TOKEN_ENDPOINT_AUTH_METHODS as readonly string[]).includes(value);
+
+/**
+ * Constant-time secret comparison (CWE-208). Comparing digests keeps both
+ * sides the same length, so `timingSafeEqual` neither throws on a mismatch nor
+ * reveals how long the expected secret is.
+ */
+const secretsMatch = (presented: string, expected: string): boolean =>
+  timingSafeEqual(
+    createHash("sha256").update(presented).digest(),
+    createHash("sha256").update(expected).digest(),
+  );
 
 export class OAuthProxyError extends Error {
   constructor(

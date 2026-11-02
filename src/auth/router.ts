@@ -106,6 +106,44 @@ const noStore = {
 };
 
 /**
+ * RFC 6749 §5.2: a client authentication failure is a 401 when the client
+ * tried the Authorization header, and RFC 9110 §15.5.2 requires every 401 to
+ * carry a challenge. Sent for every `invalid_client` from the token endpoint,
+ * which the spec allows, so the status does not depend on where the
+ * credentials were.
+ */
+const invalidClientHeaders = {
+  ...noStore,
+  "WWW-Authenticate": 'Basic realm="oauth", charset="UTF-8"',
+};
+
+/**
+ * RFC 6749 §2.3.1: `client_id:client_secret`, each form-urlencoded, then
+ * base64. Returns `null` for a header that does not decode to that shape.
+ */
+const parseBasicCredentials = (
+  authorization: string,
+): { clientId: string; clientSecret: string } | null => {
+  const decoded = Buffer.from(authorization.slice(6).trim(), "base64").toString(
+    "utf8",
+  );
+  const separator = decoded.indexOf(":");
+
+  if (separator <= 0) {
+    return null;
+  }
+
+  try {
+    return {
+      clientId: decodeURIComponent(decoded.slice(0, separator)),
+      clientSecret: decodeURIComponent(decoded.slice(separator + 1)),
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
  * RFC 8414 / 9728 metadata is snake_case on the wire; config is camelCase.
  * Top-level keys only — nested values are caller-defined payloads.
  */
@@ -208,21 +246,56 @@ export const createOAuthRouter = (options: OAuthRouterOptions): Hono => {
     try {
       const params = Object.fromEntries(new URLSearchParams(text).entries());
 
-      // RFC 6749 §2.3.1: credentials may arrive via Basic auth. Body wins.
+      // RFC 6749 §2.3.1: credentials may arrive via HTTP Basic instead of the
+      // body. The proxy verifies whichever was sent.
       const authHeader = raw.headers.get("authorization");
 
       if (authHeader?.toLowerCase().startsWith("basic ")) {
-        const decoded = Buffer.from(authHeader.slice(6), "base64").toString(
-          "utf8",
-        );
-        const separator = decoded.indexOf(":");
+        const credentials = parseBasicCredentials(authHeader);
 
-        if (separator !== -1) {
-          params.client_id ||= decodeURIComponent(decoded.slice(0, separator));
-          params.client_secret ||= decodeURIComponent(
-            decoded.slice(separator + 1),
+        if (!credentials) {
+          return c.json(
+            {
+              error: "invalid_client",
+              error_description: "Malformed Basic Authorization header",
+            },
+            401,
+            invalidClientHeaders,
           );
         }
+
+        // RFC 6749 §2.3: one authentication method per request. Merging the
+        // two used to let the body supply a client_id the header's secret
+        // was then tried against.
+        if (params.client_secret !== undefined) {
+          return c.json(
+            {
+              error: "invalid_request",
+              error_description:
+                "Send client credentials in the Authorization header or the request body, not both",
+            },
+            400,
+            noStore,
+          );
+        }
+
+        if (
+          params.client_id !== undefined &&
+          params.client_id !== credentials.clientId
+        ) {
+          return c.json(
+            {
+              error: "invalid_request",
+              error_description:
+                "client_id in the request body does not match the Authorization header",
+            },
+            400,
+            noStore,
+          );
+        }
+
+        params.client_id = credentials.clientId;
+        params.client_secret = credentials.clientSecret;
       }
 
       const result =
@@ -233,6 +306,11 @@ export const createOAuthRouter = (options: OAuthRouterOptions): Hono => {
       return c.json(result as never, 200, noStore);
     } catch (error) {
       const { body, status } = errorResponse(error);
+
+      if ((body as { error?: unknown }).error === "invalid_client") {
+        return c.json(body as never, 401, invalidClientHeaders);
+      }
+
       return c.json(body as never, status, noStore);
     }
   });

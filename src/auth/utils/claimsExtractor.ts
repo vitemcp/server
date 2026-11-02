@@ -19,6 +19,8 @@ export class ClaimsExtractor {
     "nbf",
     // The proxy's own grant decision — an upstream `scope` must never replace it.
     "scope",
+    // Whether a proxy token is an access or a refresh token.
+    "token_use",
   ]);
 
   constructor(config: boolean | CustomClaimsPassthroughConfig) {

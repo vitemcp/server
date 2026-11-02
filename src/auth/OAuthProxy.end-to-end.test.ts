@@ -86,6 +86,7 @@ describe("OAuth proxy end-to-end", () => {
 
     const tokens = await proxy.exchangeAuthorizationCode({
       client_id: dcr.client_id,
+      client_secret: dcr.client_secret,
       code: clientCode!,
       code_verifier: pkce.verifier,
       grant_type: "authorization_code",
@@ -132,6 +133,7 @@ describe("OAuth proxy end-to-end", () => {
 
     const first = await proxy.exchangeAuthorizationCode({
       client_id: dcr.client_id,
+      client_secret: dcr.client_secret,
       code: clientCode!,
       code_verifier: pkce.verifier,
       grant_type: "authorization_code",
@@ -140,6 +142,7 @@ describe("OAuth proxy end-to-end", () => {
 
     const refreshed = await proxy.exchangeRefreshToken({
       client_id: dcr.client_id,
+      client_secret: dcr.client_secret,
       grant_type: "refresh_token",
       refresh_token: first.refresh_token!,
     });
@@ -154,6 +157,7 @@ describe("OAuth proxy end-to-end", () => {
     await expect(
       proxy.exchangeRefreshToken({
         client_id: dcr.client_id,
+        client_secret: dcr.client_secret,
         grant_type: "refresh_token",
         refresh_token: first.refresh_token!,
       }),
@@ -171,6 +175,7 @@ describe("OAuth proxy end-to-end", () => {
 
     const tokens = await proxy.exchangeAuthorizationCode({
       client_id: dcr.client_id,
+      client_secret: dcr.client_secret,
       code: clientCode!,
       code_verifier: pkce.verifier,
       grant_type: "authorization_code",
@@ -231,6 +236,7 @@ describe("OAuth proxy end-to-end", () => {
       await expect(
         proxyB.exchangeAuthorizationCode({
           client_id: a.dcr.client_id,
+          client_secret: a.dcr.client_secret,
           code: codeA!,
           code_verifier: a.pkce.verifier,
           grant_type: "authorization_code",

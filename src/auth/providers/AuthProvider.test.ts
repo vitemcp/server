@@ -542,6 +542,7 @@ describe("session expiresAt", () => {
     });
     const { access_token } = await proxy.exchangeAuthorizationCode({
       client_id: client.client_id,
+      client_secret: client.client_secret,
       code,
       code_verifier: pkce.verifier,
       grant_type: "authorization_code",

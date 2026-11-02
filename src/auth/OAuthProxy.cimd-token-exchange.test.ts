@@ -149,7 +149,9 @@ describe("OAuthProxy CIMD client resolution across legs", () => {
     ).toContain("none");
   });
 
-  it('omits "none" when CIMD is disabled', () => {
+  it('still advertises "none" when CIMD is disabled, for public DCR clients', () => {
+    // A DCR client may register with token_endpoint_auth_method "none": it is
+    // issued no secret and authenticates the exchange with S256 PKCE.
     const dcrOnly = new OAuthProxy({
       ...baseConfig,
       clientIdMetadata: { enabled: false },
@@ -160,7 +162,7 @@ describe("OAuthProxy CIMD client resolution across legs", () => {
       expect(
         dcrOnly.getAuthorizationServerMetadata()
           .tokenEndpointAuthMethodsSupported,
-      ).not.toContain("none");
+      ).toContain("none");
     } finally {
       dcrOnly.destroy();
     }

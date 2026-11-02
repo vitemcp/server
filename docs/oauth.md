@@ -575,6 +575,12 @@ const response = await authProxy.exchangeAuthorizationCode(request);
 // response.access_token is the upstream provider's access token
 ```
 
+The proxy still records which client each upstream refresh token went to, keyed
+by its hash, and forwards a refresh only for that client. The upstream sees
+every refresh as coming from the proxy's own client, so without that record
+anyone holding a leaked upstream refresh token could redeem it with the proxy's
+credentials. Refresh tokens handed out before this was recorded are refused.
+
 ### JWT issuer
 
 `JWTIssuer` backs token swap and can be used on its own. It signs with
@@ -596,9 +602,12 @@ const result = await issuer.verify(accessToken);
 if (result.valid) console.log(result.claims);
 ```
 
-Issued tokens carry `iss`, `aud`, `client_id`, `scope`, `exp`, `iat`, and `jti`.
-`JWTIssuer.deriveKey(secret, iterations)` runs PBKDF2 — always derive production
-keys from a secret rather than passing a raw string.
+Issued tokens carry `iss`, `aud`, `client_id`, `scope`, `exp`, `iat`, `jti`, and
+`token_use` — `"access"` or `"refresh"`. The proxy accepts only access tokens as
+bearer credentials and only refresh tokens at `/oauth/token`; tokens issued
+before `token_use` existed are refused as both, so their holders sign in once
+more. `JWTIssuer.deriveKey(secret, iterations)` runs PBKDF2 — always derive
+production keys from a secret rather than passing a raw string.
 
 ### Custom claims passthrough
 
@@ -761,11 +770,14 @@ Two requirements:
 
   `MemoryTokenStorage` and `DiskStore` both implement it.
 
-Because codes are consumed at the start of the exchange, a token request that
-then fails validation — wrong `client_id`, bad `code_verifier` — spends the
-code. The client must restart at `/oauth/authorize`. That is deliberate: a code
-presented without its matching verifier has most likely leaked, so it should not
-stay redeemable.
+A token request whose client authentication fails — unknown `client_id`, wrong
+or missing secret — is refused before the code is touched, so it cannot spend
+one. Past that point codes are consumed at the start of the exchange, so a
+request that then fails validation — a code issued to another client, a bad
+`code_verifier` — spends the code. The client must restart at
+`/oauth/authorize`. That is deliberate: a code presented by the wrong client, or
+without its matching verifier, has most likely leaked, so it should not stay
+redeemable.
 
 ## Running multiple instances
 
@@ -851,6 +863,27 @@ asked for it, so the proxy requires `code_challenge` with
 `code_challenge_method=S256` from these clients and refuses the authorization
 request otherwise — whatever `allowPlainPkce` is set to.
 
+A DCR client chooses with `token_endpoint_auth_method`:
+
+| Method                          | Secret issued | At `/oauth/token`                                                    |
+| ------------------------------- | ------------- | -------------------------------------------------------------------- |
+| `client_secret_basic` (default) | yes           | Must authenticate with it, via HTTP Basic or the body — either works |
+| `client_secret_post`            | yes           | Same                                                                 |
+| `none`                          | no            | Sends `client_id` only; S256 PKCE required, as for CIMD clients      |
+
+Any other method is refused at registration with `invalid_client_metadata`. A
+failed client authentication is a `401` with `WWW-Authenticate: Basic`, and
+sending credentials in both the header and the body is refused.
+
+Codes and refresh tokens are bound to the client they were issued to. Anyone
+can register a client, so a valid secret alone proves nothing about whose
+token is being presented: another client presenting it gets `invalid_grant`.
+
+Registrations made before the auth method was recorded were issued a secret
+whatever they asked for. The proxy checks that secret when one is sent; a
+client that leaves it out is treated as public, may only redeem a code bound
+by S256 PKCE, and cannot refresh a token it obtained by authenticating.
+
 If you keep CIMD enabled, set `clientIdMetadata.allowedDomains` — otherwise the
 server will fetch client-supplied URLs. The providers take `clientIdMetadata`
 too:
@@ -911,16 +944,17 @@ Keep secrets in the environment, never in source.
 
 ### What the proxy defends against
 
-| Attack              | Mitigation                            |
-| ------------------- | ------------------------------------- |
-| Confused deputy     | User consent screen                   |
-| Code interception   | Two-tier PKCE, S256 only              |
-| Token theft         | Short-lived JWTs, encryption at rest  |
-| XSS                 | HTML escaping in the consent screen   |
-| CSRF                | State parameter validation            |
-| Replay              | Single-use authorization codes        |
-| Directory traversal | Key sanitization in `DiskStore`       |
-| Mix-up              | RFC 9207 `iss` validation on callback |
+| Attack              | Mitigation                                          |
+| ------------------- | --------------------------------------------------- |
+| Confused deputy     | User consent screen                                 |
+| Code interception   | Two-tier PKCE, S256 only                            |
+| Token theft         | Short-lived JWTs, encryption at rest                |
+| Stolen code/token   | Client authentication; grants bound to their client |
+| XSS                 | HTML escaping in the consent screen                 |
+| CSRF                | State parameter validation                          |
+| Replay              | Single-use authorization codes                      |
+| Directory traversal | Key sanitization in `DiskStore`                     |
+| Mix-up              | RFC 9207 `iss` validation on callback               |
 
 To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 
@@ -1005,8 +1039,9 @@ http://localhost:3000/oauth/authorize?client_id=<client_id>&response_type=code&r
 
 ```bash
 curl -X POST http://localhost:3000/oauth/token \
+  -u "<client_id>:<client_secret>" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=authorization_code&code=<code>&redirect_uri=http://localhost:8080/callback&code_verifier=<verifier>&client_id=<client_id>"
+  -d "grant_type=authorization_code&code=<code>&redirect_uri=http://localhost:8080/callback&code_verifier=<verifier>"
 ```
 
 ## Examples
