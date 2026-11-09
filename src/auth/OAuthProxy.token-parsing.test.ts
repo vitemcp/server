@@ -49,6 +49,29 @@ const issuePassthroughRefreshRequest = async (
   };
 };
 
+/**
+ * The request a provider sends the user back to the proxy with, for an
+ * authorization started there. Handling it exchanges the code upstream.
+ */
+const upstreamCallback = async (proxy: OAuthProxy): Promise<Request> => {
+  const dcr = await proxy.registerClient({
+    redirect_uris: ["http://localhost:3000/callback"],
+  });
+  const authorization = await proxy.authorize({
+    client_id: dcr.client_id,
+    redirect_uri: "http://localhost:3000/callback",
+    response_type: "code",
+    state: "client-state",
+  });
+  const state = new URL(
+    authorization.headers.get("Location")!,
+  ).searchParams.get("state")!;
+
+  return new Request(
+    `https://proxy.example.com/oauth/callback?code=upstream-code&state=${encodeURIComponent(state)}`,
+  );
+};
+
 describe("OAuthProxy - Token Response Parsing", () => {
   const baseConfig = {
     baseUrl: "https://proxy.example.com",
@@ -459,9 +482,143 @@ describe("OAuthProxy - Token Response Parsing", () => {
 
       proxy.destroy();
     });
+
+    it("should throw the error a URL-encoded 200 response reports, instead of reading it as a token", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      // GitHub refuses a token request this way, with a 200.
+      const mockResponse = new Response(
+        "error=bad_verification_code&error_description=The+code+passed+is+incorrect+or+expired.&error_uri=https%3A%2F%2Fdocs.github.com",
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+          },
+          status: 200,
+        },
+      );
+
+      const err = await (proxy as any)
+        .parseTokenResponse(mockResponse)
+        .catch((e: any) => e);
+
+      expect(err.name).toBe("OAuthProxyError");
+      expect(err.code).toBe("bad_verification_code");
+      expect(err.description).toBe("The code passed is incorrect or expired.");
+
+      proxy.destroy();
+    });
+
+    it("should throw the error a JSON 200 response reports, with no description", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        JSON.stringify({ error: "invalid_client" }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+
+      const err = await (proxy as any)
+        .parseTokenResponse(mockResponse)
+        .catch((e: any) => e);
+
+      expect(err.name).toBe("OAuthProxyError");
+      expect(err.code).toBe("invalid_client");
+      expect(err.description).toBeUndefined();
+
+      proxy.destroy();
+    });
+
+    it("should read a token whose response carries a null error", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        JSON.stringify({ access_token: "token", error: null }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+
+      const tokens = await (proxy as any).parseTokenResponse(mockResponse);
+
+      expect(tokens.access_token).toBe("token");
+
+      proxy.destroy();
+    });
   });
 
   describe("upstream error response handling", () => {
+    it("should pass on the error a provider reports with a 200 when exchanging the code", async () => {
+      const proxy = new OAuthProxy({
+        ...baseConfig,
+        enableTokenSwap: false,
+      });
+
+      const callback = await upstreamCallback(proxy);
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () =>
+        new Response(
+          "error=bad_verification_code&error_description=The+code+passed+is+incorrect+or+expired.",
+          {
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            status: 200,
+          },
+        );
+
+      try {
+        const err = await proxy.handleCallback(callback).catch((e: any) => e);
+
+        expect(err.name).toBe("OAuthProxyError");
+        expect(err.code).toBe("bad_verification_code");
+        expect(err.description).toBe(
+          "The code passed is incorrect or expired.",
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+        proxy.destroy();
+      }
+    });
+
+    it("should pass on the error a provider reports with a 200 when refreshing", async () => {
+      const proxy = new OAuthProxy({
+        ...baseConfig,
+        enableTokenSwap: false,
+      });
+
+      const request = await issuePassthroughRefreshRequest(
+        proxy,
+        "revoked-token",
+      );
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () =>
+        new Response(
+          "error=bad_refresh_token&error_description=The+refresh+token+passed+is+incorrect+or+expired.",
+          {
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            status: 200,
+          },
+        );
+
+      try {
+        const err = await proxy
+          .exchangeRefreshToken(request)
+          .catch((e: any) => e);
+
+        expect(err.name).toBe("OAuthProxyError");
+        expect(err.code).toBe("bad_refresh_token");
+        expect(err.description).toBe(
+          "The refresh token passed is incorrect or expired.",
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+        proxy.destroy();
+      }
+    });
+
     it("should handle non-JSON error from upstream token endpoint without crashing", async () => {
       // Disable token swap so exchangeRefreshToken goes through handlePassthroughRefresh
       const proxy = new OAuthProxy({

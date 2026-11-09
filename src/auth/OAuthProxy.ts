@@ -1763,6 +1763,11 @@ export class OAuthProxy {
       const text = await response.text();
       const params = new URLSearchParams(text);
 
+      this.rejectUpstreamError({
+        error: params.get("error"),
+        error_description: params.get("error_description"),
+      });
+
       const rawData = {
         access_token: params.get("access_token") || "",
         expires_in: params.get("expires_in")
@@ -1782,6 +1787,7 @@ export class OAuthProxy {
 
     // Default to JSON parsing
     const rawJson = await response.json();
+    this.rejectUpstreamError(rawJson);
     return tokenResponseSchema.parse(rawJson);
   }
 
@@ -1909,6 +1915,37 @@ export class OAuthProxy {
       scope: tokens.scope ? tokens.scope.split(" ") : [],
       tokenType: tokens.token_type || "Bearer",
     };
+  }
+
+  /**
+   * Throws the error a provider's token response reports, if it reports one.
+   *
+   * RFC 6749 §5.2 fixes the fields of a refusal, not the status that carries
+   * it, and GitHub answers a refused token request with a 200. Read as a
+   * token, that body failed the schema for want of an access token, and the
+   * client was told its own request was malformed (`invalid_request`) instead
+   * of what the provider refused. The provider's code and description are
+   * passed on, as the non-2xx paths already do.
+   */
+  private rejectUpstreamError(payload: unknown): void {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+
+    const { error, error_description } = payload as {
+      error?: unknown;
+      error_description?: unknown;
+    };
+
+    // A provider that issued a token leaves `error` out; empty is no error.
+    if (typeof error !== "string" || error === "") {
+      return;
+    }
+
+    throw new OAuthProxyError(
+      error,
+      typeof error_description === "string" ? error_description : undefined,
+    );
   }
 
   /**
