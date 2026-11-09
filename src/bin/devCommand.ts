@@ -90,9 +90,13 @@ export const buildDevCommand = (
     ];
   }
 
+  // `--` ends mcp-cli's own options. Its parser reads any flag it meets, known
+  // or not, and takes the next word as that flag's value, so `--watch` and the
+  // file never reached the server: `npx tsx` started with no file at all.
   return [
     "npx",
     "@wong2/mcp-cli",
+    "--",
     "npx",
     "tsx",
     ...(watch ? ["--watch"] : []),
