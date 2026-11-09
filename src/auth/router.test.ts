@@ -211,6 +211,104 @@ describe("OAuth router", () => {
     });
   });
 
+  describe("callback and consent errors", () => {
+    it("answers a callback with an unknown state as the OAuth error it is", async () => {
+      const app = createOAuthRouter({ proxy: makeProxy() });
+
+      const response = await get(app, "/oauth/callback?code=c&state=unknown");
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "invalid_request",
+        error_description: "Invalid or expired state",
+      });
+    });
+
+    it("passes on a code the provider refused with a 200", async () => {
+      const proxy = makeProxy();
+      const app = createOAuthRouter({ proxy });
+      const { client_id } = await proxy.registerClient({
+        redirect_uris: ["https://client.example.com/callback"],
+      });
+      const authorization = await get(
+        app,
+        `/oauth/authorize?${new URLSearchParams({
+          client_id,
+          redirect_uri: "https://client.example.com/callback",
+          response_type: "code",
+          state: "client-state",
+        })}`,
+      );
+      const state = new URL(
+        authorization.headers.get("Location")!,
+      ).searchParams.get("state")!;
+
+      // GitHub refuses a code this way, with a 200.
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+        async () =>
+          new Response(
+            "error=bad_verification_code&error_description=The+code+passed+is+incorrect+or+expired.",
+            {
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              status: 200,
+            },
+          ),
+      );
+
+      try {
+        const response = await get(
+          app,
+          `/oauth/callback?code=c&state=${encodeURIComponent(state)}`,
+        );
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: "bad_verification_code",
+          error_description: "The code passed is incorrect or expired.",
+        });
+      } finally {
+        fetchSpy.mockRestore();
+        proxy.destroy();
+      }
+    });
+
+    it("answers a consent submission with no transaction as the OAuth error it is", async () => {
+      const app = createOAuthRouter({ proxy: makeProxy() });
+
+      const response = await post(app, "/oauth/consent", {
+        body: new URLSearchParams({ action: "approve" }).toString(),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "invalid_request",
+        error_description: "Missing transaction_id",
+      });
+    });
+
+    it("leaves a failure that is not an OAuth error to answer as one", async () => {
+      const proxy = makeProxy();
+      vi.spyOn(proxy, "handleCallback").mockRejectedValue(
+        new Error("storage is down"),
+      );
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const app = createOAuthRouter({ proxy });
+
+      try {
+        const response = await get(app, "/oauth/callback?code=c&state=s");
+
+        expect(response.status).toBe(500);
+      } finally {
+        consoleSpy.mockRestore();
+        proxy.destroy();
+      }
+    });
+  });
+
   /**
    * RFC 6749 §5.1 / RFC 7591 §3.2.1. A token or `client_secret` that an
    * intermediary is allowed to retain is a credential leak, so these headers

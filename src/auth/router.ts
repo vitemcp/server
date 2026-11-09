@@ -20,6 +20,21 @@ const errorResponse = (error: unknown) => {
 };
 
 /**
+ * The answer to an error from `callback` or `consent`, the routes the user's
+ * browser lands on. An OAuth error the proxy raised — an expired state, a code
+ * the provider refused — is sent as its JSON and status, where it used to
+ * become a bare 500. Anything else is rethrown, to be logged and answered as
+ * the failure of the server it is rather than as a fault in the request.
+ */
+const browserErrorResponse = (error: unknown) => {
+  if (typeof (error as null | OAuthErrorish)?.toJSON !== "function") {
+    throw error;
+  }
+
+  return errorResponse(error);
+};
+
+/**
  * Reads a body under a hard cap, enforced *while* reading — measuring after
  * buffering would let a client push arbitrary bytes into memory.
  *
@@ -315,13 +330,23 @@ export const createOAuthRouter = (options: OAuthRouterOptions): Hono => {
     }
   });
 
-  app.get(`${basePath}/oauth/callback`, async (c) =>
-    proxy.handleCallback(c.req.raw),
-  );
+  app.get(`${basePath}/oauth/callback`, async (c) => {
+    try {
+      return await proxy.handleCallback(c.req.raw);
+    } catch (error) {
+      const { body, status } = browserErrorResponse(error);
+      return c.json(body as never, status);
+    }
+  });
 
-  app.all(`${basePath}/oauth/consent`, async (c) =>
-    proxy.handleConsent(c.req.raw),
-  );
+  app.all(`${basePath}/oauth/consent`, async (c) => {
+    try {
+      return await proxy.handleConsent(c.req.raw);
+    } catch (error) {
+      const { body, status } = browserErrorResponse(error);
+      return c.json(body as never, status);
+    }
+  });
 
   return app;
 };
