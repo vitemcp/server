@@ -180,6 +180,12 @@ fills it: one whose properties are all optional, called with only a path
 parameter, or one the document gives no schema. An optional body that nothing
 fills is left out.
 
+A body is optional unless `requestBody.required` is `true`, and an optional
+body's required properties are required only once it is sent: a call may leave
+every body argument out, but one that supplies any of them has to supply all
+the properties the body requires. The tool's schema says so with `if`/`then`.
+A required path, query, header or cookie parameter is required either way.
+
 Names can collide between the four locations and the body. A colliding
 parameter is suffixed with its location; the body keeps the bare name:
 

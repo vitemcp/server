@@ -464,3 +464,86 @@ describe("fromOpenAPI, a path item shared between paths", () => {
     await client.close();
   });
 });
+
+describe("fromOpenAPI, an optional request body", () => {
+  it.each([
+    ["application/json", '{"mode":"fast","name":"n"}'],
+    ["application/x-www-form-urlencoded", "mode=fast&name=n"],
+  ])(
+    "sends an optional %s body whole or not at all",
+    async (contentType, sent) => {
+      const requests: Array<{
+        body: unknown;
+        contentType: null | string;
+        url: string;
+      }> = [];
+      const client = await connect(
+        await fromOpenAPI({
+          fetch: (async (input, init) => {
+            requests.push({
+              body: init?.body,
+              contentType: new Headers(init?.headers).get("content-type"),
+              url: String(input),
+            });
+
+            return new Response("{}", {
+              headers: { "content-type": "application/json" },
+            });
+          }) as typeof fetch,
+          spec: {
+            info: { title: "Jobs", version: "1.0.0" },
+            openapi: "3.0.3",
+            paths: {
+              "/jobs/{id}": {
+                post: {
+                  operationId: "runJob",
+                  parameters: [
+                    { in: "path", name: "id", schema: { type: "string" } },
+                  ],
+                  // No `required`, so false: the body may be left out.
+                  requestBody: {
+                    content: {
+                      [contentType]: {
+                        schema: {
+                          properties: {
+                            enabled: { type: "boolean" },
+                            mode: { type: "string" },
+                            name: { type: "string" },
+                          },
+                          required: ["mode", "name"],
+                          type: "object",
+                        },
+                      },
+                    },
+                  },
+                  responses: { "200": { description: "OK" } },
+                },
+              },
+            },
+            servers: [{ url: "https://api.example.com" }],
+          },
+        }),
+      );
+
+      const call = async (args: Record<string, unknown>) =>
+        (await client.callTool({ arguments: args, name: "runJob" })).isError;
+
+      // Left out, sent whole, or refused for want of a property it requires.
+      expect(await call({ id: "1" })).toBeFalsy();
+      expect(await call({ enabled: false, id: "1" })).toBe(true);
+      expect(await call({ id: "1", name: "n" })).toBe(true);
+      expect(await call({ id: "1", mode: "fast", name: "n" })).toBeFalsy();
+
+      expect(requests).toEqual([
+        {
+          body: undefined,
+          contentType: null,
+          url: "https://api.example.com/jobs/1",
+        },
+        { body: sent, contentType, url: "https://api.example.com/jobs/1" },
+      ]);
+
+      await client.close();
+    },
+  );
+});

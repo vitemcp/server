@@ -389,6 +389,108 @@ describe("request bodies", () => {
       kind: "json",
     });
     expect(binding.inputSchema.required).toEqual(["name"]);
+    expect(binding.inputSchema).not.toHaveProperty("if");
+  });
+
+  it.each([false, undefined])(
+    "requires an optional body's required properties only once it is sent (required: %s)",
+    (bodyRequired) => {
+      const [{ binding }] = bind({
+        openapi: "3.0.3",
+        paths: {
+          "/jobs/{id}": {
+            post: {
+              parameters: [
+                { in: "path", name: "id", schema: { type: "string" } },
+              ],
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: {
+                      properties: {
+                        enabled: { type: "boolean" },
+                        mode: { type: "string" },
+                        name: { type: "string" },
+                      },
+                      required: ["name", "mode"],
+                      type: "object",
+                    },
+                  },
+                },
+                ...(bodyRequired === undefined
+                  ? {}
+                  : { required: bodyRequired }),
+              },
+            },
+          },
+        },
+      });
+
+      expect(binding.bodyRequired).toBe(false);
+      expect(binding.inputSchema.required).toEqual(["id"]);
+      expect(binding.inputSchema.if).toEqual({
+        anyOf: [
+          { required: ["enabled"] },
+          { required: ["mode"] },
+          { required: ["name"] },
+        ],
+      });
+      expect(binding.inputSchema.then).toEqual({ required: ["mode", "name"] });
+    },
+  );
+
+  it("names a suffixed body property in that condition by its argument", () => {
+    const [{ binding }] = bind({
+      openapi: "3.0.3",
+      paths: {
+        "/items": {
+          post: {
+            requestBody: jsonBody(
+              {
+                properties: {
+                  ["__proto__"]: { type: "string" },
+                  enabled: { type: "boolean" },
+                },
+                required: ["__proto__"],
+                type: "object",
+              },
+              false,
+            ),
+          },
+        },
+      },
+    });
+
+    expect(binding.inputSchema.required).toBeUndefined();
+    expect(binding.inputSchema.if).toEqual({
+      anyOf: [{ required: ["__proto____body"] }, { required: ["enabled"] }],
+    });
+    expect(binding.inputSchema.then).toEqual({
+      required: ["__proto____body"],
+    });
+  });
+
+  it("adds no condition for an optional body that requires nothing", () => {
+    const [{ binding }] = bind({
+      openapi: "3.0.3",
+      paths: {
+        "/pets": {
+          post: {
+            requestBody: jsonBody(
+              {
+                properties: { name: { type: "string" } },
+                type: "object",
+              },
+              false,
+            ),
+          },
+        },
+      },
+    });
+
+    expect(binding.inputSchema).not.toHaveProperty("required");
+    expect(binding.inputSchema).not.toHaveProperty("if");
+    expect(binding.inputSchema).not.toHaveProperty("then");
   });
 
   it("keeps a __proto__ property that an allOf branch contributes", () => {

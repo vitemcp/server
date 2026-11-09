@@ -115,14 +115,18 @@ export const buildToolBinding = (
     }
   }
 
+  const bodyKeys: string[] = [];
+  const requiredOnceSent: string[] = [];
+
   for (const [name, property] of body.properties) {
     const key = name === "__proto__" ? claimKey(`${name}__body`) : name;
 
     properties[key] = property.schema;
     parameters[key] = { kind: "body", name };
+    bodyKeys.push(key);
 
     if (property.required) {
-      required.push(key);
+      (body.required ? required : requiredOnceSent).push(key);
     }
   }
 
@@ -132,6 +136,15 @@ export const buildToolBinding = (
     type: "object",
     ...(required.length > 0 ? { required: required.sort() } : {}),
   };
+
+  // `requestBody.required` defaults to false, and a body that is not required
+  // may be left out even though its schema requires properties. Required
+  // outright, they refused every call that left the body out. They still hold
+  // once the body is sent, which supplying any one of its arguments means.
+  if (requiredOnceSent.length > 0) {
+    inputSchema.if = { anyOf: bodyKeys.map((key) => ({ required: [key] })) };
+    inputSchema.then = { required: requiredOnceSent.sort() };
+  }
 
   const definitions = collectDefinitions(properties, normalizer.definitions);
 
