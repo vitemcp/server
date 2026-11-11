@@ -471,5 +471,66 @@ describe("OAuth router", () => {
       // The unscoped path must not also answer.
       expect((await get(app, "/oauth/register")).status).toBe(404);
     });
+
+    // The form's action was `/oauth/consent` whatever the router was mounted
+    // under, so with a base path Approve went to a path no route answers.
+    it.each(["", "/issuer1", "/tenant/team"])(
+      "has the consent form post to the route beside it under base path '%s'",
+      async (basePath) => {
+        const proxy = new OAuthProxy({
+          allowedRedirectUriPatterns: ["https://client.example.com/*"],
+          baseUrl: `http://localhost:4200${basePath}`,
+          upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
+          upstreamClientId: "upstream-id",
+          upstreamClientSecret: "upstream-secret",
+          upstreamTokenEndpoint: "https://provider.com/oauth/token",
+        });
+        const app = createOAuthRouter({ basePath, proxy });
+
+        try {
+          const client = await proxy.registerClient({
+            redirect_uris: ["https://client.example.com/callback"],
+          });
+          const authorizeUrl = `http://localhost:4200${basePath}/oauth/authorize?${new URLSearchParams(
+            {
+              client_id: client.client_id,
+              redirect_uri: "https://client.example.com/callback",
+              response_type: "code",
+              state: "client-state",
+            },
+          )}`;
+
+          const page = await app.fetch(new Request(authorizeUrl));
+          expect(page.status).toBe(200);
+
+          const html = await page.text();
+          const action = /<form method="POST" action="([^"]+)"/.exec(html)?.[1];
+          const transactionId = /name="transaction_id" value="([^"]+)"/.exec(
+            html,
+          )?.[1];
+
+          // Resolved as a browser resolves it: against the page the form is on.
+          const consentUrl = new URL(action!, authorizeUrl);
+          expect(consentUrl.pathname).toBe(`${basePath}/oauth/consent`);
+
+          const approved = await app.fetch(
+            new Request(consentUrl, {
+              body: new URLSearchParams({
+                action: "approve",
+                transaction_id: transactionId!,
+              }),
+              method: "POST",
+            }),
+          );
+
+          expect(approved.status).toBe(302);
+          expect(new URL(approved.headers.get("location")!).origin).toBe(
+            "https://provider.com",
+          );
+        } finally {
+          proxy.destroy();
+        }
+      },
+    );
   });
 });

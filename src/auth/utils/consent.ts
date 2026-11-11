@@ -44,6 +44,11 @@ export class ConsentManager {
 
   /**
    * Generate HTML for consent screen
+   *
+   * The form posts to `consent`, relative to the page it is on, rather than to
+   * `/oauth/consent`. The page is served at `<basePath>/oauth/authorize` with
+   * the consent route beside it, so under a base path the rooted address was
+   * one no route answers, and Approve came back 404.
    */
   generateConsentScreen(data: ConsentData): string {
     const { clientName, provider, scope, transactionId } = data;
@@ -232,7 +237,7 @@ export class ConsentManager {
             </p>
         </div>
 
-        <form method="POST" action="/oauth/consent">
+        <form method="POST" action="consent">
             <input type="hidden" name="transaction_id" value="${this.escapeHtml(transactionId)}">
             <div class="actions">
                 <button type="submit" name="action" value="deny" class="deny">
