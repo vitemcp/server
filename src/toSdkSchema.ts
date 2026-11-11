@@ -66,9 +66,9 @@ const LENIENT_OPTIONS = new Map<string, Record<string, unknown>>([
  * converted, since closing them would misdescribe results the schema allows.
  *
  * Shared by `ViteMCP` and `EdgeViteMCP`, so what a tool advertises does not
- * depend on which of them serves it. Rejects when `convert` does, and when a
- * library refuses a schema even leniently: each caller leaves that tool out
- * and serves the rest.
+ * depend on which of them serves it. Rejects when `convert` does, when a
+ * library refuses a schema even leniently, and for an input schema that does
+ * not describe an object: each caller leaves that tool out and serves the rest.
  */
 export const toSdkSchema = async (
   schema: unknown,
@@ -96,10 +96,14 @@ export const toSdkSchema = async (
       io,
     );
 
+    assertDescribesArguments(json, io);
+
     return lenient ? advertising(standard, json) : { "~standard": standard };
   }
 
   const json = await convert(schema as StandardSchemaV1, io);
+
+  assertDescribesArguments(json, io);
 
   return advertising(standard, io === "input" ? strictInputSchema(json) : json);
 };
@@ -146,6 +150,25 @@ const advertising = <P extends StandardSchemaV1.Props>(
     jsonSchema: { input: () => advertised, output: () => advertised },
   },
 });
+
+/**
+ * Refuses an input schema that describes anything but an object. A tool's
+ * arguments are always one, and the SDK will not list a schema that says
+ * otherwise: `parameters: z.string()` failed `tools/list` for every tool, as an
+ * unconvertible schema did.
+ */
+const assertDescribesArguments = (
+  json: JsonSchema,
+  io: "input" | "output",
+): void => {
+  if (io === "input" && json.type !== undefined && json.type !== "object") {
+    throw new Error(
+      `A tool's arguments are an object, and this schema describes ${JSON.stringify(
+        json.type,
+      )}. Wrap it in an object schema.`,
+    );
+  }
+};
 
 /**
  * A schema's own JSON Schema, and whether it had to be asked for leniently.

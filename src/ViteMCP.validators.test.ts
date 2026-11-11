@@ -772,6 +772,53 @@ describe("schemas that hold what JSON Schema cannot say", () => {
     });
   });
 
+  // The SDK refuses to list an input schema that describes anything but an
+  // object, which failed the list for every tool as well.
+  it.each([
+    ["Zod", z.string()],
+    ["Valibot", v.string()],
+  ])(
+    "leaves out a tool whose %s parameters do not describe an object, and serves the rest",
+    async (_, parameters) => {
+      const error = vi.fn();
+      const noop = () => {};
+      const server = serverWithAdd({
+        debug: noop,
+        error,
+        info: noop,
+        log: noop,
+        warn: noop,
+      });
+
+      server.addTool({
+        execute: async () => "unreachable",
+        name: "scalar",
+        parameters,
+      });
+
+      await runWithTestServer({
+        run: async ({ client }) => {
+          for (let request = 0; request < 2; request++) {
+            const { tools } = await client.listTools();
+            expect(tools.map((tool) => tool.name)).toEqual(["add"]);
+          }
+
+          // Reported once, not on every request.
+          expect(error).toHaveBeenCalledOnce();
+          expect(error).toHaveBeenCalledWith(
+            '[ViteMCP error] Tool "scalar" is not served:',
+            expect.objectContaining({
+              message: expect.stringContaining(
+                'this schema describes "string"',
+              ),
+            }),
+          );
+        },
+        server,
+      });
+    },
+  );
+
   // A library with no lenient form to ask for: what it throws while the SDK
   // lists the tools failed the list too, rather than its own tool alone.
   it("leaves out a tool whose library refuses its schema outright, and serves the rest", async () => {

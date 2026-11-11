@@ -270,8 +270,9 @@ JSON Schema can express neither. Converted input schemas get
 schema (`v.record()`, `v.objectWithRest()`) describes the extra keys, or where
 the keys are declared in the branches of a `v.union()`, `v.variant()` or
 `v.intersect()`, or behind the `$ref` a `v.lazy()` becomes; converted output
-schemas are left as they are. A tool whose schema cannot be converted at all
-is left out of the server and reported through the logger.
+schemas are left as they are. A tool whose schema cannot be converted at all,
+or whose `parameters` do not describe an object, is left out of the server and
+reported through the logger.
 
 A plain JSON Schema is validated in the dialect its `$schema` declares —
 2020-12, 2019-09, draft-07 or draft-06 — and as 2020-12 when it declares none,
