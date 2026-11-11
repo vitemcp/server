@@ -14,6 +14,35 @@ export type JsonSchemaConverter = (
 ) => Promise<JsonSchema>;
 
 /**
+ * `~standard.jsonSchema`, as Zod v4 and ArkType implement it. Declared here
+ * because `@standard-schema/spec` 1.0 predates it.
+ */
+type NativeJsonSchema = Record<
+  "input" | "output",
+  (options: {
+    libraryOptions?: Record<string, unknown>;
+    target: string;
+  }) => JsonSchema
+>;
+
+/** The draft the SDK asks a schema for when `tools/list` describes a tool. */
+const SDK_TARGET = "draft-2020-12";
+
+/**
+ * What a library is told so that it leaves open the parts of a schema JSON
+ * Schema cannot say, rather than refuse the schema over them. Zod describes
+ * such a part as `{}`. ArkType hands over what it had worked out before it
+ * reached the part: `{}` for a `Date`, `{ type: "string" }` for a string under
+ * a `narrow()`.
+ *
+ * A library not named here is left to refuse, and its tool is not served.
+ */
+const LENIENT_OPTIONS = new Map<string, Record<string, unknown>>([
+  ["arktype", { fallback: (context: { base: JsonSchema }) => context.base }],
+  ["zod", { unrepresentable: "any" }],
+]);
+
+/**
  * A tool's schema as the SDK registers it: one that validates by own keys only
  * (see `withOwnKeysOnly`) and carries a JSON Schema. The schema itself is left
  * as it was, since whoever wrote it may use it elsewhere.
@@ -25,11 +54,21 @@ export type JsonSchemaConverter = (
  * a `check()` — so validating against it instead would pass `execute`
  * arguments the schema never produced.
  *
- * Advertised inputs are closed with `strictInputSchema`. Outputs are left as
+ * A native schema is converted here too, once, the way the SDK will for
+ * `tools/list`. The SDK converts every tool in the one handler, so a schema
+ * its library refused to convert — a `z.date()`, a `z.bigint()`, an ArkType
+ * `narrow()` — failed the list for every tool, though each could still be
+ * called. One refused is asked for again with what JSON Schema cannot say left
+ * open (see `LENIENT_OPTIONS`), which is what Valibot's converter is already
+ * told, and that copy is advertised in place of the library's own.
+ *
+ * Converted inputs are closed with `strictInputSchema`. Outputs are left as
  * converted, since closing them would misdescribe results the schema allows.
  *
  * Shared by `ViteMCP` and `EdgeViteMCP`, so what a tool advertises does not
- * depend on which of them serves it. Rejects when `convert` does.
+ * depend on which of them serves it. Rejects when `convert` does, and when a
+ * library refuses a schema even leniently: each caller leaves that tool out
+ * and serves the rest.
  */
 export const toSdkSchema = async (
   schema: unknown,
@@ -43,24 +82,26 @@ export const toSdkSchema = async (
   const standard = withOwnKeysOnly(
     (
       schema as {
-        "~standard": { jsonSchema?: unknown } & StandardSchemaV1.Props;
+        "~standard": {
+          jsonSchema?: NativeJsonSchema;
+        } & StandardSchemaV1.Props;
       }
     )["~standard"],
   );
 
   if (standard.jsonSchema) {
-    return { "~standard": standard };
+    const { json, lenient } = nativeJsonSchema(
+      standard.jsonSchema,
+      standard.vendor,
+      io,
+    );
+
+    return lenient ? advertising(standard, json) : { "~standard": standard };
   }
 
   const json = await convert(schema as StandardSchemaV1, io);
-  const advertised = io === "input" ? strictInputSchema(json) : json;
 
-  return {
-    "~standard": {
-      ...standard,
-      jsonSchema: { input: () => advertised, output: () => advertised },
-    },
-  };
+  return advertising(standard, io === "input" ? strictInputSchema(json) : json);
 };
 
 /**
@@ -93,6 +134,42 @@ export const valibotToJsonSchema: JsonSchemaConverter = async (schema, io) => {
     errorMode: "ignore",
     typeMode: io,
   }) as JsonSchema;
+};
+
+/** `standard`, carrying `advertised` as its JSON Schema, input and output. */
+const advertising = <P extends StandardSchemaV1.Props>(
+  standard: P,
+  advertised: JsonSchema,
+) => ({
+  "~standard": {
+    ...standard,
+    jsonSchema: { input: () => advertised, output: () => advertised },
+  },
+});
+
+/**
+ * A schema's own JSON Schema, and whether it had to be asked for leniently.
+ * Throws what the library does when it refuses the schema either way.
+ */
+const nativeJsonSchema = (
+  native: NativeJsonSchema,
+  vendor: string,
+  io: "input" | "output",
+): { json: JsonSchema; lenient: boolean } => {
+  try {
+    return { json: native[io]({ target: SDK_TARGET }), lenient: false };
+  } catch (error) {
+    const libraryOptions = LENIENT_OPTIONS.get(vendor);
+
+    if (!libraryOptions) {
+      throw error;
+    }
+
+    return {
+      json: native[io]({ libraryOptions, target: SDK_TARGET }),
+      lenient: true,
+    };
+  }
 };
 
 /**

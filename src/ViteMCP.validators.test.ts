@@ -2,6 +2,7 @@ import { Ajv } from "ajv";
 import { type } from "arktype";
 import * as v from "valibot";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import { runWithTestServer, withoutEnvelope } from "./testHarness.js";
 import { ViteMCP } from "./ViteMCP.js";
@@ -642,5 +643,183 @@ describe("Valibot schemas converted to JSON Schema", () => {
       vi.doUnmock("@valibot/to-json-schema");
       vi.resetModules();
     }
+  });
+});
+
+// Zod and ArkType emit their own JSON Schema, and refuse a schema holding
+// something JSON Schema cannot say. The SDK asks for it while it answers
+// `tools/list`, for every tool in turn, so one such schema failed the list for
+// all of them — though each tool could still be called.
+describe("schemas that hold what JSON Schema cannot say", () => {
+  const serverWithAdd = (
+    logger?: ConstructorParameters<typeof ViteMCP>[0]["logger"],
+  ) => {
+    const server = new ViteMCP({ logger, name: "Test", version: "1.0.0" });
+
+    server.addTool({
+      execute: async ({ a, b }) => String(a + b),
+      name: "add",
+      parameters: z.object({ a: z.number(), b: z.number() }),
+    });
+
+    return server;
+  };
+
+  it.each([
+    ["a z.date()", z.object({ at: z.date() }), {}],
+    ["a z.coerce.date()", z.object({ at: z.coerce.date() }), {}],
+    ["a z.bigint()", z.object({ at: z.bigint() }), {}],
+    ["an ArkType Date", type({ at: "Date" }), {}],
+    [
+      "an ArkType narrow()",
+      type({ at: type("string").narrow((value) => value.length > 2) }),
+      { type: "string" },
+    ],
+  ])(
+    "lists every tool when one's parameters hold %s",
+    async (_, parameters, at) => {
+      const server = serverWithAdd();
+
+      server.addTool({
+        execute: async () => "scheduled",
+        name: "schedule",
+        parameters,
+      });
+
+      await runWithTestServer({
+        run: async ({ client }) => {
+          const { tools } = await client.listTools();
+
+          expect(tools.map((tool) => tool.name)).toEqual(["add", "schedule"]);
+          expect(tools[0].inputSchema).toMatchObject({
+            properties: { a: { type: "number" }, b: { type: "number" } },
+            required: ["a", "b"],
+          });
+
+          // Only the part that cannot be said is left open.
+          expect(tools[1].inputSchema).toMatchObject({
+            required: ["at"],
+            type: "object",
+          });
+          expect(tools[1].inputSchema.properties).toEqual({ at });
+        },
+        server,
+      });
+    },
+  );
+
+  it("still validates with the library itself, so a date reaches execute as one", async () => {
+    let received: unknown;
+    const server = serverWithAdd();
+
+    server.addTool({
+      execute: async ({ at }) => {
+        received = at;
+        return at.toISOString();
+      },
+      name: "schedule",
+      parameters: z.object({ at: z.coerce.date() }),
+    });
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        await client.listTools();
+
+        expect(
+          withoutEnvelope(
+            await client.callTool({
+              arguments: { at: "2026-01-02T03:04:05.000Z" },
+              name: "schedule",
+            }),
+          ),
+        ).toEqual({
+          content: [{ text: "2026-01-02T03:04:05.000Z", type: "text" }],
+        });
+        expect(received).toBeInstanceOf(Date);
+
+        const refused = await client.callTool({
+          arguments: { at: "not a date" },
+          name: "schedule",
+        });
+
+        expect(refused.isError).toBe(true);
+      },
+      server,
+    });
+  });
+
+  it("describes an output schema the same way", async () => {
+    const server = serverWithAdd();
+
+    server.addTool({
+      execute: async () => ({ now: new Date(0) }),
+      name: "now",
+      outputSchema: z.object({ now: z.date() }),
+    });
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        const { tools } = await client.listTools();
+
+        expect(tools.map((tool) => tool.name)).toEqual(["add", "now"]);
+        expect(tools[1].outputSchema).toMatchObject({
+          required: ["now"],
+          type: "object",
+        });
+        expect(tools[1].outputSchema?.properties).toEqual({ now: {} });
+      },
+      server,
+    });
+  });
+
+  // A library with no lenient form to ask for: what it throws while the SDK
+  // lists the tools failed the list too, rather than its own tool alone.
+  it("leaves out a tool whose library refuses its schema outright, and serves the rest", async () => {
+    const error = vi.fn();
+    const noop = () => {};
+    const server = serverWithAdd({
+      debug: noop,
+      error,
+      info: noop,
+      log: noop,
+      warn: noop,
+    });
+    const refuse = (): never => {
+      throw new Error("this library has no JSON Schema for a clock");
+    };
+
+    server.addTool({
+      execute: async () => "unreachable",
+      name: "opaque",
+      parameters: {
+        "~standard": {
+          jsonSchema: { input: refuse, output: refuse },
+          validate: (value: unknown) => ({
+            value: value as Record<string, never>,
+          }),
+          vendor: "hand-rolled",
+          version: 1 as const,
+        },
+      },
+    });
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        for (let request = 0; request < 2; request++) {
+          const { tools } = await client.listTools();
+          expect(tools.map((tool) => tool.name)).toEqual(["add"]);
+        }
+
+        // Reported once, not on every request.
+        expect(error).toHaveBeenCalledOnce();
+        expect(error).toHaveBeenCalledWith(
+          '[ViteMCP error] Tool "opaque" is not served:',
+          expect.objectContaining({
+            message: expect.stringContaining("no JSON Schema for a clock"),
+          }),
+        );
+      },
+      server,
+    });
   });
 });

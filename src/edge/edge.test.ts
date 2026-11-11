@@ -461,6 +461,37 @@ describe("EdgeViteMCP", () => {
     );
   });
 
+  // Zod refuses to convert a schema holding a `Date`, and the SDK asks while
+  // it answers `tools/list`, so the one tool failed the list for both.
+  it("lists every tool when one's schema holds what JSON Schema cannot say", async () => {
+    const server = new EdgeViteMCP({ name: "TestServer", version: "1.0.0" });
+
+    server.addTool({
+      description: "Greet someone",
+      execute: async ({ name }) => `Hello, ${name}!`,
+      name: "greet",
+      parameters: z.object({ name: z.string() }),
+    });
+    server.addTool({
+      description: "Schedule something",
+      execute: async () => "scheduled",
+      name: "schedule",
+      parameters: z.object({ at: z.date() }),
+    });
+
+    const listed = await call(server, "tools/list");
+
+    expect(listed.error).toBeUndefined();
+
+    const { tools } = listed.result as {
+      tools: { inputSchema: { properties: unknown }; name: string }[];
+    };
+
+    expect(tools.map((tool) => tool.name)).toEqual(["greet", "schedule"]);
+    // Only the part that cannot be said is left open.
+    expect(tools[1].inputSchema.properties).toEqual({ at: {} });
+  });
+
   it("serves custom routes alongside the MCP endpoint", async () => {
     const server = makeServer();
     server.getApp().get("/health", (c) => c.text("ok"));

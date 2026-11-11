@@ -258,17 +258,20 @@ server.addTool({
 ```
 
 Works for `outputSchema` too, and is advertised as written — as are Zod and
-ArkType schemas, which emit their own JSON Schema. Anything else (Valibot, for
-one) is converted to JSON Schema for `tools/list` only; arguments and results
-are still validated by the library itself, so a `v.transform()` reaches
-`execute` and a `v.check()` is enforced even though JSON Schema can express
-neither. Converted input schemas get `additionalProperties: false` on every
-object, except where a record or rest schema (`v.record()`,
-`v.objectWithRest()`) describes the extra keys, or where the keys are declared
-in the branches of a `v.union()`, `v.variant()` or `v.intersect()`, or behind
-the `$ref` a `v.lazy()` becomes; converted output schemas are left as they
-are. A tool whose schema cannot be converted at all is left out of the server
-and reported through the logger.
+ArkType schemas, which emit their own JSON Schema. Where one of those holds
+something JSON Schema cannot express — a `z.date()`, a `z.bigint()`, an ArkType
+`narrow()` — that part alone is advertised as open, as `{}` or as the type a
+`narrow()` narrows, and the library still enforces it. A schema from any other
+library (Valibot, for one) is converted to JSON Schema for `tools/list` only;
+arguments and results are still validated by the library itself, so a
+`v.transform()` reaches `execute` and a `v.check()` is enforced even though
+JSON Schema can express neither. Converted input schemas get
+`additionalProperties: false` on every object, except where a record or rest
+schema (`v.record()`, `v.objectWithRest()`) describes the extra keys, or where
+the keys are declared in the branches of a `v.union()`, `v.variant()` or
+`v.intersect()`, or behind the `$ref` a `v.lazy()` becomes; converted output
+schemas are left as they are. A tool whose schema cannot be converted at all
+is left out of the server and reported through the logger.
 
 A plain JSON Schema is validated in the dialect its `$schema` declares —
 2020-12, 2019-09, draft-07 or draft-06 — and as 2020-12 when it declares none,
