@@ -216,7 +216,9 @@ schema, which is what the model reads when deciding what to put there.
 `pipeDelimited` and `deepObject` for query parameters, `simple`, `label` and
 `matrix` for path parameters. An array sent to an operation declaring
 `explode: false` arrives comma-joined, not repeated. An empty array or object is
-left out of the query, rather than sent as `tags=`.
+left out of the query, rather than sent as `tags=`. A `null` given for a
+nullable query, header or cookie parameter is left out as well, rather than
+sent as the text `null`.
 
 `components.schemas` referenced by an operation travel with it as `$defs` —
 only the ones it actually reaches, so `tools/list` does not carry the whole

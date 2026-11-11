@@ -68,6 +68,15 @@ export const executeRequest = async <T extends ViteMCPAuth>(
 
     const { parameter } = binder;
 
+    // RFC 6570, which OpenAPI's styles are modelled on, treats `null` as
+    // undefined, and leaves an undefined value out. A nullable parameter
+    // accepts `null`, and a model fills optional arguments with it, so a
+    // header or cookie given one was sent holding the text `null`. The path
+    // keeps its value, since the URL cannot be built without one.
+    if (value === null && parameter.in !== "path") {
+      continue;
+    }
+
     switch (parameter.in) {
       case "cookie":
         cookies.push(

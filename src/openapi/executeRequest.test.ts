@@ -371,6 +371,56 @@ describe("building the request", () => {
     expect(calls[0].headers.get("cookie")).toBe("session=abc%3B%20admin=true");
   });
 
+  // `nullable: true` and `type: [..., "null"]` both let the argument be
+  // `null`. The query already left it out; the header and the cookie were sent
+  // as `x-trace: null` and `session=null`.
+  it.each([
+    ["3.0.3", { nullable: true, type: "string" }],
+    ["3.1.0", { type: ["string", "null"] }],
+  ])(
+    "leaves out a null query, header or cookie parameter (OpenAPI %s)",
+    async (openapi, nullable) => {
+      const { calls, client } = await withRecordedCalls({
+        info: { title: "Pets", version: "1.0.0" },
+        openapi,
+        paths: {
+          "/pets": {
+            get: {
+              operationId: "listPets",
+              parameters: [
+                { in: "query", name: "limit", schema: { type: "integer" } },
+                { in: "query", name: "status", schema: nullable },
+                { in: "header", name: "X-Trace", schema: nullable },
+                { in: "cookie", name: "session", schema: nullable },
+                { in: "cookie", name: "theme", schema: { type: "string" } },
+              ],
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.test/v1" }],
+      });
+
+      const result = await client.callTool({
+        arguments: {
+          limit: 10,
+          session: null,
+          status: null,
+          theme: "dark",
+          "X-Trace": null,
+        },
+        name: "listPets",
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(calls[0].url.toString()).toBe(
+        "https://api.example.test/v1/pets?limit=10",
+      );
+      expect(calls[0].headers.has("x-trace")).toBe(false);
+      // The cookie beside it is still sent.
+      expect(calls[0].headers.get("cookie")).toBe("theme=dark");
+    },
+  );
+
   it("delivers every argument when a suffixed name was already taken", async () => {
     // `id__query` is the document's own query parameter and `id__path` its own
     // body property, so the suffixes for the colliding `id`s move aside. Had
