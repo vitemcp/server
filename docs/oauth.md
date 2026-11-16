@@ -773,8 +773,9 @@ Two requirements:
 A token request whose client authentication fails — unknown `client_id`, wrong
 or missing secret — is refused before the code is touched, so it cannot spend
 one. Past that point codes are consumed at the start of the exchange, so a
-request that then fails validation — a code issued to another client, a bad
-`code_verifier` — spends the code. The client must restart at
+request that then fails validation — a code issued to another client, a
+`redirect_uri` other than the one it was authorized for, a bad `code_verifier` —
+spends the code. The client must restart at
 `/oauth/authorize`. That is deliberate: a code presented by the wrong client, or
 without its matching verifier, has most likely leaked, so it should not stay
 redeemable.

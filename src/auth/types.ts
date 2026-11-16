@@ -59,6 +59,11 @@ export interface ClientCode {
   createdAt: Date;
   /** Code expiration timestamp */
   expiresAt: Date;
+  /**
+   * The redirect URI the code was authorized for. Absent from a code stored by
+   * a version that did not record it, which is redeemed without the check.
+   */
+  redirectUri?: string;
   transactionId: string;
   /** Upstream tokens obtained from provider */
   upstreamTokens: UpstreamTokenSet;
@@ -474,7 +479,8 @@ export interface TokenRequest {
   code: string;
   code_verifier?: string;
   grant_type: "authorization_code";
-  redirect_uri: string;
+  /** Optional: OAuth 2.1 drops it from the token request. */
+  redirect_uri?: string;
 }
 
 /**

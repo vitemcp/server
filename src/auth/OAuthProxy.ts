@@ -377,6 +377,21 @@ export class OAuthProxy {
       );
     }
 
+    // RFC 6749 §4.1.3: a token request that names a redirect URI must name the
+    // one the code was authorized for — a code delivered to one of a client's
+    // callbacks is not to be redeemed for another. OAuth 2.1 drops the
+    // parameter from the token request, so leaving it out is not refused.
+    if (
+      request.redirect_uri &&
+      clientCode.redirectUri !== undefined &&
+      request.redirect_uri !== clientCode.redirectUri
+    ) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "redirect_uri does not match the authorization request",
+      );
+    }
+
     // Without client authentication, PKCE is all that binds the code to
     // whoever asked for it, so an unauthenticated exchange must redeem an
     // S256-bound code. `authorize()` already insists on that from public
@@ -1137,6 +1152,7 @@ export class OAuthProxy {
       expiresAt: new Date(
         Date.now() + (this.config.authorizationCodeTtl || 300) * 1000,
       ),
+      redirectUri: transaction.clientCallbackUrl,
       transactionId: transaction.id,
       upstreamTokens,
     };

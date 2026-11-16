@@ -28,6 +28,7 @@ import { MemoryTokenStorage } from "./utils/tokenStore.js";
 
 const BASE = "http://localhost:4200";
 const CALLBACK = "https://client.example.com/callback";
+const OTHER_CALLBACK = "https://client.example.com/other";
 const SIGNING_KEY = "client-authentication-test-signing-key";
 
 const basic = (clientId: string, secret: string) =>
@@ -98,12 +99,15 @@ describe("OAuthProxy client authentication", () => {
     /** authorize -> upstream -> callback: the code the client is handed. */
     const authorizeCode = async (
       clientId: string,
-      { pkce = true }: { pkce?: boolean } = {},
+      {
+        pkce = true,
+        redirectUri = CALLBACK,
+      }: { pkce?: boolean; redirectUri?: string } = {},
     ) => {
       const pair = PKCEUtils.generatePair("S256");
       const response = await authorize({
         client_id: clientId,
-        redirect_uri: CALLBACK,
+        redirect_uri: redirectUri,
         response_type: "code",
         scope: "read",
         ...(pkce && {
@@ -415,6 +419,61 @@ describe("OAuthProxy client authentication", () => {
       expect(redeemed.response.status).toBe(200);
 
       tokenStorage.destroy();
+    });
+  });
+
+  describe("the redirect URI a code was authorized for", () => {
+    /** A code delivered to the second of a client's two callbacks. */
+    const issueToOtherCallback = async () => {
+      const http = serve(makeProxy());
+      const { body: client } = await http.register({
+        redirect_uris: [CALLBACK, OTHER_CALLBACK],
+      });
+      const issued = await http.authorizeCode(client.client_id, {
+        redirectUri: OTHER_CALLBACK,
+      });
+
+      return (redirectUri: string | undefined) =>
+        http.token(
+          {
+            code: issued.code,
+            code_verifier: issued.verifier,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+          },
+          basic(client.client_id, client.client_secret!),
+        );
+    };
+
+    it("redeems the code when the token request names that URI", async () => {
+      const redeem = await issueToOtherCallback();
+
+      const result = await redeem(OTHER_CALLBACK);
+
+      expect(result.response.status).toBe(200);
+      expect(result.body.access_token).toBeTruthy();
+    });
+
+    it("refuses the code when the token request names another of the client's URIs", async () => {
+      const redeem = await issueToOtherCallback();
+
+      const result = await redeem(CALLBACK);
+
+      expectInvalidGrant(result);
+      expect(result.body.error_description).toBe(
+        "redirect_uri does not match the authorization request",
+      );
+      expect(result.body.access_token).toBeUndefined();
+      expect(result.response.headers.get("cache-control")).toBe("no-store");
+    });
+
+    it("redeems the code when the token request leaves redirect_uri out, as OAuth 2.1 does", async () => {
+      const redeem = await issueToOtherCallback();
+
+      const result = await redeem(undefined);
+
+      expect(result.response.status).toBe(200);
+      expect(result.body.access_token).toBeTruthy();
     });
   });
 
