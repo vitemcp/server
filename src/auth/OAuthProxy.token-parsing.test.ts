@@ -135,6 +135,62 @@ describe("OAuthProxy - Token Response Parsing", () => {
       proxy.destroy();
     });
 
+    it.each([
+      {
+        body: (scope: string) =>
+          JSON.stringify({
+            access_token: "gho_x",
+            scope,
+            token_type: "bearer",
+          }),
+        contentType: "application/json",
+      },
+      {
+        body: (scope: string) =>
+          new URLSearchParams({
+            access_token: "gho_x",
+            scope,
+            token_type: "bearer",
+          }).toString(),
+        contentType: "application/x-www-form-urlencoded",
+      },
+    ])(
+      "should split the comma-separated scopes of a GitHub $contentType token response",
+      async ({ body, contentType }) => {
+        const proxy = new OAuthProxy({
+          ...baseConfig,
+          upstreamTokenEndpoint: "https://github.com/login/oauth/access_token",
+        });
+
+        for (const scope of ["read:user,user:email", "read:user, user:email"]) {
+          const tokens = await (proxy as any).parseTokenResponse(
+            new Response(body(scope), {
+              headers: { "Content-Type": contentType },
+            }),
+          );
+
+          expect(tokens.scope).toBe("read:user user:email");
+        }
+
+        proxy.destroy();
+      },
+    );
+
+    it("should keep a comma inside a scope from a provider other than GitHub", async () => {
+      // RFC 6749 §3.3 allows one; only GitHub uses it as a separator.
+      const proxy = new OAuthProxy(baseConfig);
+
+      const tokens = await (proxy as any).parseTokenResponse(
+        new Response("access_token=x&scope=literal%2Cscope&token_type=bearer", {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+      );
+
+      expect(tokens.scope).toBe("literal,scope");
+
+      proxy.destroy();
+    });
+
     it("should handle URL-encoded response without optional fields", async () => {
       const proxy = new OAuthProxy(baseConfig);
 

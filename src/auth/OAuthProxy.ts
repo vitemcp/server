@@ -55,6 +55,9 @@ import {
 } from "./utils/tokenStore.js";
 import { withoutTrailingSlash } from "./utils/trailingSlash.js";
 
+/** Where GitHub OAuth Apps exchange codes, as `GitHubProvider` configures. */
+const GITHUB_TOKEN_ENDPOINT = "https://github.com/login/oauth/access_token";
+
 /**
  * Authorization request parameters owned by the proxy. Entries in
  * `extraAuthorizationParams` with these keys are ignored so configuration
@@ -1784,7 +1787,18 @@ export class OAuthProxy {
       id_token: z.string().optional(),
       refresh_expires_in: z.coerce.number().int().positive().optional(),
       refresh_token: z.string().optional(),
-      scope: z.string().optional(),
+      // GitHub lists the scopes it granted with commas, `read:user,user:email`,
+      // which read as one scope that no check matched. RFC 6749 §3.3 separates
+      // scopes with spaces and allows a comma inside one, so only GitHub's are
+      // split.
+      scope: z
+        .string()
+        .transform((scope) =>
+          this.config.upstreamTokenEndpoint === GITHUB_TOKEN_ENDPOINT
+            ? scope.split(/[ ,]+/).filter(Boolean).join(" ")
+            : scope,
+        )
+        .optional(),
       token_type: z.string().optional(),
     });
 

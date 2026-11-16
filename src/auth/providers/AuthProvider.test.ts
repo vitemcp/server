@@ -1,13 +1,76 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { UpstreamTokenSet } from "../types.js";
-import type { AuthProviderConfig } from "./AuthProvider.js";
+import type {
+  AuthProvider,
+  AuthProviderConfig,
+  OAuthSession,
+} from "./AuthProvider.js";
 
+import { requireScopes } from "../helpers.js";
 import { PKCEUtils } from "../utils/pkce.js";
 import { AzureProvider } from "./AzureProvider.js";
 import { GitHubProvider } from "./GitHubProvider.js";
 import { GoogleProvider } from "./GoogleProvider.js";
 import { OAuthProvider } from "./OAuthProvider.js";
+
+/**
+ * Signs in through a provider whose upstream answers the code exchange with
+ * `upstreamTokens`, form-encoded as GitHub's does, and returns the session the
+ * issued token authenticates as. The upstream login needs a browser, so the
+ * redirect back to the proxy is made by hand. Expects `consentRequired: false`
+ * and a base URL of http://localhost:8000.
+ */
+const signIn = async <T extends OAuthSession>(
+  provider: AuthProvider<T>,
+  upstreamTokens: Record<string, string>,
+): Promise<T | undefined> => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    new Response(new URLSearchParams(upstreamTokens).toString(), {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    }),
+  );
+
+  try {
+    const proxy = provider.getProxy();
+    const client = await proxy.registerClient({
+      redirect_uris: ["https://client.example.com/callback"],
+    });
+    const pkce = PKCEUtils.generatePair("S256");
+    const authorization = await proxy.authorize({
+      client_id: client.client_id,
+      code_challenge: pkce.challenge,
+      code_challenge_method: "S256",
+      redirect_uri: "https://client.example.com/callback",
+      response_type: "code",
+    });
+    const state = new URL(
+      authorization.headers.get("Location")!,
+    ).searchParams.get("state")!;
+    const callback = await proxy.handleCallback(
+      new Request(
+        `http://localhost:8000/oauth/callback?code=upstream-code&state=${encodeURIComponent(state)}`,
+      ),
+    );
+    const { access_token } = await proxy.exchangeAuthorizationCode({
+      client_id: client.client_id,
+      client_secret: client.client_secret,
+      code: new URL(callback.headers.get("Location")!).searchParams.get(
+        "code",
+      )!,
+      code_verifier: pkce.verifier,
+      grant_type: "authorization_code",
+    });
+
+    return await provider.authenticate(
+      new Request("http://localhost:8000/mcp", {
+        headers: { authorization: `Bearer ${access_token}` },
+      }),
+    );
+  } finally {
+    fetchSpy.mockRestore();
+  }
+};
 
 describe("OAuthProvider", () => {
   const baseConfig = {
@@ -156,6 +219,27 @@ describe("GitHubProvider", () => {
   it("should expose getProxy method", () => {
     const provider = new GitHubProvider(baseConfig);
     expect(provider.getProxy()).toBeDefined();
+  });
+
+  it("reads the scopes GitHub grants, which it separates with commas, one by one", async () => {
+    const provider = new GitHubProvider({
+      ...baseConfig,
+      allowedRedirectUriPatterns: ["https://client.example.com/*"],
+      consentRequired: false,
+    });
+
+    try {
+      const session = await signIn(provider, {
+        access_token: "gho_upstream-access-token",
+        scope: "read:user,user:email",
+        token_type: "bearer",
+      });
+
+      expect(session?.scopes).toEqual(["read:user", "user:email"]);
+      expect(requireScopes("user:email")({ ...session })).toBe(true);
+    } finally {
+      provider.destroy();
+    }
   });
 });
 
@@ -582,54 +666,17 @@ describe("session expiresAt", () => {
   it("is left unset when the upstream did not say when its token expires", async () => {
     // GitHub OAuth Apps send no expires_in. The proxy used to store an hour in
     // its place, and the session reported an expiry the upstream never gave.
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response("access_token=upstream-access-token&token_type=bearer", {
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      }),
-    );
     const provider = new OAuthProvider({ ...config, consentRequired: false });
-    const proxy = provider.getProxy();
 
     try {
-      const client = await proxy.registerClient({
-        redirect_uris: ["https://client.example.com/callback"],
+      const session = await signIn(provider, {
+        access_token: "upstream-access-token",
+        token_type: "bearer",
       });
-      const pkce = PKCEUtils.generatePair("S256");
-      const authorization = await proxy.authorize({
-        client_id: client.client_id,
-        code_challenge: pkce.challenge,
-        code_challenge_method: "S256",
-        redirect_uri: "https://client.example.com/callback",
-        response_type: "code",
-      });
-      const state = new URL(
-        authorization.headers.get("Location")!,
-      ).searchParams.get("state")!;
-      const callback = await proxy.handleCallback(
-        new Request(
-          `http://localhost:8000/oauth/callback?code=upstream-code&state=${encodeURIComponent(state)}`,
-        ),
-      );
-      const { access_token } = await proxy.exchangeAuthorizationCode({
-        client_id: client.client_id,
-        client_secret: client.client_secret,
-        code: new URL(callback.headers.get("Location")!).searchParams.get(
-          "code",
-        )!,
-        code_verifier: pkce.verifier,
-        grant_type: "authorization_code",
-      });
-
-      const session = await provider.authenticate(
-        new Request("http://localhost:8000/mcp", {
-          headers: { authorization: `Bearer ${access_token}` },
-        }),
-      );
 
       expect(session?.accessToken).toBe("upstream-access-token");
       expect(session?.expiresAt).toBeUndefined();
     } finally {
-      fetchSpy.mockRestore();
       provider.destroy();
     }
   });
