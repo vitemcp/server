@@ -219,6 +219,68 @@ export const collectDefinitions = (
 };
 
 /**
+ * `schema` with each read-only property taken out of the `required` list beside
+ * it, at any depth — for a tool's input, which is the request. OpenAPI 3.0 says
+ * a read-only property "SHOULD NOT be sent as part of the request", and that a
+ * `required` naming one "will take effect on the response only"; JSON Schema,
+ * which 3.1 defers to, has the server ignore or refuse one that is sent.
+ * Generators reuse one schema for both directions, so a server-assigned `id`
+ * left required refused every call that did not invent one.
+ *
+ * The property itself stays, so a model may still send a value it has, such as
+ * the unchanged one on a PUT. Builds new nodes rather than editing `schema`:
+ * the same definitions describe the response, which does carry them.
+ */
+export const withoutReadOnlyRequired = (schema: unknown): unknown => {
+  if (Array.isArray(schema)) {
+    return schema.map((entry) => withoutReadOnlyRequired(entry));
+  }
+
+  if (!schema || typeof schema !== "object") {
+    return schema;
+  }
+
+  const result: Record<string, unknown> = {};
+
+  for (const [key, entry] of Object.entries(schema)) {
+    if (VALUE_KEYWORDS.has(key)) {
+      result[key] = entry;
+    } else if (
+      SCHEMA_MAP_KEYWORDS.has(key) &&
+      entry &&
+      typeof entry === "object"
+    ) {
+      result[key] = Object.fromEntries(
+        Object.entries(entry as Record<string, unknown>).map(
+          ([name, member]) => [name, withoutReadOnlyRequired(member)],
+        ),
+      );
+    } else {
+      result[key] = withoutReadOnlyRequired(entry);
+    }
+  }
+
+  const { properties, required } = result;
+
+  if (Array.isArray(required) && properties && typeof properties === "object") {
+    const writable = required.filter(
+      (name) =>
+        typeof name !== "string" ||
+        !Object.hasOwn(properties, name) ||
+        (properties as Record<string, OpenApiSchema>)[name]?.readOnly !== true,
+    );
+
+    if (writable.length > 0) {
+      result.required = writable;
+    } else {
+      delete result.required;
+    }
+  }
+
+  return result;
+};
+
+/**
  * Reconciles the three places OpenAPI diverges from the JSON Schema dialect
  * AJV compiles, each of which is common enough in published documents to be
  * worth handling rather than reporting.

@@ -650,6 +650,120 @@ describe("request bodies", () => {
   });
 });
 
+describe("read-only properties", () => {
+  const pet = {
+    properties: {
+      id: { readOnly: true, type: "integer" },
+      name: { type: "string" },
+    },
+    required: ["id", "name"],
+    type: "object",
+  };
+
+  /** One operation taking `body`, and one returning `Pet`. */
+  const documentTaking = (body: Record<string, unknown>): OpenApiDocument => ({
+    components: { schemas: { Pet: pet } },
+    openapi: "3.0.3",
+    paths: {
+      "/pets": {
+        get: {
+          responses: {
+            "200": {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Pet" },
+                },
+              },
+            },
+          },
+        },
+        post: { requestBody: jsonBody(body) },
+      },
+    },
+  });
+
+  const bindingFor = (document: OpenApiDocument, method: string) =>
+    bind(document, true).find(({ route }) => route.method === method)!.binding;
+
+  it.each([
+    ["inline", pet],
+    ["by $ref", { $ref: "#/components/schemas/Pet" }],
+  ])("are not required by a flattened body described %s", (_, body) => {
+    const { inputSchema } = bindingFor(documentTaking(body), "post");
+
+    // OpenAPI: a `required` naming one "will take effect on the response
+    // only". The property is still offered.
+    expect(inputSchema.required).toEqual(["name"]);
+    expect(inputSchema.properties).toHaveProperty("id");
+  });
+
+  it("are not required inside the definitions a body references", () => {
+    const { inputSchema } = bindingFor(
+      documentTaking({
+        items: { $ref: "#/components/schemas/Pet" },
+        type: "array",
+      }),
+      "post",
+    );
+
+    expect(inputSchema.$defs).toEqual({ Pet: { ...pet, required: ["name"] } });
+  });
+
+  it("are not required in an object nested inside the body", () => {
+    const { inputSchema } = bindingFor(
+      documentTaking({
+        properties: { owner: { ...pet, example: pet } },
+        type: "object",
+      }),
+      "post",
+    );
+
+    expect(inputSchema.properties?.owner).toEqual({
+      ...pet,
+      // Instance data, not a schema, so it is left as written.
+      example: pet,
+      required: ["name"],
+    });
+  });
+
+  it("leave out the list when every name in it is read-only", () => {
+    const { inputSchema } = bindingFor(
+      documentTaking({
+        properties: {
+          owner: {
+            properties: { id: { readOnly: true, type: "integer" } },
+            required: ["id"],
+            type: "object",
+          },
+        },
+        type: "object",
+      }),
+      "post",
+    );
+
+    expect(inputSchema.properties?.owner).not.toHaveProperty("required");
+  });
+
+  it("stay required in the response, which carries them", () => {
+    // Bound together, so both draw on one normalizer's definitions, which
+    // building the input must not have edited.
+    const bindings = bind(
+      documentTaking({
+        items: { $ref: "#/components/schemas/Pet" },
+        type: "array",
+      }),
+      true,
+    );
+    const of = (method: string) =>
+      bindings.find(({ route }) => route.method === method)!.binding;
+
+    expect(of("post").inputSchema.$defs).toEqual({
+      Pet: { ...pet, required: ["name"] },
+    });
+    expect(of("get").outputSchema?.$defs).toEqual({ Pet: pet });
+  });
+});
+
 describe("output schemas", () => {
   const documentReturning = (
     schema: Record<string, unknown>,

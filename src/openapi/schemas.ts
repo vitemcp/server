@@ -2,7 +2,7 @@ import type { JsonSchemaObject } from "../jsonSchemaAdapter.js";
 import type { SchemaNormalizer } from "./normalize.js";
 import type { HttpRoute, OpenApiParameter, OpenApiSchema } from "./types.js";
 
-import { collectDefinitions } from "./normalize.js";
+import { collectDefinitions, withoutReadOnlyRequired } from "./normalize.js";
 
 /** Everything derived from one operation that building a request needs. */
 export type ToolBinding = {
@@ -121,7 +121,7 @@ export const buildToolBinding = (
   for (const [name, property] of body.properties) {
     const key = name === "__proto__" ? claimKey(`${name}__body`) : name;
 
-    properties[key] = property.schema;
+    properties[key] = withoutReadOnlyRequired(property.schema) as OpenApiSchema;
     parameters[key] = { kind: "body", name };
     bodyKeys.push(key);
 
@@ -149,7 +149,12 @@ export const buildToolBinding = (
   const definitions = collectDefinitions(properties, normalizer.definitions);
 
   if (definitions) {
-    inputSchema.$defs = definitions;
+    inputSchema.$defs = Object.fromEntries(
+      Object.entries(definitions).map(([name, definition]) => [
+        name,
+        withoutReadOnlyRequired(definition) as OpenApiSchema,
+      ]),
+    );
   }
 
   return {
@@ -229,7 +234,8 @@ const describeBody = (
   if (object && Object.keys(object.properties).length > 0) {
     for (const [name, property] of Object.entries(object.properties)) {
       properties.set(name, {
-        required: object.required.has(name),
+        // The server's to fill in; see `withoutReadOnlyRequired`.
+        required: object.required.has(name) && property.readOnly !== true,
         schema: property,
       });
     }

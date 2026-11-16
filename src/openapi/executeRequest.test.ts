@@ -122,6 +122,56 @@ const formBodySpec: OpenApiDocument = {
 };
 
 describe("building the request", () => {
+  it.each(["3.0.3", "3.1.0"])(
+    "sends a body without the read-only properties its schema lists as required (OpenAPI %s)",
+    async (openapi) => {
+      const pet = {
+        properties: {
+          id: { readOnly: true, type: "integer" },
+          name: { type: "string" },
+        },
+        required: ["id", "name"],
+        type: "object",
+      };
+      const { calls, client } = await withRecordedCalls({
+        components: { schemas: { Pet: pet } },
+        info: { title: "Pets", version: "1.0.0" },
+        openapi,
+        paths: {
+          "/pets": {
+            post: {
+              operationId: "createPet",
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Pet" },
+                  },
+                },
+                required: true,
+              },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.test" }],
+      });
+
+      const created = await client.callTool({
+        arguments: { name: "Rex" },
+        name: "createPet",
+      });
+      const unnamed = await client.callTool({
+        arguments: {},
+        name: "createPet",
+      });
+
+      // The server assigns `id`; refused without one, the call never left.
+      expect(created.isError).toBeFalsy();
+      expect(calls.map((call) => call.body)).toEqual(['{"name":"Rex"}']);
+      // `name` is still the caller's to give.
+      expect(unnamed.isError).toBe(true);
+    },
+  );
+
   it("routes each argument to the location its parameter names", async () => {
     const { calls, client } = await withRecordedCalls(petstore);
 

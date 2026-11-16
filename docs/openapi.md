@@ -227,6 +227,11 @@ document once per tool. OpenAPI's `nullable`, draft-04 boolean
 `exclusiveMinimum`/`exclusiveMaximum`, and a stray `required: true` are
 normalized on the way, since none of them compiles as JSON Schema.
 
+A `readOnly` property is not required in a tool's input, even where the
+schema's `required` lists it: OpenAPI applies that to the response only, and
+the server assigns the value — an `id`, a `created_at`. The property is still
+offered, and an output schema still requires it.
+
 ## Responses
 
 A JSON object comes back as `structuredContent`, mirrored as JSON text for
