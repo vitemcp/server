@@ -413,6 +413,15 @@ export class OAuthProxy {
       if (!valid) {
         throw new OAuthProxyError("invalid_grant", "Invalid PKCE verifier");
       }
+    } else if (request.code_verifier) {
+      // RFC 9700 §4.8.2: a verifier for a code authorized without a challenge
+      // is what a PKCE downgrade looks like — the challenge stripped from the
+      // authorization request on its way here. Ignoring the verifier let that
+      // code through as though PKCE had never been asked for.
+      throw new OAuthProxyError(
+        "invalid_request",
+        "code_verifier provided without a code_challenge",
+      );
     }
 
     // Return tokens based on token swap setting

@@ -264,6 +264,42 @@ describe("OAuthProxy client authentication", () => {
       );
     });
 
+    it("redeems a code it authorized without PKCE when it sends no code_verifier", async () => {
+      const http = serve(makeProxy());
+      const { body: client } = await http.register();
+
+      const redeemed = await http.redeem(
+        await http.authorizeCode(client.client_id, { pkce: false }),
+        { authorization: basic(client.client_id, client.client_secret!) },
+      );
+
+      expect(redeemed.response.status).toBe(200);
+      expect(redeemed.body.access_token).toBeTruthy();
+    });
+
+    it("cannot redeem a code it authorized without PKCE by sending a code_verifier", async () => {
+      // RFC 9700 §4.8.2: the shape of a PKCE downgrade, where the challenge
+      // was stripped from the authorization request but the client, unaware,
+      // still sends its verifier.
+      const http = serve(makeProxy());
+      const { body: client } = await http.register();
+      const issued = await http.authorizeCode(client.client_id, {
+        pkce: false,
+      });
+
+      const result = await http.redeem(issued, {
+        authorization: basic(client.client_id, client.client_secret!),
+        body: { code_verifier: PKCEUtils.generateVerifier() },
+      });
+
+      expect(result.response.status).toBe(400);
+      expect(result.body).toEqual({
+        error: "invalid_request",
+        error_description: "code_verifier provided without a code_challenge",
+      });
+      expect(result.response.headers.get("cache-control")).toBe("no-store");
+    });
+
     it("keeps its code redeemable after a caller fails to authenticate", async () => {
       const http = serve(makeProxy());
       const { body: client } = await http.register();
