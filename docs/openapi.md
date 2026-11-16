@@ -218,7 +218,8 @@ schema, which is what the model reads when deciding what to put there.
 `explode: false` arrives comma-joined, not repeated. An empty array or object is
 left out of the query, rather than sent as `tags=`. A `null` given for a
 nullable query, header or cookie parameter is left out as well, rather than
-sent as the text `null`.
+sent as the text `null`, and so is a `null` item or member of one:
+`{ gte: 1, lte: null }` is sent as `gte=1`.
 
 `components.schemas` referenced by an operation travel with it as `$defs` —
 only the ones it actually reaches, so `tools/list` does not carry the whole

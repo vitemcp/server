@@ -12,15 +12,17 @@ import type { OpenApiParameter } from "./types.js";
 export const appendQueryParameter = (
   query: URLSearchParams,
   parameter: OpenApiParameter,
-  value: unknown,
+  given: unknown,
 ): void => {
   const style = parameter.style ?? "form";
   const explode = parameter.explode ?? style === "form";
   const name = parameter.name;
 
-  if (value === null || value === undefined) {
+  if (given === null || given === undefined) {
     return;
   }
+
+  const value = withoutNullMembers(given);
 
   if (style === "deepObject") {
     if (isRecord(value)) {
@@ -129,9 +131,10 @@ export const serializePathParameter = (
  */
 export const serializeSimpleParameter = (
   parameter: OpenApiParameter,
-  value: unknown,
+  given: unknown,
 ): string => {
   const explode = parameter.explode ?? false;
+  const value = withoutNullMembers(given);
 
   if (Array.isArray(value)) {
     return value.map(stringify).join(",");
@@ -163,6 +166,30 @@ const DELIMITERS: Record<string, string> = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * An array or object without its `null` members. RFC 6570 leaves an undefined
+ * member out of an expansion, and treats `null` as undefined, as
+ * `executeRequest` does for a `null` parameter. A model fills an optional bound
+ * with `null` — `{ gte: 1, lte: null }` — and each such member was sent as the
+ * text `null`, a filter on that word.
+ *
+ * Only the members the style itself serializes: a value nested inside one is
+ * sent as JSON, where `null` means what it says.
+ */
+const withoutNullMembers = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.filter((entry) => entry !== null);
+  }
+
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).filter(([, entry]) => entry !== null),
+    );
+  }
+
+  return value;
+};
 
 const serializeSimple = (
   value: unknown,

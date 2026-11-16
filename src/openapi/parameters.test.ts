@@ -87,6 +87,41 @@ describe("query parameters", () => {
   it("sends a nested object as JSON rather than [object Object]", () => {
     expect(queryString({ name: "where" }, [{ id: 1 }])).toBe('where={"id":1}');
   });
+
+  it.each([
+    { expected: "tags=a&tags=b", overrides: {} },
+    { expected: "tags=a,b", overrides: { explode: false } },
+    { expected: "tags=a|b", overrides: { style: "pipeDelimited" } },
+    { expected: "tags=a b", overrides: { style: "spaceDelimited" } },
+  ])(
+    "leaves a null item out of an array with $overrides",
+    ({ expected, overrides }) => {
+      // Not `tags=a&tags=null&tags=b`, a filter on the word `null`.
+      expect(queryString(overrides, ["a", null, "b"])).toBe(expected);
+    },
+  );
+
+  it("leaves a null member out of an object, whatever the style", () => {
+    const range = { gte: 1, lte: null };
+
+    expect(queryString({}, range)).toBe("gte=1");
+    expect(queryString({ explode: false }, range)).toBe("tags=gte,1");
+    expect(queryString({ style: "deepObject" }, range)).toBe("tags[gte]=1");
+  });
+
+  it.each([{}, { explode: false }, { style: "deepObject" }])(
+    "leaves out an array or object of nulls alone, as an empty one, with %o",
+    (overrides) => {
+      expect(queryString(overrides, [null])).toBe("");
+      expect(queryString(overrides, { lte: null })).toBe("");
+    },
+  );
+
+  it("keeps a null nested inside a member, which is sent as JSON", () => {
+    expect(queryString({ name: "where" }, [{ id: null }])).toBe(
+      'where={"id":null}',
+    );
+  });
 });
 
 describe("path parameters", () => {
@@ -160,5 +195,20 @@ describe("header and cookie parameters", () => {
         b: 2,
       }),
     ).toBe("a=1,b=2");
+  });
+
+  it("leaves a null member out of an array or object", () => {
+    expect(
+      serializeSimpleParameter(parameter({ in: "header" }), ["a", null, "b"]),
+    ).toBe("a,b");
+    expect(
+      serializeSimpleParameter(parameter({ in: "header" }), { a: 1, b: null }),
+    ).toBe("a,1");
+    expect(
+      serializeSimpleParameter(parameter({ explode: true, in: "cookie" }), {
+        a: 1,
+        b: null,
+      }),
+    ).toBe("a=1");
   });
 });

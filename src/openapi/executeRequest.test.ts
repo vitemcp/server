@@ -425,6 +425,53 @@ describe("building the request", () => {
     },
   );
 
+  it("leaves out the null members of a query, header or cookie array or object", async () => {
+    const list = { items: { type: ["string", "null"] }, type: "array" };
+    const { calls, client } = await withRecordedCalls({
+      info: { title: "Pets", version: "1.0.0" },
+      openapi: "3.1.0",
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "listPets",
+            parameters: [
+              {
+                in: "query",
+                name: "age",
+                schema: {
+                  additionalProperties: { type: ["integer", "null"] },
+                  type: "object",
+                },
+                style: "deepObject",
+              },
+              { in: "query", name: "ids", schema: list },
+              { in: "cookie", name: "prefs", schema: list },
+              { in: "header", name: "X-Tags", schema: list },
+            ],
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.test/v1" }],
+    });
+
+    const result = await client.callTool({
+      arguments: {
+        age: { gte: 1, lte: null },
+        ids: ["a", null, "b"],
+        prefs: [null, "dark"],
+        "X-Tags": ["x", null],
+      },
+      name: "listPets",
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(decodeURIComponent(calls[0].url.search)).toBe(
+      "?age[gte]=1&ids=a&ids=b",
+    );
+    expect(calls[0].headers.get("x-tags")).toBe("x");
+    expect(calls[0].headers.get("cookie")).toBe("prefs=dark");
+  });
+
   it("delivers every argument when a suffixed name was already taken", async () => {
     // `id__query` is the document's own query parameter and `id__path` its own
     // body property, so the suffixes for the colliding `id`s move aside. Had
