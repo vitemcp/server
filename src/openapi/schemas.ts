@@ -2,7 +2,7 @@ import type { JsonSchemaObject } from "../jsonSchemaAdapter.js";
 import type { SchemaNormalizer } from "./normalize.js";
 import type { HttpRoute, OpenApiParameter, OpenApiSchema } from "./types.js";
 
-import { collectDefinitions, withoutReadOnlyRequired } from "./normalize.js";
+import { collectDefinitions, schemaFor } from "./normalize.js";
 
 /** Everything derived from one operation that building a request needs. */
 export type ToolBinding = {
@@ -121,7 +121,7 @@ export const buildToolBinding = (
   for (const [name, property] of body.properties) {
     const key = name === "__proto__" ? claimKey(`${name}__body`) : name;
 
-    properties[key] = withoutReadOnlyRequired(property.schema) as OpenApiSchema;
+    properties[key] = schemaFor(property.schema, "request") as OpenApiSchema;
     parameters[key] = { kind: "body", name };
     bodyKeys.push(key);
 
@@ -149,12 +149,7 @@ export const buildToolBinding = (
   const definitions = collectDefinitions(properties, normalizer.definitions);
 
   if (definitions) {
-    inputSchema.$defs = Object.fromEntries(
-      Object.entries(definitions).map(([name, definition]) => [
-        name,
-        withoutReadOnlyRequired(definition) as OpenApiSchema,
-      ]),
-    );
+    inputSchema.$defs = definitionsFor(definitions, "request");
   }
 
   return {
@@ -234,7 +229,7 @@ const describeBody = (
   if (object && Object.keys(object.properties).length > 0) {
     for (const [name, property] of Object.entries(object.properties)) {
       properties.set(name, {
-        // The server's to fill in; see `withoutReadOnlyRequired`.
+        // The server's to fill in; see `schemaFor`.
         required: object.required.has(name) && property.readOnly !== true,
         schema: property,
       });
@@ -325,11 +320,23 @@ const buildOutputSchema = (
   }
 
   return {
-    ...schema,
+    ...(schemaFor(schema, "response") as OpenApiSchema),
     type: "object",
-    ...(definitions ? { $defs: definitions } : {}),
+    ...(definitions ? { $defs: definitionsFor(definitions, "response") } : {}),
   } as JsonSchemaObject;
 };
+
+/** Each of `definitions` as `direction` sees it; see `schemaFor`. */
+const definitionsFor = (
+  definitions: Record<string, OpenApiSchema>,
+  direction: "request" | "response",
+): Record<string, OpenApiSchema> =>
+  Object.fromEntries(
+    Object.entries(definitions).map(([name, definition]) => [
+      name,
+      schemaFor(definition, direction) as OpenApiSchema,
+    ]),
+  );
 
 /**
  * A parameter's own `description` and `deprecated` live beside its schema

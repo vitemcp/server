@@ -265,6 +265,11 @@ Only object-typed responses get a schema. When any 2xx response is an array, a
 scalar or empty — a 204 — the tool declares none and returns text, since
 structured content could not carry that response.
 
+A `writeOnly` property is not required in an output schema, even where the
+schema's `required` lists it: OpenAPI applies that to the request only, and a
+response leaves the value out — a `password`, say. The request still requires
+it.
+
 A response schema pulling in more than 100 shared definitions is also left
 undeclared. Every tool's schema travels in one `tools/list`, and on a large
 document the response schemas reach most of the components table: unbounded,

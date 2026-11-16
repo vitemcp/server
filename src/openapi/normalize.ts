@@ -219,21 +219,26 @@ export const collectDefinitions = (
 };
 
 /**
- * `schema` with each read-only property taken out of the `required` list beside
- * it, at any depth — for a tool's input, which is the request. OpenAPI 3.0 says
- * a read-only property "SHOULD NOT be sent as part of the request", and that a
- * `required` naming one "will take effect on the response only"; JSON Schema,
- * which 3.1 defers to, has the server ignore or refuse one that is sent.
+ * `schema` as one direction of the exchange sees it: each property flagged for
+ * the other direction alone taken out of the `required` list beside it, at any
+ * depth. OpenAPI 3.0 has a `required` naming a `readOnly` property "take effect
+ * on the response only", and one naming a `writeOnly` property "on the request
+ * only"; JSON Schema, which 3.1 defers to, means the same by the two.
  * Generators reuse one schema for both directions, so a server-assigned `id`
- * left required refused every call that did not invent one.
+ * left required refused every call that did not invent one, and a `password`
+ * left required failed every response that, rightly, did not echo it.
  *
  * The property itself stays, so a model may still send a value it has, such as
  * the unchanged one on a PUT. Builds new nodes rather than editing `schema`:
- * the same definitions describe the response, which does carry them.
+ * the same definitions describe the other direction, where the requirement
+ * stands.
  */
-export const withoutReadOnlyRequired = (schema: unknown): unknown => {
+export const schemaFor = (
+  schema: unknown,
+  direction: "request" | "response",
+): unknown => {
   if (Array.isArray(schema)) {
-    return schema.map((entry) => withoutReadOnlyRequired(entry));
+    return schema.map((entry) => schemaFor(entry, direction));
   }
 
   if (!schema || typeof schema !== "object") {
@@ -252,26 +257,30 @@ export const withoutReadOnlyRequired = (schema: unknown): unknown => {
     ) {
       result[key] = Object.fromEntries(
         Object.entries(entry as Record<string, unknown>).map(
-          ([name, member]) => [name, withoutReadOnlyRequired(member)],
+          ([name, member]) => [name, schemaFor(member, direction)],
         ),
       );
     } else {
-      result[key] = withoutReadOnlyRequired(entry);
+      result[key] = schemaFor(entry, direction);
     }
   }
 
   const { properties, required } = result;
 
   if (Array.isArray(required) && properties && typeof properties === "object") {
-    const writable = required.filter(
+    const otherDirectionOnly =
+      direction === "request" ? "readOnly" : "writeOnly";
+    const kept = required.filter(
       (name) =>
         typeof name !== "string" ||
         !Object.hasOwn(properties, name) ||
-        (properties as Record<string, OpenApiSchema>)[name]?.readOnly !== true,
+        (properties as Record<string, OpenApiSchema>)[name]?.[
+          otherDirectionOnly
+        ] !== true,
     );
 
-    if (writable.length > 0) {
-      result.required = writable;
+    if (kept.length > 0) {
+      result.required = kept;
     } else {
       delete result.required;
     }

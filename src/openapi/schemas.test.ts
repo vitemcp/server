@@ -764,6 +764,64 @@ describe("read-only properties", () => {
   });
 });
 
+describe("write-only properties", () => {
+  const user = {
+    properties: {
+      id: { type: "string" },
+      password: { type: "string", writeOnly: true },
+    },
+    required: ["id", "password"],
+    type: "object",
+  };
+
+  /** One operation taking `User`, and one returning `response`. */
+  const bindUsers = (response: Record<string, unknown>) => {
+    const bindings = bind(
+      {
+        components: { schemas: { User: user } },
+        openapi: "3.0.3",
+        paths: {
+          "/users": {
+            get: {
+              responses: {
+                "200": {
+                  content: { "application/json": { schema: response } },
+                },
+              },
+            },
+            post: {
+              requestBody: jsonBody({ $ref: "#/components/schemas/User" }),
+            },
+          },
+        },
+      },
+      true,
+    );
+
+    return (method: string) =>
+      bindings.find(({ route }) => route.method === method)!.binding;
+  };
+
+  it("are not required by a response described inline", () => {
+    // OpenAPI: a `required` naming one takes effect "on the request only". A
+    // response that, rightly, left `password` out failed validation.
+    expect(bindUsers(user)("get").outputSchema).toEqual({
+      ...user,
+      required: ["id"],
+    });
+  });
+
+  it("are not required inside the definitions a response references", () => {
+    const of = bindUsers({ $ref: "#/components/schemas/User" });
+
+    expect(of("get").outputSchema?.$defs).toEqual({
+      User: { ...user, required: ["id"] },
+    });
+    // The request, flattened from the same definition, still requires it.
+    expect(of("post").inputSchema.required).toEqual(["id", "password"]);
+  });
+});
+
 describe("output schemas", () => {
   const documentReturning = (
     schema: Record<string, unknown>,

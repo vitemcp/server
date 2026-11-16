@@ -985,6 +985,49 @@ describe("reading the response", () => {
     });
   });
 
+  it("returns a response without the write-only properties its schema lists as required", async () => {
+    const { client } = await withRecordedCalls(
+      {
+        ...petstore,
+        paths: {
+          "/me": {
+            get: {
+              operationId: "getMe",
+              responses: {
+                "200": {
+                  content: {
+                    "application/json": {
+                      schema: {
+                        properties: {
+                          id: { type: "string" },
+                          password: { type: "string", writeOnly: true },
+                        },
+                        required: ["id", "password"],
+                        type: "object",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      { outputSchema: true },
+      () =>
+        new Response(JSON.stringify({ id: "u1" }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const result = await client.callTool({ arguments: {}, name: "getMe" });
+
+    // The API rightly leaves `password` out. Validated against the schema as
+    // written, the call was reported as an error.
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({ id: "u1" });
+  });
+
   describe("telling JSON by its media type", () => {
     const respondWith = (contentType: string) => () =>
       new Response(JSON.stringify({ id: 7 }), {
