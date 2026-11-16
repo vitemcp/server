@@ -245,7 +245,9 @@ timed-out tool call stops the HTTP request it started.
 ### Output schemas
 
 `outputSchema: true` declares each tool's output schema from the operation's
-first 2xx JSON response.
+2xx JSON responses. An operation declaring several — a 200 with the result
+beside a 202 with a job reference, say — accepts a response matching any of
+them.
 
 It is off by default. MCP makes a declared output schema binding and the SDK
 rejects a result that does not validate against it, so on a document whose
@@ -253,8 +255,9 @@ response schemas have drifted from the real API — which is the common case —
 turning this on converts a cosmetic inaccuracy into a failed tool call. Turn it
 on when the document is generated from the server's own types.
 
-Only object-typed responses get a schema; an array or scalar response is left
-undeclared, since structured content cannot carry one.
+Only object-typed responses get a schema. When any 2xx response is an array, a
+scalar or empty — a 204 — the tool declares none and returns text, since
+structured content could not carry that response.
 
 A response schema pulling in more than 100 shared definitions is also left
 undeclared. Every tool's schema travels in one `tools/list`, and on a large

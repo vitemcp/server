@@ -3,7 +3,11 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vitest";
 
 import type { ViteMCP } from "../ViteMCP.js";
-import type { OpenApiDocument, OpenApiRequestBody } from "./types.js";
+import type {
+  OpenApiDocument,
+  OpenApiRequestBody,
+  OpenApiResponse,
+} from "./types.js";
 
 import { resolveBaseUrl } from "./executeRequest.js";
 import { fromOpenAPI } from "./fromOpenAPI.js";
@@ -817,6 +821,71 @@ describe("reading the response", () => {
     expect(result.content).toEqual([
       { text: JSON.stringify({ id: 7, name: "Rex" }), type: "text" },
     ]);
+  });
+
+  describe("with output schemas, from an operation declaring several successes", () => {
+    const requiring = (key: string): OpenApiResponse => ({
+      content: {
+        "application/json": {
+          schema: {
+            properties: { [key]: { type: "string" } },
+            required: [key],
+            type: "object",
+          },
+        },
+      },
+    });
+
+    const jobs = (responses: Record<string, OpenApiResponse>) => ({
+      ...petstore,
+      paths: { "/jobs": { post: { operationId: "createJob", responses } } },
+    });
+
+    it.each([
+      { payload: { id: "job-1" }, status: 200 },
+      { payload: { jobId: "job-1" }, status: 202 },
+    ])(
+      "returns a $status matching its own schema as structured content",
+      async ({ payload, status }) => {
+        const { client } = await withRecordedCalls(
+          jobs({ "200": requiring("id"), "202": requiring("jobId") }),
+          { outputSchema: true },
+          () =>
+            new Response(JSON.stringify(payload), {
+              headers: { "content-type": "application/json" },
+              status,
+            }),
+        );
+
+        const result = await client.callTool({
+          arguments: {},
+          name: "createJob",
+        });
+
+        expect(result.isError).toBeFalsy();
+        expect(result.structuredContent).toEqual(payload);
+      },
+    );
+
+    it("returns an empty 204 as text when it is one of them", async () => {
+      const { client } = await withRecordedCalls(
+        jobs({ "200": requiring("id"), "204": {} }),
+        { outputSchema: true },
+        () => new Response(null, { status: 204, statusText: "No Content" }),
+      );
+
+      const { tools } = await client.listTools();
+      const result = await client.callTool({
+        arguments: {},
+        name: "createJob",
+      });
+
+      expect(tools[0].outputSchema).toBeUndefined();
+      expect(result.isError).toBeFalsy();
+      expect(result.content).toEqual([
+        { text: "204 No Content", type: "text" },
+      ]);
+    });
   });
 
   describe("telling JSON by its media type", () => {

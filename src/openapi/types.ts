@@ -69,7 +69,7 @@ export type FromOpenAPIOptions<T extends ViteMCPAuth = ViteMCPAuth> = {
 
   /**
    * Declares each tool's `outputSchema` from the operation's 2xx JSON response
-   * schema.
+   * schemas, accepting a response that matches any of them.
    *
    * Off by default, and deliberately so: MCP makes a declared output schema
    * binding, and the SDK rejects a result that does not validate against it.

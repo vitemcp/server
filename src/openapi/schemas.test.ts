@@ -5,6 +5,7 @@ import type {
   HttpRoute,
   OpenApiDocument,
   OpenApiParameter,
+  OpenApiResponse,
   OpenApiSchema,
 } from "./types.js";
 
@@ -727,6 +728,105 @@ describe("output schemas", () => {
       type: "object",
     });
   });
+
+  /** An operation that declares `responses`, among them its successes. */
+  const documentResponding = (
+    responses: Record<string, OpenApiResponse>,
+    schemas: Record<string, OpenApiSchema> = {},
+  ): OpenApiDocument => ({
+    components: { schemas },
+    openapi: "3.0.3",
+    paths: { "/jobs": { post: { responses } } },
+  });
+
+  const json = (schema: OpenApiSchema): OpenApiResponse => ({
+    content: { "application/json": { schema } },
+  });
+
+  const requiring = (key: string): OpenApiSchema => ({
+    properties: { [key]: { type: "string" } },
+    required: [key],
+    type: "object",
+  });
+
+  it("accepts any of the successes an operation declares", () => {
+    // Declared from the 200 alone, a 202 answering with its own shape failed
+    // validation, and the call was reported as an error.
+    const [{ binding }] = bind(
+      documentResponding({
+        "200": json(requiring("id")),
+        "202": json(requiring("jobId")),
+        "404": json(requiring("message")),
+      }),
+      true,
+    );
+
+    expect(binding.outputSchema).toEqual({
+      anyOf: [requiring("id"), requiring("jobId")],
+      type: "object",
+    });
+  });
+
+  it("collects the definitions each alternative references", () => {
+    const [{ binding }] = bind(
+      documentResponding(
+        {
+          "200": json({ $ref: "#/components/schemas/Result" }),
+          "202": json({ $ref: "#/components/schemas/Job" }),
+        },
+        { Job: requiring("jobId"), Result: requiring("id") },
+      ),
+      true,
+    );
+
+    expect(binding.outputSchema).toEqual({
+      $defs: { Job: requiring("jobId"), Result: requiring("id") },
+      anyOf: [{ $ref: "#/$defs/Result" }, { $ref: "#/$defs/Job" }],
+      type: "object",
+    });
+  });
+
+  it("declares a schema its successes share once", () => {
+    const [{ binding }] = bind(
+      documentResponding(
+        {
+          "200": json({ $ref: "#/components/schemas/Pet" }),
+          "201": json({ $ref: "#/components/schemas/Pet" }),
+        },
+        { Pet: requiring("id") },
+      ),
+      true,
+    );
+
+    expect(binding.outputSchema).toEqual({
+      $defs: { Pet: requiring("id") },
+      $ref: "#/$defs/Pet",
+      type: "object",
+    });
+  });
+
+  it.each<[string, string, OpenApiResponse]>([
+    ["an empty 204", "204", {}],
+    ["an array", "202", json({ items: { type: "string" }, type: "array" })],
+    [
+      "a text/plain body",
+      "202",
+      { content: { "text/plain": { schema: { type: "string" } } } },
+    ],
+  ])(
+    "declines when another success is %s, which structured content cannot carry",
+    (_, status, response) => {
+      const [{ binding }] = bind(
+        documentResponding({
+          "200": json(requiring("id")),
+          [status]: response,
+        }),
+        true,
+      );
+
+      expect(binding.outputSchema).toBeUndefined();
+    },
+  );
 
   /**
    * A document whose `Root` component reaches `total - 1` others, which is how

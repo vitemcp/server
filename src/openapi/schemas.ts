@@ -259,34 +259,52 @@ const describeBody = (
 const MAX_OUTPUT_SCHEMA_DEFINITIONS = 100;
 
 /**
- * Derives a tool's `outputSchema` from its first successful JSON response.
+ * Derives a tool's `outputSchema` from its successful JSON responses: the
+ * schema itself when there is one, and any of them when an operation declares
+ * several — a 202 carrying a job reference beside a 200 carrying the result.
+ * Declared from the first alone, a valid 202 failed validation against the
+ * 200's schema, and the call that got it was reported as an error.
  *
- * Only an object-typed response qualifies: MCP requires `structuredContent` to
- * be an object, so declaring an array or scalar schema would promise a shape
- * the protocol has no way to carry.
+ * Every success has to qualify, or no schema is declared. MCP requires
+ * `structuredContent` to be an object, so a success that is an array, a scalar
+ * or empty — a 204 — could not be returned against any schema, and the tool
+ * falls back to text, as for an operation that declares no response schema.
  */
 const buildOutputSchema = (
   route: HttpRoute,
   normalizer: SchemaNormalizer,
 ): JsonSchemaObject | undefined => {
-  const status = Object.keys(route.responses)
+  const statuses = Object.keys(route.responses)
     .filter((code) => /^2\d\d$/.test(code))
-    .sort()[0];
+    .sort();
+  const alternatives = new Map<string, OpenApiSchema>();
 
-  const content = status ? route.responses[status]?.content : undefined;
-  const contentType = content && findJsonContentType(Object.keys(content));
-  const raw = contentType ? content?.[contentType]?.schema : undefined;
+  for (const status of statuses) {
+    const content = route.responses[status]?.content;
+    const contentType = content && findJsonContentType(Object.keys(content));
+    const raw = contentType ? content?.[contentType]?.schema : undefined;
 
-  if (!raw) {
+    if (!raw) {
+      return undefined;
+    }
+
+    const schema = normalizer.normalize(raw);
+
+    if (!resolvesToObject(schema, normalizer.definitions)) {
+      return undefined;
+    }
+
+    // Keyed by content, so a 200 and a 201 that share a schema declare it
+    // once rather than as two identical alternatives.
+    alternatives.set(JSON.stringify(schema), schema);
+  }
+
+  if (alternatives.size === 0) {
     return undefined;
   }
 
-  const schema = normalizer.normalize(raw);
-
-  if (!resolvesToObject(schema, normalizer.definitions)) {
-    return undefined;
-  }
-
+  const [first, ...others] = alternatives.values();
+  const schema = others.length === 0 ? first : { anyOf: [first, ...others] };
   const definitions = collectDefinitions(schema, normalizer.definitions);
 
   // Dropping the schema, rather than truncating its definitions, is what keeps
