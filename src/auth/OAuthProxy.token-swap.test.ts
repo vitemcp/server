@@ -1,10 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TokenRequest, TokenStorage, UpstreamTokenSet } from "./types.js";
+import type {
+  TokenRequest,
+  TokenResponse,
+  TokenStorage,
+  UpstreamTokenSet,
+} from "./types.js";
 
 import { OAuthProxy } from "./OAuthProxy.js";
 import {
+  DEFAULT_ACCESS_TOKEN_TTL,
   DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH,
   DEFAULT_REFRESH_TOKEN_TTL,
 } from "./types.js";
@@ -1666,5 +1672,185 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     proxy.destroy();
     backend.destroy();
+  });
+});
+
+describe("OAuthProxy - Access token TTL when the upstream omits expires_in", () => {
+  const baseConfig = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
+    baseUrl: "https://proxy.example.com",
+    consentRequired: false,
+    enableTokenSwap: true,
+    jwtSigningKey: "test-signing-key",
+    upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
+    upstreamClientId: "upstream-client-id",
+    upstreamClientSecret: "upstream-client-secret",
+    upstreamTokenEndpoint: "https://provider.com/oauth/token",
+  };
+  const redirectUri = "https://client.example.com/callback";
+
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch");
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  /** The upstream's next token response, form-encoded as GitHub sends it. */
+  const upstreamResponds = (tokens: Record<string, string>) => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(new URLSearchParams(tokens).toString(), {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      }),
+    );
+  };
+
+  /**
+   * authorize -> upstream -> callback -> token exchange. The tests above hand
+   * the proxy a token set ready-made; this one is parsed from the upstream's
+   * response, which is where an omitted `expires_in` used to become an hour.
+   */
+  const signIn = async (proxy: OAuthProxy) => {
+    const client = await proxy.registerClient({ redirect_uris: [redirectUri] });
+    const pkce = PKCEUtils.generatePair("S256");
+    const authorization = await proxy.authorize({
+      client_id: client.client_id,
+      code_challenge: pkce.challenge,
+      code_challenge_method: "S256",
+      redirect_uri: redirectUri,
+      response_type: "code",
+    });
+    const state = new URL(
+      authorization.headers.get("Location")!,
+    ).searchParams.get("state")!;
+    const callback = await proxy.handleCallback(
+      new Request(
+        `${baseConfig.baseUrl}/oauth/callback?code=upstream-code&state=${encodeURIComponent(state)}`,
+      ),
+    );
+    const code = new URL(callback.headers.get("Location")!).searchParams.get(
+      "code",
+    )!;
+    const credentials = {
+      client_id: client.client_id,
+      client_secret: client.client_secret,
+    };
+    const tokens = await proxy.exchangeAuthorizationCode({
+      ...credentials,
+      code,
+      code_verifier: pkce.verifier,
+      grant_type: "authorization_code",
+    });
+
+    return { credentials, tokens };
+  };
+
+  /** The lifetime a token response reports, and the one its JWT carries. */
+  const lifetimeOf = (tokens: TokenResponse) => {
+    const { exp, iat } = JSON.parse(
+      Buffer.from(tokens.access_token.split(".")[1], "base64url").toString(),
+    ) as { exp: number; iat: number };
+
+    return { expires_in: tokens.expires_in, jwt: exp - iat };
+  };
+
+  it.each<{
+    accessTokenTtl?: number;
+    expected: number;
+    name: string;
+    upstream: Record<string, string>;
+  }>([
+    {
+      accessTokenTtl: 900,
+      expected: 900,
+      name: "takes accessTokenTtl",
+      upstream: {},
+    },
+    {
+      expected: DEFAULT_ACCESS_TOKEN_TTL,
+      name: "defaults to an hour when the upstream issued a refresh token",
+      upstream: { refresh_token: "upstream-refresh-token" },
+    },
+    {
+      expected: DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH,
+      name: "defaults to a year when the upstream issued no refresh token",
+      upstream: {},
+    },
+    {
+      accessTokenTtl: 900,
+      expected: 1234,
+      name: "still yields to an expires_in the upstream does send",
+      upstream: { expires_in: "1234" },
+    },
+  ])("$name", async ({ accessTokenTtl, expected, upstream }) => {
+    const proxy = new OAuthProxy({ ...baseConfig, accessTokenTtl });
+    upstreamResponds({
+      access_token: "upstream-access-token",
+      token_type: "bearer",
+      ...upstream,
+    });
+
+    try {
+      const { tokens } = await signIn(proxy);
+
+      expect(lifetimeOf(tokens)).toEqual({
+        expires_in: expected,
+        jwt: expected,
+      });
+    } finally {
+      proxy.destroy();
+    }
+  });
+
+  it("takes accessTokenTtl after a refresh whose response omits expires_in", async () => {
+    const proxy = new OAuthProxy({ ...baseConfig, accessTokenTtl: 900 });
+    upstreamResponds({
+      access_token: "upstream-access-token",
+      expires_in: "3600",
+      refresh_token: "upstream-refresh-token",
+      token_type: "bearer",
+    });
+    upstreamResponds({
+      access_token: "refreshed-upstream-access-token",
+      token_type: "bearer",
+    });
+
+    try {
+      const { credentials, tokens } = await signIn(proxy);
+      const refreshed = await proxy.exchangeRefreshToken({
+        ...credentials,
+        grant_type: "refresh_token",
+        refresh_token: tokens.refresh_token!,
+      });
+
+      expect(lifetimeOf(tokens)).toEqual({ expires_in: 3600, jwt: 3600 });
+      expect(lifetimeOf(refreshed)).toEqual({ expires_in: 900, jwt: 900 });
+    } finally {
+      proxy.destroy();
+    }
+  });
+
+  it("still reports a passed-through token whose expiry the upstream did not give as an hour", async () => {
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      accessTokenTtl: 900,
+      enableTokenSwap: false,
+    });
+    upstreamResponds({
+      access_token: "upstream-access-token",
+      token_type: "bearer",
+    });
+
+    try {
+      const { tokens } = await signIn(proxy);
+
+      expect(tokens.access_token).toBe("upstream-access-token");
+      expect(tokens.expires_in).toBe(3600);
+    } finally {
+      proxy.destroy();
+    }
   });
 });

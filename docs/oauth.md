@@ -368,7 +368,7 @@ interface OAuthProxyConfig {
   upstreamIssuer?: string; // when issuer ≠ endpoint origin
 
   // Token swap (enabled by default)
-  accessTokenTtl?: number; // seconds, default: 3600
+  accessTokenTtl?: number; // seconds, when the upstream omits expires_in
   enableTokenSwap?: boolean; // default: true
   jwtSigningKey?: string; // auto-generated if absent
   refreshTokenTtl?: number; // seconds, default: 2592000
@@ -452,6 +452,13 @@ const authProxy = new OAuthProxy({
 ```
 
 All values are in seconds.
+
+`accessTokenTtl` sizes a swapped access token only when the upstream's token
+response carries no `expires_in`, as GitHub OAuth Apps' does not. A positive
+`expires_in` takes precedence, so the proxy's token does not outlive the
+upstream one it stands for. Without either, the token lasts an hour when the
+upstream issued a refresh token, and a year when it did not, since a client
+with nothing to refresh would otherwise have to sign in again every hour.
 
 ### Consent
 

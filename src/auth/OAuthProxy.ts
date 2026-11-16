@@ -448,10 +448,12 @@ export class OAuthProxy {
         authenticated,
       );
     } else {
-      // Pass-through pattern: return upstream tokens directly
+      // Pass-through pattern: return upstream tokens directly. An upstream
+      // that did not say when its token expires is reported as an hour, as it
+      // always has been here.
       const response: TokenResponse = {
         access_token: clientCode.upstreamTokens.accessToken,
-        expires_in: clientCode.upstreamTokens.expiresIn,
+        expires_in: clientCode.upstreamTokens.expiresIn || 3600,
         token_type: clientCode.upstreamTokens.tokenType,
       };
 
@@ -1034,7 +1036,10 @@ export class OAuthProxy {
 
     return {
       accessToken: tokens.access_token,
-      expiresIn: tokens.expires_in || 3600,
+      // 0 when the upstream did not say, so `accessTokenTtl` and the defaults
+      // apply. An hour substituted here made every such token look as though
+      // the upstream had set it, and neither was ever reached.
+      expiresIn: tokens.expires_in ?? 0,
       idToken: tokens.id_token,
       issuedAt: new Date(),
       refreshExpiresIn: tokens.refresh_expires_in,
@@ -1932,7 +1937,8 @@ export class OAuthProxy {
     // preserve the original one
     return {
       accessToken: tokens.access_token,
-      expiresIn: tokens.expires_in || 3600,
+      // 0 when the upstream did not say, as on the code exchange.
+      expiresIn: tokens.expires_in ?? 0,
       idToken: tokens.id_token,
       issuedAt: new Date(),
       refreshExpiresIn: tokens.refresh_expires_in,

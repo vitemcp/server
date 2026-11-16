@@ -578,4 +578,59 @@ describe("session expiresAt", () => {
 
     expect(session.expiresAt).toBe(Date.parse("2026-01-01T11:50:00Z") / 1000);
   });
+
+  it("is left unset when the upstream did not say when its token expires", async () => {
+    // GitHub OAuth Apps send no expires_in. The proxy used to store an hour in
+    // its place, and the session reported an expiry the upstream never gave.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("access_token=upstream-access-token&token_type=bearer", {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      }),
+    );
+    const provider = new OAuthProvider({ ...config, consentRequired: false });
+    const proxy = provider.getProxy();
+
+    try {
+      const client = await proxy.registerClient({
+        redirect_uris: ["https://client.example.com/callback"],
+      });
+      const pkce = PKCEUtils.generatePair("S256");
+      const authorization = await proxy.authorize({
+        client_id: client.client_id,
+        code_challenge: pkce.challenge,
+        code_challenge_method: "S256",
+        redirect_uri: "https://client.example.com/callback",
+        response_type: "code",
+      });
+      const state = new URL(
+        authorization.headers.get("Location")!,
+      ).searchParams.get("state")!;
+      const callback = await proxy.handleCallback(
+        new Request(
+          `http://localhost:8000/oauth/callback?code=upstream-code&state=${encodeURIComponent(state)}`,
+        ),
+      );
+      const { access_token } = await proxy.exchangeAuthorizationCode({
+        client_id: client.client_id,
+        client_secret: client.client_secret,
+        code: new URL(callback.headers.get("Location")!).searchParams.get(
+          "code",
+        )!,
+        code_verifier: pkce.verifier,
+        grant_type: "authorization_code",
+      });
+
+      const session = await provider.authenticate(
+        new Request("http://localhost:8000/mcp", {
+          headers: { authorization: `Bearer ${access_token}` },
+        }),
+      );
+
+      expect(session?.accessToken).toBe("upstream-access-token");
+      expect(session?.expiresAt).toBeUndefined();
+    } finally {
+      fetchSpy.mockRestore();
+      provider.destroy();
+    }
+  });
 });
