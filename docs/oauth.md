@@ -165,7 +165,8 @@ same route starting from `GoogleProvider` and friends.
 
 ## Provider setup
 
-Every provider needs the redirect URI registered as `{baseUrl}/oauth/callback`.
+Every provider needs the redirect URI registered as `{baseUrl}/oauth/callback`,
+or `{baseUrl}` followed by your `redirectPath` if you set one.
 
 ### Google
 
@@ -981,8 +982,9 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 ## Troubleshooting
 
 **"Invalid redirect URI"** — the URI registered with your provider must be
-exactly `{baseUrl}/oauth/callback`, e.g.
-`https://your-server.com/oauth/callback`. Check for a trailing slash.
+exactly `{baseUrl}/oauth/callback` (`{baseUrl}{redirectPath}` if you set
+`redirectPath`), e.g. `https://your-server.com/oauth/callback`. Check for a
+trailing slash.
 
 **"Invalid state"** — the transaction expired (10 minutes by default), the
 server restarted without persistent storage, key material differs between

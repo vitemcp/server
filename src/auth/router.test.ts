@@ -309,6 +309,82 @@ describe("OAuth router", () => {
     });
   });
 
+  // The proxy hands the provider `{baseUrl}{redirectPath}` as the place to send
+  // the user back, but the route stayed at `/oauth/callback`: with any other
+  // path the provider's redirect was a 404, and the sign-in could not finish.
+  describe("a configured redirectPath", () => {
+    it.each(["", "/issuer1"])(
+      "serves the callback at that path under base path '%s'",
+      async (basePath) => {
+        const proxy = new OAuthProxy({
+          allowedRedirectUriPatterns: ["https://client.example.com/*"],
+          baseUrl: `http://localhost:4200${basePath}`,
+          consentRequired: false,
+          redirectPath: "/auth/cb",
+          upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
+          upstreamClientId: "upstream-id",
+          upstreamClientSecret: "upstream-secret",
+          upstreamTokenEndpoint: "https://provider.com/oauth/token",
+        });
+        const app = createOAuthRouter({ basePath, proxy });
+        const callbackUri = `http://localhost:4200${basePath}/auth/cb`;
+        const fetchSpy = vi
+          .spyOn(globalThis, "fetch")
+          .mockImplementation(async () =>
+            Response.json({
+              access_token: "upstream-access-token",
+              token_type: "Bearer",
+            }),
+          );
+
+        try {
+          const { client_id } = await proxy.registerClient({
+            redirect_uris: ["https://client.example.com/callback"],
+          });
+          const authorization = await get(
+            app,
+            `${basePath}/oauth/authorize?${new URLSearchParams({
+              client_id,
+              redirect_uri: "https://client.example.com/callback",
+              response_type: "code",
+              state: "client-state",
+            })}`,
+          );
+          const upstream = new URL(authorization.headers.get("Location")!);
+
+          // Where the provider is told to send the user back...
+          expect(upstream.searchParams.get("redirect_uri")).toBe(callbackUri);
+
+          // ...is where the route answers.
+          const callback = await get(
+            app,
+            `${basePath}/auth/cb?${new URLSearchParams({
+              code: "upstream-code",
+              state: upstream.searchParams.get("state")!,
+            })}`,
+          );
+
+          expect(callback.status).toBe(302);
+
+          const redirect = new URL(callback.headers.get("Location")!);
+          expect(`${redirect.origin}${redirect.pathname}`).toBe(
+            "https://client.example.com/callback",
+          );
+          expect(redirect.searchParams.get("state")).toBe("client-state");
+
+          // The provider checks the code exchange against the same URI.
+          const exchange = fetchSpy.mock.calls.find(
+            ([input]) => String(input) === "https://provider.com/oauth/token",
+          )?.[1]?.body as undefined | URLSearchParams;
+          expect(exchange?.get("redirect_uri")).toBe(callbackUri);
+        } finally {
+          fetchSpy.mockRestore();
+          proxy.destroy();
+        }
+      },
+    );
+  });
+
   /**
    * RFC 6749 §5.1 / RFC 7591 §3.2.1. A token or `client_secret` that an
    * intermediary is allowed to retain is a credential leak, so these headers

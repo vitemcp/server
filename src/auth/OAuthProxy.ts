@@ -55,6 +55,12 @@ import {
 } from "./utils/tokenStore.js";
 import { withoutTrailingSlash } from "./utils/trailingSlash.js";
 
+/**
+ * Where the provider sends the user back, unless `redirectPath` says
+ * otherwise.
+ */
+const DEFAULT_REDIRECT_PATH = "/oauth/callback";
+
 /** Where GitHub OAuth Apps exchange codes, as `GitHubProvider` configures. */
 const GITHUB_TOKEN_ENDPOINT = "https://github.com/login/oauth/access_token";
 
@@ -131,7 +137,7 @@ export class OAuthProxy {
       authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
       consentRequired: true,
       enableTokenSwap: true, // Enabled by default for security
-      redirectPath: "/oauth/callback",
+      redirectPath: DEFAULT_REDIRECT_PATH,
       transactionTtl: DEFAULT_TRANSACTION_TTL,
       upstreamRequestTimeoutMs: DEFAULT_UPSTREAM_REQUEST_TIMEOUT_MS,
       upstreamTokenEndpointAuthMethod: "client_secret_basic",
@@ -554,6 +560,16 @@ export class OAuthProxy {
       // can use unless "none" is advertised alongside the confidential methods.
       tokenEndpointAuthMethodsSupported: [...TOKEN_ENDPOINT_AUTH_METHODS],
     };
+  }
+
+  /**
+   * The path the upstream provider redirects back to: `redirectPath`, or
+   * `/oauth/callback` when none is set. The router serves the callback here
+   * and the proxy sends `{baseUrl}{path}` upstream as the `redirect_uri`, so
+   * both read it from this one place and cannot disagree.
+   */
+  getRedirectPath(): string {
+    return this.config.redirectPath ?? DEFAULT_REDIRECT_PATH;
   }
 
   /**
@@ -999,7 +1015,7 @@ export class OAuthProxy {
       code,
       code_verifier: transaction.proxyCodeVerifier,
       grant_type: "authorization_code",
-      redirect_uri: `${this.config.baseUrl}${this.config.redirectPath}`,
+      redirect_uri: `${this.config.baseUrl}${this.getRedirectPath()}`,
     };
 
     // Include client credentials in body only for client_secret_post
@@ -1869,7 +1885,7 @@ export class OAuthProxy {
     authUrl.searchParams.set("client_id", this.config.upstreamClientId);
     authUrl.searchParams.set(
       "redirect_uri",
-      `${this.config.baseUrl}${this.config.redirectPath}`,
+      `${this.config.baseUrl}${this.getRedirectPath()}`,
     );
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("state", transaction.id);

@@ -330,7 +330,10 @@ export const createOAuthRouter = (options: OAuthRouterOptions): Hono => {
     }
   });
 
-  app.get(`${basePath}/oauth/callback`, async (c) => {
+  // Where the provider sends the user back: the path the proxy hands it as the
+  // `redirect_uri`, which is `/oauth/callback` unless `redirectPath` says
+  // otherwise. A fixed route here 404ed any other path the proxy was set to use.
+  app.get(`${basePath}${proxy.getRedirectPath()}`, async (c) => {
     try {
       return await proxy.handleCallback(c.req.raw);
     } catch (error) {
