@@ -18,13 +18,19 @@ import { pathToFileURL } from "url";
  * It exits as soon as the import settles, once its verdict is flushed. A
  * server file normally starts its transport on load, which would otherwise
  * keep this process, and the command waiting on it, alive forever.
+ *
+ * It imports nothing but the file. A bare specifier in a `-e` script resolves
+ * from the working directory, not from the file, so importing
+ * `@vitemcp/server` here failed any file whose project was not the directory
+ * the command ran in — `vitemcp validate packages/app/server.ts` from the root
+ * of a monorepo — before the file's own imports, which do resolve from beside
+ * it, were tried.
  */
 export const STRUCTURE_CHECK_SCRIPT = `
 (async () => {
   let failure;
 
   try {
-    await import("@vitemcp/server");
     await import(process.argv[1]);
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);

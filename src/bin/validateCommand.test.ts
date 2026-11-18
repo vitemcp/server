@@ -295,27 +295,10 @@ describe("missingTsxHint", () => {
 
 describe("the structure check script", { timeout: 30_000 }, () => {
   /**
-   * A project holding just enough of an `@vitemcp/server` package for the
-   * script's own `import("@vitemcp/server")` to resolve, since a bare specifier
-   * in a `node -e` script resolves from the working directory. Standing one in
-   * matters: the release job runs the tests before it builds, so the real entry
-   * point (`dist/ViteMCP.js`) does not exist yet.
+   * Runs the check from `project` on `file`, which it writes first. Nothing
+   * here installs `@vitemcp/server` where the check runs: a check that needs it
+   * there fails every one of these tests.
    */
-  const makeProject = async (): Promise<string> => {
-    const project = await makeDir();
-    await writeFiles(project, {
-      "node_modules/@vitemcp/server/index.js":
-        "export const ViteMCP = class {};\n",
-      "node_modules/@vitemcp/server/package.json": JSON.stringify({
-        exports: "./index.js",
-        name: "@vitemcp/server",
-        type: "module",
-        version: "0.0.0",
-      }),
-    });
-    return project;
-  };
-
   const check = async (
     project: string,
     file: string,
@@ -336,7 +319,7 @@ describe("the structure check script", { timeout: 30_000 }, () => {
 
   it("imports a server file whose path needs escaping", async () => {
     const result = await check(
-      await makeProject(),
+      await makeDir(),
       `${AWKWARD_NAME}/server.mjs`,
       "export default {};\n",
     );
@@ -349,7 +332,7 @@ describe("the structure check script", { timeout: 30_000 }, () => {
     // A server file starts its transport on load; without an explicit exit
     // the check never finishes.
     const result = await check(
-      await makeProject(),
+      await makeDir(),
       "server.mjs",
       "setInterval(() => {}, 60_000);\n",
     );
@@ -360,13 +343,37 @@ describe("the structure check script", { timeout: 30_000 }, () => {
 
   it("reports why a server file could not be imported", async () => {
     const result = await check(
-      await makeProject(),
+      await makeDir(),
       "broken.mjs",
       "throw new Error('boom');\n",
     );
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Server structure validation failed: boom");
+  });
+
+  it("imports a server file whose package is installed beside it, not where the check runs", async () => {
+    // `vitemcp validate packages/app/server.ts`, from the root of a monorepo.
+    const root = await makeDir();
+    await writeFiles(root, {
+      "app/node_modules/@vitemcp/server/index.js":
+        "export const ViteMCP = class {};\n",
+      "app/node_modules/@vitemcp/server/package.json": JSON.stringify({
+        exports: "./index.js",
+        name: "@vitemcp/server",
+        type: "module",
+        version: "0.0.0",
+      }),
+    });
+
+    const result = await check(
+      root,
+      "app/server.mjs",
+      'import { ViteMCP } from "@vitemcp/server";\n\nexport default new ViteMCP();\n',
+    );
+
+    expect(result.exitCode, formatCommandFailure(result)).toBe(0);
+    expect(result.stdout).toContain("Server structure validation passed");
   });
 
   describe("through the project's tsx", () => {
@@ -380,7 +387,7 @@ describe("the structure check script", { timeout: 30_000 }, () => {
     it("follows a `.js` import to the `.ts` file beside it", async () => {
       // Plain Node looks for a `tools.js` on disk and fails the check, though
       // `vitemcp dev` runs the file fine.
-      const project = await makeProject();
+      const project = await makeDir();
       await writeFiles(project, {
         [`${AWKWARD_NAME}/tools.ts`]:
           "export const add = (a: number, b: number): number => a + b;\n",
@@ -399,7 +406,7 @@ describe("the structure check script", { timeout: 30_000 }, () => {
 
     it("runs syntax that plain Node cannot strip", async () => {
       const result = await check(
-        await makeProject(),
+        await makeDir(),
         "server.ts",
         [
           "enum Transport { Stdio, Http }",
@@ -415,7 +422,7 @@ describe("the structure check script", { timeout: 30_000 }, () => {
 
     it("still reports why a server file could not be imported", async () => {
       const result = await check(
-        await makeProject(),
+        await makeDir(),
         "broken.ts",
         "throw new Error('boom');\n",
         tsxLoader,
