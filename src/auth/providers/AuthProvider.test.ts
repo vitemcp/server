@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UpstreamTokenSet } from "../types.js";
 import type {
@@ -437,14 +437,20 @@ describe("AuthProvider common behavior", () => {
     }
   });
 
-  // The lazily-created proxy runs two cleanup timers, and an uncleared
-  // setInterval keeps the Node event loop alive — a server that has stopped
-  // serving would never exit on its own.
+  // The lazily-created proxy runs two cleanup timers. Neither keeps the Node
+  // event loop alive, so they are counted through fake timers, which see every
+  // interval that is scheduled; `destroy()` has to clear them all.
   describe("destroy", () => {
-    /** How many timers are currently keeping the event loop alive. */
-    const activeTimers = () =>
-      process.getActiveResourcesInfo().filter((type) => type === "Timeout")
-        .length;
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["clearInterval", "setInterval"] });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** How many intervals are scheduled, whether or not they keep Node alive. */
+    const activeTimers = () => vi.getTimerCount();
 
     const config = {
       baseUrl: "http://localhost:8000",

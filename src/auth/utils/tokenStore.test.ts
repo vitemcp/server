@@ -81,6 +81,12 @@ describe("MemoryTokenStorage", () => {
       expect(storage.size()).toBe(1);
       expect(await storage.get("key7")).toBe("value7");
     });
+
+    // A sweep is housekeeping: an interval that held the event loop open would
+    // stop a process that has nothing else to do from exiting.
+    it("should not keep the process alive", () => {
+      expect(storage["cleanupInterval"]?.hasRef()).toBe(false);
+    });
   });
 
   describe("take", () => {

@@ -115,11 +115,10 @@ export class OAuthProxy {
   private issuerNs: string;
   private jwtIssuer?: JWTIssuer;
   /**
-   * The fallback storage this proxy created for itself, if any. It runs a
-   * cleanup timer that keeps the event loop alive, so `destroy()` has to stop
-   * it — and once the storage is wrapped for encryption it is reachable
-   * through nothing else. A caller-supplied storage is deliberately not
-   * recorded here: its lifetime belongs to the caller.
+   * The fallback storage this proxy created for itself, if any. Kept so that
+   * `destroy()` can stop its cleanup timer: once the storage is wrapped for
+   * encryption it is reachable through nothing else. A caller-supplied storage
+   * is deliberately not recorded here: its lifetime belongs to the caller.
    */
   private ownedTokenStorage: MemoryTokenStorage | null = null;
   /**
@@ -2136,12 +2135,18 @@ export class OAuthProxy {
   }
 
   /**
-   * Start periodic cleanup of expired transactions and codes
+   * Start periodic cleanup of expired transactions and codes.
+   *
+   * The timer is `unref`ed: a sweep is housekeeping, and a process with nothing
+   * else left to do must be free to exit rather than wait on it. `stop()`
+   * leaves the proxy running, since it may be shared or serve again, so a timer
+   * that held the process open would do so until `destroy()`.
    */
   private startCleanup(): void {
     this.cleanupInterval = setInterval(() => {
       this.cleanup();
     }, 60000); // Run every minute
+    this.cleanupInterval.unref?.();
   }
 
   /**

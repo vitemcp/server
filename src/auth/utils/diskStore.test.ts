@@ -170,6 +170,16 @@ describe("DiskStore", () => {
     store.destroy();
   });
 
+  // A sweep is housekeeping: an interval that held the event loop open would
+  // stop a process that has nothing else to do from exiting.
+  it("should not keep the process alive for its cleanup sweep", () => {
+    const store = new DiskStore({ directory: TEST_DIR });
+
+    expect(store["cleanupInterval"]?.hasRef()).toBe(false);
+
+    store.destroy();
+  });
+
   it("should clean up expired entries", async () => {
     const store = new DiskStore({ directory: TEST_DIR });
 

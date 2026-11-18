@@ -64,6 +64,9 @@ export class DiskStore implements TokenStorage {
     this.cleanupInterval = setInterval(() => {
       void this.cleanup();
     }, cleanupIntervalMs);
+    // Housekeeping only: it must not keep a process alive that has nothing else
+    // to do.
+    this.cleanupInterval.unref?.();
   }
 
   /**

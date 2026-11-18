@@ -162,10 +162,10 @@ export abstract class AuthProvider<
    * Release the resources held by the proxy this provider built for itself.
    *
    * That proxy runs two cleanup timers — its own sweep and its token
-   * storage's — and both keep the Node event loop alive, so a process that has
-   * stopped serving does not exit until this runs. `getProxy().destroy()`
-   * reaches the same teardown; this exists so a caller holding only the
-   * provider does not have to know that.
+   * storage's. Neither keeps the Node event loop alive, so a process that has
+   * stopped serving exits without this, but the timers run on until it does.
+   * `getProxy().destroy()` reaches the same teardown; this exists so a caller
+   * holding only the provider does not have to know that.
    *
    * Terminal: the provider will not serve again afterwards, and any later use
    * throws rather than quietly building a replacement. Call it when the process

@@ -651,7 +651,9 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
    * every example does — can still reach it at shutdown. The provider holds an
    * `OAuthProxy` with two cleanup timers, and `stop()` deliberately leaves them
    * running: the server does not own the provider, and a stopped server can be
-   * started again. Terminal teardown is therefore the caller's call:
+   * started again. The timers do not keep the process alive, so a stopped
+   * server lets it exit; they run on until the provider is destroyed, and
+   * terminal teardown is the caller's call:
    *
    * ```ts
    * await server.stop();

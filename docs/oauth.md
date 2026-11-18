@@ -479,10 +479,11 @@ const authProxy = new GoogleProvider({
 
 ### Shutting down
 
-Both the proxy and its default in-memory storage run a 60-second cleanup sweep,
-and an uncleared `setInterval` keeps the Node event loop alive — a process that
-has stopped serving will not exit on its own. Call `destroy()` when you are done
-with it:
+Both the proxy and its default in-memory storage run a 60-second cleanup sweep.
+The sweeps do not keep the Node event loop alive, so a process that has stopped
+serving exits on its own — but they run on until `destroy()` is called. Call it
+when you are done with the provider in a process that carries on, so its timers
+and state do not pile up:
 
 ```typescript
 const provider = new GoogleProvider({
