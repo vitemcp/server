@@ -9,9 +9,10 @@
  * `AuthProvider.authenticate` returns `undefined` for a missing or invalid
  * bearer token, which made that the default outcome of the `auth` option.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { GitHubProvider } from "./auth/providers/GitHubProvider.js";
+import { OAuthProvider } from "./auth/providers/OAuthProvider.js";
 import { ViteMCP } from "./ViteMCP.js";
 
 const MODERN_PROTOCOL_VERSION = "2026-07-28";
@@ -416,6 +417,78 @@ describe("authenticate gate", () => {
       expect(calls.count).toBe(0);
     } finally {
       await server.stop();
+      auth.destroy();
+    }
+  });
+
+  // RFC 9110 §11.1: an authentication scheme's name is case-insensitive, and
+  // RFC 6750 §2.1 allows one or more spaces before the token. A client that
+  // wrote `bearer` was answered with a 401 whatever token it held.
+  it("lets a valid token in whatever the case of the Bearer scheme", async () => {
+    const baseUrl = "http://localhost";
+    const auth = new OAuthProvider({
+      authorizationEndpoint: `${baseUrl}/authorize`,
+      baseUrl,
+      clientId: "id",
+      clientSecret: "secret",
+      tokenEndpoint: `${baseUrl}/token`,
+    });
+    const lookup = vi
+      .spyOn(auth.getProxy(), "loadUpstreamTokens")
+      .mockImplementation(async (token) =>
+        token === "AbC9"
+          ? {
+              accessToken: "upstream",
+              expiresIn: 3600,
+              issuedAt: new Date(),
+              scope: [],
+              tokenType: "Bearer",
+            }
+          : null,
+      );
+    const calls = { count: 0 };
+
+    const server = new ViteMCP({ auth, name: "Auth", version: "1.0.0" });
+
+    server.addTool({
+      description: "Unguarded on purpose",
+      execute: async () => {
+        calls.count += 1;
+        return "ok";
+      },
+      name: "secret",
+    });
+
+    await server.start({
+      httpStream: { port: 0 },
+      transportType: "httpStream",
+    });
+
+    try {
+      const admitted = [
+        "Bearer AbC9",
+        "bearer AbC9",
+        "BEARER AbC9",
+        "Bearer  AbC9",
+      ];
+      const refused = ["Bearer", "Bearer AbC8", "Basic AbC9"];
+
+      for (const authorization of [...admitted, ...refused]) {
+        const response = await callTool(server.port!, {
+          Authorization: authorization,
+        });
+        await response.text();
+
+        expect
+          .soft(response.status, authorization)
+          .toBe(admitted.includes(authorization) ? 200 : 401);
+      }
+
+      // The tool ran for the callers let in, and for no one else.
+      expect(calls.count).toBe(admitted.length);
+    } finally {
+      await server.stop();
+      lookup.mockRestore();
       auth.destroy();
     }
   });

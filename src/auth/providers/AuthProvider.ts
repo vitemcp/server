@@ -143,12 +143,16 @@ export abstract class AuthProvider<
       return undefined;
     }
 
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    // RFC 9110 §11.1: an authentication scheme's name is case-insensitive, and
+    // RFC 6750 §2.1 puts one or more spaces between it and the token. A token
+    // cannot start with a space, so everything after them is the token.
+    const token = /^bearer +(\S.*)$/i.exec(
+      request.headers.get("authorization") ?? "",
+    )?.[1];
+    if (!token) {
       return undefined;
     }
 
-    const token = authHeader.slice(7);
     const upstreamTokens = await this.proxy.loadUpstreamTokens(token);
 
     if (!upstreamTokens) {

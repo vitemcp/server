@@ -176,6 +176,71 @@ describe("OAuthProvider", () => {
       // Without valid upstream tokens, should return undefined
       expect(result).toBeUndefined();
     });
+
+    // RFC 9110 §11.1: an authentication scheme's name is case-insensitive, and
+    // RFC 6750 §2.1 allows one or more spaces between it and the token. A
+    // client that wrote `bearer` was refused with a token that was valid.
+    describe("the Bearer scheme", () => {
+      const upstreamTokens: UpstreamTokenSet = {
+        accessToken: "upstream",
+        expiresIn: 3600,
+        issuedAt: new Date(),
+        scope: [],
+        tokenType: "Bearer",
+      };
+
+      /** The session `authorization` earns, and each token it had looked up. */
+      const authenticateWith = async (authorization: string) => {
+        const provider = new OAuthProvider(baseConfig);
+        const lookup = vi
+          .spyOn(provider.getProxy(), "loadUpstreamTokens")
+          .mockImplementation(async (token) =>
+            token === "AbC9" ? upstreamTokens : null,
+          );
+
+        try {
+          const session = await provider.authenticate(
+            new Request("https://example.com/mcp", {
+              headers: { authorization },
+            }),
+          );
+
+          return { looked: lookup.mock.calls.map(([token]) => token), session };
+        } finally {
+          lookup.mockRestore();
+          provider.destroy();
+        }
+      };
+
+      it.each([
+        "Bearer AbC9",
+        "bearer AbC9",
+        "BEARER AbC9",
+        "bEaReR AbC9",
+        "Bearer  AbC9",
+        "bearer     AbC9",
+      ])("accepts %j, and looks up the token alone", async (authorization) => {
+        const { looked, session } = await authenticateWith(authorization);
+
+        expect(session).toBeDefined();
+        expect(looked).toEqual(["AbC9"]);
+      });
+
+      it.each([
+        "Bearer",
+        "bearer ",
+        "Bearerx AbC9",
+        "Bearer-AbC9",
+        "Bearer\tAbC9",
+        "Basic AbC9",
+        "AbC9",
+      ])("refuses %j without looking anything up", async (authorization) => {
+        const { looked, session } = await authenticateWith(authorization);
+
+        expect(session).toBeUndefined();
+        expect(looked).toEqual([]);
+      });
+    });
   });
 });
 
