@@ -1071,10 +1071,7 @@ export class OAuthProxy {
       let errorCode = "server_error";
       let errorDescription: string | undefined;
       try {
-        const error = (await tokenResponse.json()) as {
-          error?: string;
-          error_description?: string;
-        };
+        const error = await this.readUpstreamError(tokenResponse);
         errorCode = error.error || "server_error";
         errorDescription = error.error_description;
       } catch {
@@ -1338,10 +1335,7 @@ export class OAuthProxy {
       let errorCode = "invalid_grant";
       let errorDescription: string | undefined;
       try {
-        const error = (await tokenResponse.json()) as {
-          error?: string;
-          error_description?: string;
-        };
+        const error = await this.readUpstreamError(tokenResponse);
         errorCode = error.error || "invalid_grant";
         errorDescription = error.error_description;
       } catch {
@@ -1897,6 +1891,51 @@ export class OAuthProxy {
   }
 
   /**
+   * What a refusal from the token endpoint says: the `error` and
+   * `error_description` RFC 6749 §5.2 gives it.
+   *
+   * §5.2 sends them as JSON, but a provider that answers a successful request
+   * with a form — GitHub, by default — may refuse with one too, and read as
+   * JSON that lost the provider's own code and description to a bare HTTP
+   * status.
+   *
+   * What parses as JSON is read as JSON, whatever the response declares, as
+   * every refusal was before. A form is read only when the response declares
+   * one, by its media type alone: a 502 page can name that type in a parameter
+   * and carry `error=` in a link, and is no provider's refusal. Rejects when
+   * the body is neither, and the caller falls back to the HTTP status.
+   */
+  private async readUpstreamError(
+    response: Response,
+  ): Promise<{ error?: string; error_description?: string }> {
+    const text = await response.text();
+
+    try {
+      return JSON.parse(text);
+    } catch (cause) {
+      const mediaType = response.headers
+        .get("content-type")
+        ?.split(";", 1)[0]
+        ?.trim()
+        .toLowerCase();
+
+      if (mediaType === "application/x-www-form-urlencoded") {
+        const params = new URLSearchParams(text);
+        const error = params.get("error");
+
+        if (error) {
+          return {
+            error,
+            error_description: params.get("error_description") ?? undefined,
+          };
+        }
+      }
+
+      throw cause;
+    }
+  }
+
+  /**
    * Send the user's browser back to the client's registered callback with how
    * its request came out: a code, or an error (RFC 6749 §4.1.2). The `state`
    * the client sent goes with either, and so does the issuer, so that the
@@ -2010,10 +2049,7 @@ export class OAuthProxy {
       let errorCode = "invalid_grant";
       let errorDescription: string | undefined = "Upstream refresh failed";
       try {
-        const error = (await tokenResponse.json()) as {
-          error?: string;
-          error_description?: string;
-        };
+        const error = await this.readUpstreamError(tokenResponse);
         errorCode = error.error || "invalid_grant";
         errorDescription = error.error_description || "Upstream refresh failed";
       } catch {

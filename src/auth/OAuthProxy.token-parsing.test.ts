@@ -5,14 +5,13 @@ import { OAuthProxy } from "./OAuthProxy.js";
 import { PKCEUtils } from "./utils/pkce.js";
 
 /**
- * A passthrough-mode refresh request the proxy will forward: the upstream
- * refresh token is handed out by a code exchange, which binds it to the
- * client. No upstream call is made, so `fetch` can be mocked to fail first.
+ * A refresh request the proxy will send upstream, in either mode: a code
+ * exchange hands the client its refresh token, and binds it to the client.
+ * That is `refreshToken` itself in passthrough mode, and a token of the
+ * proxy's own in swap mode, where `refreshToken` stays with the proxy. No
+ * upstream call is made, so `fetch` can be mocked to fail first.
  */
-const issuePassthroughRefreshRequest = async (
-  proxy: OAuthProxy,
-  refreshToken: string,
-) => {
+const issueRefreshRequest = async (proxy: OAuthProxy, refreshToken: string) => {
   const redirectUri = "http://localhost:3000/callback";
   const dcr = await proxy.registerClient({ redirect_uris: [redirectUri] });
   const pkce = PKCEUtils.generatePair("S256");
@@ -32,7 +31,7 @@ const issuePassthroughRefreshRequest = async (
     tokenType: "Bearer",
   });
 
-  await proxy.exchangeAuthorizationCode({
+  const tokens = await proxy.exchangeAuthorizationCode({
     client_id: dcr.client_id,
     client_secret: dcr.client_secret,
     code,
@@ -45,7 +44,7 @@ const issuePassthroughRefreshRequest = async (
     client_id: dcr.client_id,
     client_secret: dcr.client_secret,
     grant_type: "refresh_token" as const,
-    refresh_token: refreshToken,
+    refresh_token: tokens.refresh_token!,
   };
 };
 
@@ -644,10 +643,7 @@ describe("OAuthProxy - Token Response Parsing", () => {
         enableTokenSwap: false,
       });
 
-      const request = await issuePassthroughRefreshRequest(
-        proxy,
-        "revoked-token",
-      );
+      const request = await issueRefreshRequest(proxy, "revoked-token");
 
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () =>
@@ -682,10 +678,7 @@ describe("OAuthProxy - Token Response Parsing", () => {
         enableTokenSwap: false,
       });
 
-      const request = await issuePassthroughRefreshRequest(
-        proxy,
-        "test-refresh-token",
-      );
+      const request = await issueRefreshRequest(proxy, "test-refresh-token");
 
       // Mock global fetch to return an HTML error page (e.g. load balancer 502)
       const originalFetch = globalThis.fetch;
@@ -716,10 +709,7 @@ describe("OAuthProxy - Token Response Parsing", () => {
         enableTokenSwap: false,
       });
 
-      const request = await issuePassthroughRefreshRequest(
-        proxy,
-        "expired-token",
-      );
+      const request = await issueRefreshRequest(proxy, "expired-token");
 
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () =>
@@ -747,6 +737,139 @@ describe("OAuthProxy - Token Response Parsing", () => {
         globalThis.fetch = originalFetch;
         proxy.destroy();
       }
+    });
+
+    describe("an error sent as a form", () => {
+      const paths = [
+        "authorization-code exchange",
+        "passthrough refresh",
+        "token-swap refresh",
+      ] as const;
+
+      /**
+       * What the proxy throws when the upstream's token endpoint answers
+       * `response` to the request `path` makes of it.
+       */
+      const refusedWith = async (
+        path: (typeof paths)[number],
+        response: Response,
+      ): Promise<any> => {
+        const proxy = new OAuthProxy({
+          ...baseConfig,
+          enableTokenSwap: path === "token-swap refresh",
+        });
+        let ask: () => Promise<unknown>;
+
+        if (path === "authorization-code exchange") {
+          const callback = await upstreamCallback(proxy);
+          ask = () => proxy.handleCallback(callback);
+        } else {
+          const request = await issueRefreshRequest(proxy, "upstream-refresh");
+          ask = () => proxy.exchangeRefreshToken(request);
+        }
+
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async () => response;
+
+        try {
+          return await ask().catch((error: unknown) => error);
+        } finally {
+          globalThis.fetch = originalFetch;
+          proxy.destroy();
+        }
+      };
+
+      describe.each(paths)("during the %s", (path) => {
+        it.each<{ fields: Record<string, string>; label: string }>([
+          {
+            fields: {
+              error: "bad_verification_code",
+              error_description: "Grant rejected + expired.",
+            },
+            label: "with a description",
+          },
+          { fields: { error: "access_denied" }, label: "without one" },
+        ])(
+          "is passed on as it is when sent as JSON, $label",
+          async ({ fields }) => {
+            const asJson = await refusedWith(
+              path,
+              Response.json(fields, { status: 400 }),
+            );
+            const asForm = await refusedWith(
+              path,
+              new Response(new URLSearchParams(fields), { status: 400 }),
+            );
+
+            expect(asJson.code).toBe(fields.error);
+            expect(asForm.name).toBe("OAuthProxyError");
+            expect(asForm.code).toBe(asJson.code);
+            expect(asForm.description).toBe(asJson.description);
+          },
+        );
+      });
+
+      it.each([
+        "application/x-www-form-urlencoded",
+        "Application/X-WWW-Form-Urlencoded ; charset=utf-8",
+      ])("is read when the response declares %s", async (type) => {
+        const refusal = await refusedWith(
+          "passthrough refresh",
+          new Response("error=invalid_scope&error_description=Too+wide", {
+            headers: { "Content-Type": type },
+            status: 400,
+          }),
+        );
+
+        expect(refusal.code).toBe("invalid_scope");
+        expect(refusal.description).toBe("Too wide");
+      });
+
+      it("leaves JSON that a response declares as a form to be read as JSON", async () => {
+        const refusal = await refusedWith(
+          "passthrough refresh",
+          new Response(
+            JSON.stringify({
+              error: "invalid_scope",
+              error_description: "Too wide",
+            }),
+            {
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              status: 400,
+            },
+          ),
+        );
+
+        expect(refusal.code).toBe("invalid_scope");
+        expect(refusal.description).toBe("Too wide");
+      });
+
+      it.each([
+        {
+          body: '<a href="/help?status=502&error=busy&retry=1">Bad Gateway</a>',
+          label: "a page that names the form type in a parameter",
+          type: 'text/html; profile="application/x-www-form-urlencoded"',
+        },
+        {
+          body: "status=502&detail=down",
+          label: "a form that reports no error",
+          type: "application/x-www-form-urlencoded",
+        },
+      ])("falls back to the HTTP status for $label", async ({ body, type }) => {
+        const refusal = await refusedWith(
+          "passthrough refresh",
+          new Response(body, {
+            headers: { "Content-Type": type },
+            status: 502,
+            statusText: "Bad Gateway",
+          }),
+        );
+
+        expect(refusal.code).toBe("invalid_grant");
+        expect(refusal.description).toBe(
+          "Upstream returned HTTP 502 Bad Gateway",
+        );
+      });
     });
   });
 });
