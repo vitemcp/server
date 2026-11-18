@@ -61,8 +61,42 @@ import { withoutTrailingSlash } from "./utils/trailingSlash.js";
  */
 const DEFAULT_REDIRECT_PATH = "/oauth/callback";
 
+/** A transaction ID, as `generateId()` makes it: 32 random bytes in base64url. */
+const GENERATED_ID = /^[\w-]{43}$/;
+
 /** Where GitHub OAuth Apps exchange codes, as `GitHubProvider` configures. */
 const GITHUB_TOKEN_ENDPOINT = "https://github.com/login/oauth/access_token";
+
+/** The most of an upstream's error text that is passed on to a client. */
+const MAX_RELAYED_ERROR_LENGTH = 512;
+
+/**
+ * RFC 6749 Appendix A.7 and A.8: `error` and `error_description` are NQSCHAR,
+ * printable ASCII without `"` and `\`.
+ */
+const OAUTH_ERROR_TEXT = /^[\x20-\x21\x23-\x5b\x5d-\x7e]+$/;
+
+/**
+ * An upstream's error as the client may be sent it. Both fields are NQSCHAR,
+ * which an upstream's text does not always keep to: Azure AD's descriptions
+ * carry line breaks, for one. The description is prose, so it is cleaned up to
+ * fit and capped, lest it swell the redirect; the code is an identifier, and
+ * one that cannot be passed on as it is becomes `server_error`.
+ */
+const relayableError = (
+  error: string,
+  description: string | undefined,
+): Pick<OAuthError, "error_description" | "error"> => ({
+  error:
+    OAUTH_ERROR_TEXT.test(error) && error.length <= MAX_RELAYED_ERROR_LENGTH
+      ? error
+      : "server_error",
+  error_description:
+    description
+      ?.replace(/[^\x21\x23-\x5b\x5d-\x7e]+/g, " ")
+      .slice(0, MAX_RELAYED_ERROR_LENGTH)
+      .trim() || undefined,
+});
 
 /**
  * Authorization request parameters owned by the proxy. Entries in
@@ -576,17 +610,29 @@ export class OAuthProxy {
    */
   async handleCallback(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const code = url.searchParams.get("code");
+    const code = url.searchParams.get("code") ?? "";
     const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
+    const description = url.searchParams.get("error_description") || undefined;
 
-    // Check for errors from upstream
     if (error) {
-      const errorDescription = url.searchParams.get("error_description");
-      throw new OAuthProxyError(error, errorDescription || undefined);
-    }
-
-    if (!code || !state) {
+      // The provider turned the request down — the user denied it, say — and
+      // sent no code. The client is still waiting on its own redirect, so the
+      // error is passed on to it below, but only for a state that names a live
+      // transaction. Any other is answered with the error itself, as it always
+      // was, so a callback made up for the purpose can neither spend a
+      // transaction nor reach a client. The stored ID is compared too: a
+      // storage may normalize the keys it is asked for, and what it hands back
+      // is then not the transaction this state names.
+      if (
+        !state ||
+        url.searchParams.getAll("state").length !== 1 ||
+        !GENERATED_ID.test(state) ||
+        (await this.stateStore.getTransaction(state))?.id !== state
+      ) {
+        throw new OAuthProxyError(error, description);
+      }
+    } else if (!code || !state) {
       throw new OAuthProxyError(
         "invalid_request",
         "Missing code or state parameter",
@@ -624,6 +670,15 @@ export class OAuthProxy {
       );
     }
 
+    // An error ends the transaction here, having passed the checks a code
+    // would have, and reaches the registered client the way a code does.
+    if (error) {
+      return this.redirectToClient(
+        transaction,
+        relayableError(error, description),
+      );
+    }
+
     // Exchange code with upstream provider
     const upstreamTokens = await this.exchangeUpstreamCode(code, transaction);
 
@@ -634,18 +689,7 @@ export class OAuthProxy {
     );
 
     // Redirect to client callback with code
-    const redirectUrl = new URL(transaction.clientCallbackUrl);
-    redirectUrl.searchParams.set("code", clientCode);
-    redirectUrl.searchParams.set("state", transaction.state);
-    // RFC 9207 §2: identify the issuer so the client can detect an AS mix-up.
-    redirectUrl.searchParams.set("iss", this.config.baseUrl);
-
-    return new Response(null, {
-      headers: {
-        Location: redirectUrl.toString(),
-      },
-      status: 302,
-    });
+    return this.redirectToClient(transaction, { code: clientCode });
   }
 
   /**
@@ -688,20 +732,9 @@ export class OAuthProxy {
           "Transaction callback URL is not registered",
         );
       }
-      const redirectUrl = new URL(transaction.clientCallbackUrl);
-      redirectUrl.searchParams.set("error", "access_denied");
-      redirectUrl.searchParams.set(
-        "error_description",
-        "User denied authorization",
-      );
-      redirectUrl.searchParams.set("state", transaction.state);
-      redirectUrl.searchParams.set("iss", this.config.baseUrl);
-
-      return new Response(null, {
-        headers: {
-          Location: redirectUrl.toString(),
-        },
-        status: 302,
+      return this.redirectToClient(transaction, {
+        error: "access_denied",
+        error_description: "User denied authorization",
       });
     }
 
@@ -1861,6 +1894,35 @@ export class OAuthProxy {
       .digest("base64url");
 
     return `passthrough-refresh:${this.issuerNs}:${digest}`;
+  }
+
+  /**
+   * Send the user's browser back to the client's registered callback with how
+   * its request came out: a code, or an error (RFC 6749 §4.1.2). The `state`
+   * the client sent goes with either, and so does the issuer, so that the
+   * client can detect an AS mix-up (RFC 9207 §2).
+   */
+  private redirectToClient(
+    transaction: OAuthTransaction,
+    params: { code: string } | Pick<OAuthError, "error_description" | "error">,
+  ): Response {
+    const redirectUrl = new URL(transaction.clientCallbackUrl);
+
+    for (const [name, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        redirectUrl.searchParams.set(name, value);
+      }
+    }
+
+    redirectUrl.searchParams.set("state", transaction.state);
+    redirectUrl.searchParams.set("iss", this.config.baseUrl);
+
+    return new Response(null, {
+      headers: {
+        Location: redirectUrl.toString(),
+      },
+      status: 302,
+    });
   }
 
   /**

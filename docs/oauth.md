@@ -43,6 +43,14 @@ This is the complete OAuth reference. For the abbreviated version, see
 Two PKCE pairs are in play: one between client and proxy, one between proxy and
 upstream. Neither party ever sees the other's verifier.
 
+If the provider answers step 5 with an error instead of a code — the user denied
+access on its screen, say — the proxy ends the flow there. It sends the error to
+the client in place of step 6: `error` and `error_description` on the redirect
+URI the client registered, with the client's own `state` and `iss` (RFC 6749
+§4.1.2.1). A description with characters outside what the RFC allows is cleaned
+up to fit. A callback whose `state` names no live transaction is answered with
+the error as JSON, and nothing is sent to any client.
+
 Only `S256` is accepted. `plain` makes the challenge and the verifier the same
 value, so the secret that redeems an authorization code ends up in browser
 history, referrer headers and proxy logs — RFC 7636 §4.2 requires S256 of any

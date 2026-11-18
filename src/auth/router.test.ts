@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OAuthProxy } from "./OAuthProxy.js";
 import { createOAuthRouter, OAUTH_PROXY_MAX_BODY_SIZE } from "./router.js";
@@ -305,6 +305,243 @@ describe("OAuth router", () => {
       } finally {
         consoleSpy.mockRestore();
         proxy.destroy();
+      }
+    });
+  });
+
+  // A provider that turns the request down — the user denies it on the
+  // provider's own screen — sends the user back with an `error` and no code.
+  // The client is still waiting on its own redirect, and a JSON page in the
+  // user's browser told it nothing: the transaction sat in storage until it
+  // expired and the sign-in simply hung.
+  describe("an error from the upstream provider", () => {
+    const clientCallback = "https://client.example.com/callback";
+    const denial = {
+      error: "access_denied",
+      error_description: "The user denied access",
+    };
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /**
+     * A proxy with an authorization under way, and the callback the provider
+     * sends the user back to for it: the denial, with `params` set over it.
+     */
+    const startAuthorization = async () => {
+      const proxy = makeProxy();
+      const app = createOAuthRouter({ proxy });
+      const { client_id } = await proxy.registerClient({
+        redirect_uris: [clientCallback],
+      });
+      const authorization = await get(
+        app,
+        `/oauth/authorize?${new URLSearchParams({
+          client_id,
+          redirect_uri: clientCallback,
+          response_type: "code",
+          state: "client +state",
+        })}`,
+      );
+      const state = new URL(
+        authorization.headers.get("Location")!,
+      ).searchParams.get("state")!;
+
+      return {
+        app,
+        callback: (params: Record<string, string> = {}) =>
+          `/oauth/callback?${new URLSearchParams({ ...denial, state, ...params })}`,
+        proxy,
+        state,
+      };
+    };
+
+    /** What the client's registered callback was sent. */
+    const sentToClient = (response: Response) => {
+      expect(response.status).toBe(302);
+
+      const location = new URL(response.headers.get("Location")!);
+
+      expect(`${location.origin}${location.pathname}`).toBe(clientCallback);
+
+      return Object.fromEntries(location.searchParams);
+    };
+
+    it("is passed on to the client's registered callback", async () => {
+      const { app, callback, proxy } = await startAuthorization();
+
+      try {
+        expect(sentToClient(await get(app, callback()))).toEqual({
+          ...denial,
+          iss: "http://localhost:4200",
+          state: "client +state",
+        });
+      } finally {
+        proxy.destroy();
+      }
+    });
+
+    it("is passed on once, and spends the transaction with it", async () => {
+      const { app, callback, proxy, state } = await startAuthorization();
+
+      try {
+        sentToClient(await get(app, callback()));
+
+        // Gone from storage, rather than left there until it expires.
+        expect(await proxy["stateStore"].getTransaction(state)).toBeNull();
+
+        const replay = await get(app, callback());
+
+        expect(replay.status).toBe(400);
+        expect(replay.headers.get("Location")).toBeNull();
+        expect(await replay.json()).toEqual(denial);
+      } finally {
+        proxy.destroy();
+      }
+    });
+
+    it("is not passed on for a state that names no live transaction", async () => {
+      const { app, callback, proxy, state } = await startAuthorization();
+      const withStates = (...states: string[]) => {
+        const params = new URLSearchParams(denial);
+
+        for (const value of states) {
+          params.append("state", value);
+        }
+
+        return `/oauth/callback?${params}`;
+      };
+
+      try {
+        // Answered as it always was: the error itself, as JSON.
+        for (const path of [
+          withStates(),
+          withStates("malformed!"),
+          withStates("A".repeat(43)),
+          withStates(state, state),
+        ]) {
+          const response = await get(app, path);
+
+          expect(response.status, path).toBe(400);
+          expect(response.headers.get("Location"), path).toBeNull();
+          expect(await response.json(), path).toEqual(denial);
+        }
+
+        // None of them spent the transaction that is live.
+        sentToClient(await get(app, callback()));
+      } finally {
+        proxy.destroy();
+      }
+    });
+
+    it("is not passed on once the transaction has expired", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+
+      const { app, callback, proxy } = await startAuthorization();
+
+      try {
+        // A transaction lives ten minutes by default.
+        vi.setSystemTime(Date.now() + 601_000);
+
+        const response = await get(app, callback());
+
+        expect(response.status).toBe(400);
+        expect(response.headers.get("Location")).toBeNull();
+        expect(await response.json()).toEqual(denial);
+      } finally {
+        proxy.destroy();
+      }
+    });
+
+    // The client is sent text the provider chose, so it has to be fit to the
+    // RFC 6749 §4.1.2.1 character set rather than refused, and it cannot be
+    // allowed to add parameters of its own to the redirect.
+    it.each<{
+      expected: Record<string, string>;
+      label: string;
+      params: Record<string, string>;
+    }>([
+      {
+        expected: {
+          ...denial,
+          error_description:
+            "AADSTS65004: The user declined. Trace ID: 1f2e Correlation ID: a b",
+        },
+        label: "line breaks, quotes and backslashes in the description",
+        params: {
+          error_description:
+            'AADSTS65004: The user declined.\r\nTrace ID: 1f2e\r\nCorrelation ID: "a\\b"',
+        },
+      },
+      {
+        expected: { ...denial, error_description: "x".repeat(512) },
+        label: "a description over the length cap",
+        params: { error_description: "x".repeat(2000) },
+      },
+      {
+        expected: { error: denial.error },
+        label: "a description with nothing printable in it",
+        params: { error_description: "\r\n\t" },
+      },
+      {
+        expected: { ...denial, error: "server_error" },
+        label: "an error code outside the character set",
+        params: { error: "accès_refusé" },
+      },
+      {
+        expected: {
+          ...denial,
+          error_description: "denied&code=stolen&state=forged",
+        },
+        label: "a description that reads as more parameters",
+        params: { error_description: "denied&code=stolen&state=forged" },
+      },
+    ])("is fit to what a client may be sent: $label", async (testCase) => {
+      const { app, callback, proxy } = await startAuthorization();
+
+      try {
+        expect(sentToClient(await get(app, callback(testCase.params)))).toEqual(
+          {
+            ...testCase.expected,
+            iss: "http://localhost:4200",
+            state: "client +state",
+          },
+        );
+      } finally {
+        proxy.destroy();
+      }
+    });
+
+    it("goes through the issuer check a code would", async () => {
+      const matching = await startAuthorization();
+      const foreign = await startAuthorization();
+
+      try {
+        // RFC 9207: a response that names another issuer came from another
+        // authorization server, whatever else it says.
+        sentToClient(
+          await get(
+            matching.app,
+            matching.callback({ iss: "https://provider.com" }),
+          ),
+        );
+
+        const rejected = await get(
+          foreign.app,
+          foreign.callback({ iss: "https://evil.example" }),
+        );
+
+        expect(rejected.status).toBe(400);
+        expect(rejected.headers.get("Location")).toBeNull();
+        expect(await rejected.json()).toEqual({
+          error: "invalid_request",
+          error_description:
+            "Authorization response issuer does not match the request issuer",
+        });
+      } finally {
+        matching.proxy.destroy();
+        foreign.proxy.destroy();
       }
     });
   });
