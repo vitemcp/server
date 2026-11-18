@@ -88,8 +88,9 @@ describe("OAuthProxy authorization response issuer (RFC 9207)", () => {
   it("names the issuer on the redirect that reports a denied consent", async () => {
     const proxy = await makeProxy(true);
 
+    const consentScreen = await authorize(proxy);
     const transactionId = /name="transaction_id" value="([^"]+)"/.exec(
-      await (await authorize(proxy)).text(),
+      await consentScreen.text(),
     )![1];
     const denied = await proxy.handleConsent(
       new Request("http://localhost:4200/oauth/consent", {
@@ -97,7 +98,11 @@ describe("OAuthProxy authorization response issuer (RFC 9207)", () => {
           action: "deny",
           transaction_id: transactionId,
         }).toString(),
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          // The browser the consent screen was shown to.
+          cookie: consentScreen.headers.getSetCookie()[0].split(";")[0],
+        },
         method: "POST",
       }),
     );

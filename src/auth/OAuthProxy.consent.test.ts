@@ -6,7 +6,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { OAuthProxy, OAuthProxyError } from "./OAuthProxy.js";
+import { OAuthProxy } from "./OAuthProxy.js";
 import { MemoryTokenStorage } from "./utils/tokenStore.js";
 
 const CALLBACK_URL = "https://client.example.com/callback";
@@ -54,22 +54,29 @@ describe("OAuthProxy consent action handling", () => {
     });
     expect(response.status).toBe(200);
 
+    // What the browser the consent screen was shown to sends back.
+    const cookie = response.headers.getSetCookie()[0].split(";")[0];
+
     const transactionId = /name="transaction_id" value="([^"]+)"/.exec(
       await response.text(),
     )?.[1];
     expect(transactionId).toBeTruthy();
 
-    return { proxy, transactionId: transactionId! };
+    return { cookie, proxy, transactionId: transactionId! };
   };
 
   const submitConsent = (
     proxy: OAuthProxy,
     body: Record<string, string>,
+    cookie?: string,
   ): Promise<Response> =>
     proxy.handleConsent(
       new Request(`${baseConfig.baseUrl}/oauth/consent`, {
         body: new URLSearchParams(body).toString(),
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          ...(cookie && { cookie }),
+        },
         method: "POST",
       }),
     );
@@ -109,12 +116,13 @@ describe("OAuthProxy consent action handling", () => {
   });
 
   it("redirects upstream on approve", async () => {
-    const { proxy, transactionId } = await startConsentFlow();
+    const { cookie, proxy, transactionId } = await startConsentFlow();
 
-    const response = await submitConsent(proxy, {
-      action: "approve",
-      transaction_id: transactionId,
-    });
+    const response = await submitConsent(
+      proxy,
+      { action: "approve", transaction_id: transactionId },
+      cookie,
+    );
 
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("Location") ?? "");
@@ -124,12 +132,13 @@ describe("OAuthProxy consent action handling", () => {
   });
 
   it("redirects back to the client with access_denied on deny", async () => {
-    const { proxy, transactionId } = await startConsentFlow();
+    const { cookie, proxy, transactionId } = await startConsentFlow();
 
-    const response = await submitConsent(proxy, {
-      action: "deny",
-      transaction_id: transactionId,
-    });
+    const response = await submitConsent(
+      proxy,
+      { action: "deny", transaction_id: transactionId },
+      cookie,
+    );
 
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("Location") ?? "");
@@ -139,10 +148,14 @@ describe("OAuthProxy consent action handling", () => {
     // The transaction is gone, so the denial cannot be re-submitted as an
     // approval.
     await expect(
-      submitConsent(proxy, {
-        action: "approve",
-        transaction_id: transactionId,
-      }),
-    ).rejects.toBeInstanceOf(OAuthProxyError);
+      submitConsent(
+        proxy,
+        { action: "approve", transaction_id: transactionId },
+        cookie,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      description: "Invalid or expired transaction",
+    });
   });
 });

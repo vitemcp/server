@@ -472,9 +472,23 @@ with nothing to refresh would otherwise have to sign in again every hour.
 ### Consent
 
 The consent screen is what stops a confused-deputy attack, so it is on by
-default. It renders the requesting client and the scopes being granted, sets a
-signed (HMAC-SHA256) cookie with a 5-minute TTL, and escapes everything it
-prints.
+default. Every MCP client reaches the provider through the proxy's one client,
+so the provider cannot tell them apart: without the screen, a user already
+signed in there would authorize any client that sent them to it. The screen
+shows the requesting client, where approving sends the user, and the scopes
+being granted. It escapes everything it prints and cannot be framed by another
+page.
+
+A request is approved, and finished, in the browser the screen was shown to. The
+screen sets an `HttpOnly`, `SameSite=Lax` cookie there — `vitemcp-consent`, or
+`__Host-vitemcp-consent` and `Secure` when `baseUrl` is `https://` — which lasts
+as long as the request (`transactionTtl`). Approving or denying takes it, and so
+does the provider's redirect back to `/oauth/callback`. A client cannot approve
+for itself, a page cannot submit the form from a user's browser, and a user sent
+straight to the provider with someone else's request is refused when they come
+back. One browser keeps one cookie however many requests it has open. The proxy
+stores only a digest of it with the request, so any instance sharing the storage
+can check it.
 
 ```typescript
 const authProxy = new GoogleProvider({
@@ -964,7 +978,7 @@ Keep secrets in the environment, never in source.
 
 | Attack              | Mitigation                                          |
 | ------------------- | --------------------------------------------------- |
-| Confused deputy     | User consent screen                                 |
+| Confused deputy     | Consent screen, bound to the browser it appeared in |
 | Code interception   | Two-tier PKCE, S256 only                            |
 | Token theft         | Short-lived JWTs, encryption at rest                |
 | Stolen code/token   | Client authentication; grants bound to their client |
@@ -1017,10 +1031,19 @@ does not apply to it.
 provider's issuer legitimately differs from its endpoint origin, set
 `upstreamIssuer`.
 
-**Consent screen never appears** — `consentRequired` is `false`, a valid consent
-cookie is still set (clear cookies for the domain), or `consentSigningKey`
-changes between requests because it is auto-generated and you run more than one
-process.
+**Consent screen never appears** — `consentRequired` is `false`.
+
+**"Consent must be given in the browser that requested it"** or **"This
+authorization request was not approved in this browser"** — the first means the
+consent form was submitted without the consent cookie, the second that the
+provider's redirect reached `/oauth/callback` without it. Finish the flow in the
+browser that showed the consent screen, and allow cookies for the server's
+origin. With an `https://` `baseUrl` the cookie is `Secure`, which a browser
+drops over plain HTTP, so `baseUrl` has to use the scheme the server is reached
+by. If you serve the proxy's handlers yourself, return the headers of
+`authorize()`'s response, and pass the browser's `Cookie` header in the requests
+you give `authorize()` (as its second argument), `handleConsent()` and
+`handleCallback()`.
 
 **Sessions vanish on restart** — you are on the default `MemoryTokenStorage`.
 Switch to `DiskStore` or a shared backend.

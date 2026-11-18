@@ -816,6 +816,9 @@ describe("OAuth router", () => {
           const page = await app.fetch(new Request(authorizeUrl));
           expect(page.status).toBe(200);
 
+          // What the browser the page was shown to sends back with its answer.
+          const cookie = page.headers.getSetCookie()[0].split(";")[0];
+
           const html = await page.text();
           const action = /<form method="POST" action="([^"]+)"/.exec(html)?.[1];
           const transactionId = /name="transaction_id" value="([^"]+)"/.exec(
@@ -832,6 +835,7 @@ describe("OAuth router", () => {
                 action: "approve",
                 transaction_id: transactionId!,
               }),
+              headers: { cookie },
               method: "POST",
             }),
           );

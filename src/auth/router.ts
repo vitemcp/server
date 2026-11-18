@@ -243,7 +243,9 @@ export const createOAuthRouter = (options: OAuthRouterOptions): Hono => {
       const params = Object.fromEntries(
         new URL(c.req.url).searchParams.entries(),
       );
-      return await proxy.authorize(params as never);
+      // The request goes too: it carries the consent cookie this browser
+      // already holds, if any.
+      return await proxy.authorize(params as never, c.req.raw);
     } catch (error) {
       const { body, status } = errorResponse(error);
       return c.json(body as never, status);
