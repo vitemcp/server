@@ -182,18 +182,10 @@ export class JWKSVerifier implements TokenVerifier {
       return;
     }
 
-    try {
-      this.jose = await import("jose");
-      this.joseLoaded = true;
+    let jose: any;
 
-      // Create the JWKS cache with the configured URI
-      this.jwksCache = this.jose.createRemoteJWKSet(
-        new URL(this.config.jwksUri),
-        {
-          cacheMaxAge: this.config.cacheDuration,
-          cooldownDuration: this.config.cooldownDuration,
-        },
-      );
+    try {
+      jose = await import("jose");
     } catch (error: any) {
       throw new Error(
         `JWKS verification requires the 'jose' package.\n` +
@@ -202,6 +194,17 @@ export class JWKSVerifier implements TokenVerifier {
           `Original error: ${error.message}`,
       );
     }
+
+    // Outside the import's try block, so an invalid jwksUri is reported as
+    // such rather than as a missing package. jose only counts as loaded once
+    // the key set exists: marked any earlier, every later call skipped this
+    // and verified against no key set at all.
+    this.jwksCache = jose.createRemoteJWKSet(new URL(this.config.jwksUri), {
+      cacheMaxAge: this.config.cacheDuration,
+      cooldownDuration: this.config.cooldownDuration,
+    });
+    this.jose = jose;
+    this.joseLoaded = true;
   }
 
   /**
