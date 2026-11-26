@@ -18,7 +18,8 @@ export type ToolBinding = {
   parameters: Record<string, ParameterBinding>;
   /**
    * Set when the body is exposed as one argument rather than flattened into
-   * several — an array body, or one the schema describes as a scalar.
+   * several — an array body, one the schema describes as a scalar, or one
+   * offering alternatives.
    */
   wholeBodyKey?: string;
 };
@@ -238,9 +239,9 @@ const describeBody = (
     return { encoding, properties, required };
   }
 
-  // An array body, a dictionary, or one the document describes only by `$ref`
-  // or a composition keyword: there is nothing to flatten, so the whole body
-  // becomes one argument.
+  // An array body, a dictionary, a scalar behind a `$ref`, or one that offers
+  // alternatives with `anyOf` or `oneOf`: there is nothing to flatten, so the
+  // whole body becomes one argument, validated against all of its schema.
   properties.set("body", { required, schema });
 
   return { encoding, properties, required, wholeBodyKey: "body" };
@@ -367,6 +368,18 @@ const describeParameter = (
  * almost every document defines its request bodies as a `$ref` to a named
  * component, and stopping at the reference would put the entire body behind a
  * single opaque argument.
+ *
+ * Everything in a schema applies at once — the target of its `$ref`, each
+ * `allOf` branch, and the properties and requirements it declares beside them
+ * — so all of it is merged. Merging the branches alone dropped what the schema
+ * declared itself, and the tool's closed input schema then refused every call
+ * that sent those properties.
+ *
+ * A schema carrying `anyOf` or `oneOf` is not flattened at all. Their branches
+ * are alternatives, and one flat argument list cannot say which combination of
+ * them a call has to meet. Flattened from its own properties, such a body was
+ * sent without the fields its branches require, while a call that supplied
+ * them was refused; whole, it is validated against all of it.
  */
 const flattenObject = (
   schema: OpenApiSchema | undefined,
@@ -375,62 +388,74 @@ const flattenObject = (
 ):
   | { properties: Record<string, OpenApiSchema>; required: Set<string> }
   | undefined => {
-  if (!schema || depth > 8) {
-    return undefined;
-  }
-
-  if (typeof schema.$ref === "string" && schema.$ref.startsWith("#/$defs/")) {
-    return flattenObject(
-      definitions[schema.$ref.slice("#/$defs/".length)],
-      definitions,
-      depth + 1,
-    );
-  }
-
-  if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
-    // No prototype, so that `Object.assign` copies a property called
-    // `__proto__` instead of making it this object's prototype.
-    const properties: Record<string, OpenApiSchema> = Object.create(null);
-    const required = new Set<string>();
-
-    for (const branch of schema.allOf) {
-      const part = flattenObject(
-        branch as OpenApiSchema,
-        definitions,
-        depth + 1,
-      );
-
-      if (!part) {
-        return undefined;
-      }
-
-      Object.assign(properties, part.properties);
-
-      for (const name of part.required) {
-        required.add(name);
-      }
-    }
-
-    return { properties, required };
-  }
-
-  const properties = schema.properties;
-
   if (
-    !properties ||
-    typeof properties !== "object" ||
-    Array.isArray(properties)
+    !schema ||
+    depth > 8 ||
+    isNonEmptyArray(schema.anyOf) ||
+    isNonEmptyArray(schema.oneOf)
   ) {
     return undefined;
   }
 
-  return {
-    properties: properties as Record<string, OpenApiSchema>,
-    required: new Set(
-      Array.isArray(schema.required) ? (schema.required as string[]) : [],
-    ),
-  };
+  const parts: unknown[] = [];
+
+  if (typeof schema.$ref === "string" && schema.$ref.startsWith("#/$defs/")) {
+    parts.push(definitions[schema.$ref.slice("#/$defs/".length)]);
+  }
+
+  if (isNonEmptyArray(schema.allOf)) {
+    parts.push(...schema.allOf);
+  }
+
+  const own = isPropertyMap(schema.properties) ? schema.properties : undefined;
+
+  if (parts.length === 0 && !own) {
+    return undefined;
+  }
+
+  // No prototype, so that `Object.assign` copies a property called
+  // `__proto__` instead of making it this object's prototype.
+  const properties: Record<string, OpenApiSchema> = Object.create(null);
+  const required = new Set<string>();
+
+  for (const part of parts) {
+    const flattened = flattenObject(
+      part as OpenApiSchema,
+      definitions,
+      depth + 1,
+    );
+
+    if (!flattened) {
+      return undefined;
+    }
+
+    Object.assign(properties, flattened.properties);
+
+    for (const name of flattened.required) {
+      required.add(name);
+    }
+  }
+
+  // Merged last, as the most specific: a property the schema restates from
+  // one it inherits keeps the schema's own declaration.
+  Object.assign(properties, own);
+
+  if (Array.isArray(schema.required)) {
+    for (const name of schema.required as string[]) {
+      required.add(name);
+    }
+  }
+
+  return { properties, required };
 };
+
+const isNonEmptyArray = (value: unknown): value is unknown[] =>
+  Array.isArray(value) && value.length > 0;
+
+const isPropertyMap = (
+  value: unknown,
+): value is Record<string, OpenApiSchema> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const encodingKindFor = (contentType: string): BodyEncoding["kind"] => {
   if (contentType === "application/x-www-form-urlencoded") {

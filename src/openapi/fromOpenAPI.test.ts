@@ -547,3 +547,127 @@ describe("fromOpenAPI, an optional request body", () => {
     },
   );
 });
+
+/**
+ * A JSON body composing its schema with `allOf`, `anyOf` or `oneOf` beside the
+ * properties it declares itself. Flattened from those alone, the tool sent a
+ * body missing what the composition requires, and refused every call that
+ * supplied it.
+ */
+describe("fromOpenAPI, a request body that composes its schema", () => {
+  const JOB = (composition: string) => ({
+    [composition]: [
+      { $ref: "#/components/schemas/Tenant" },
+      {
+        properties: { queue: { type: "string" } },
+        required: ["queue"],
+        type: "object",
+      },
+    ],
+    properties: { name: { type: "string" } },
+    required: ["name"],
+    type: "object",
+  });
+
+  const serve = async (composition: string, referenced: boolean) => {
+    const sent: unknown[] = [];
+    const client = await connect(
+      await fromOpenAPI({
+        fetch: (async (_input, init) => {
+          sent.push(JSON.parse(String(init?.body)));
+
+          return new Response("{}", {
+            headers: { "content-type": "application/json" },
+          });
+        }) as typeof fetch,
+        spec: {
+          components: {
+            schemas: {
+              Job: JOB(composition),
+              Tenant: {
+                properties: { tenant_id: { type: "string" } },
+                required: ["tenant_id"],
+                type: "object",
+              },
+            },
+          },
+          info: { title: "Jobs", version: "1.0.0" },
+          openapi: "3.1.0",
+          paths: {
+            "/jobs": {
+              post: {
+                operationId: "runJob",
+                requestBody: {
+                  content: {
+                    "application/json": {
+                      schema: referenced
+                        ? { $ref: "#/components/schemas/Job" }
+                        : JOB(composition),
+                    },
+                  },
+                  required: true,
+                },
+                responses: { "200": { description: "OK" } },
+              },
+            },
+          },
+          servers: [{ url: "https://api.example.com" }],
+        },
+      }),
+    );
+
+    const call = async (args: Record<string, unknown>) =>
+      !(await client.callTool({ arguments: args, name: "runJob" })).isError;
+
+    return { call, client, sent };
+  };
+
+  const FULL = { name: "nightly", queue: "batch", tenant_id: "t1" };
+
+  it.each([false, true])(
+    "flattens an allOf body with everything it declares (referenced: %s)",
+    async (referenced) => {
+      const { call, client, sent } = await serve("allOf", referenced);
+
+      const { tools } = await client.listTools();
+      expect(Object.keys(tools[0].inputSchema.properties ?? {}).sort()).toEqual(
+        ["name", "queue", "tenant_id"],
+      );
+
+      expect(await call(FULL)).toBe(true);
+      expect(await call({ name: "nightly", queue: "batch" })).toBe(false);
+      expect(await call({ queue: "batch", tenant_id: "t1" })).toBe(false);
+      expect(sent).toEqual([FULL]);
+
+      await client.close();
+    },
+  );
+
+  it.each([
+    ["anyOf", false],
+    ["anyOf", true],
+    ["oneOf", false],
+    ["oneOf", true],
+  ])(
+    "sends a body offering alternatives with %s whole, as its schema allows (referenced: %s)",
+    async (composition, referenced) => {
+      const { call, client, sent } = await serve(composition, referenced);
+
+      const { tools } = await client.listTools();
+      expect(Object.keys(tools[0].inputSchema.properties ?? {})).toEqual([
+        "body",
+      ]);
+
+      const one = { name: "nightly", tenant_id: "t1" };
+
+      expect(await call({ body: one })).toBe(true);
+      // Meets both branches, which oneOf forbids and anyOf allows.
+      expect(await call({ body: FULL })).toBe(composition === "anyOf");
+      expect(await call({ body: { name: "nightly" } })).toBe(false);
+      expect(await call({ body: { tenant_id: "t1" } })).toBe(false);
+      expect(sent).toEqual(composition === "anyOf" ? [one, FULL] : [one]);
+
+      await client.close();
+    },
+  );
+});

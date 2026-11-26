@@ -522,6 +522,154 @@ describe("request bodies", () => {
     });
   });
 
+  describe("composed", () => {
+    const TENANT = {
+      properties: { tenant_id: { type: "string" } },
+      required: ["tenant_id"],
+      type: "object",
+    };
+    const QUEUE = {
+      properties: { queue: { type: "string" } },
+      required: ["queue"],
+      type: "object",
+    };
+
+    const bindBody = (schema: Record<string, unknown>, openapi = "3.0.3") => {
+      const [{ binding }] = bind({
+        components: { schemas: { Tenant: TENANT } },
+        openapi,
+        paths: { "/jobs": { post: { requestBody: jsonBody(schema) } } },
+      });
+
+      return binding;
+    };
+
+    // The branches alone were merged, so `name` was no argument at all, and
+    // the closed input schema refused every call that sent it.
+    it("merges what an allOf body declares beside its branches", () => {
+      const binding = bindBody({
+        allOf: [{ $ref: "#/components/schemas/Tenant" }, QUEUE],
+        properties: { name: { type: "string" } },
+        required: ["name"],
+        type: "object",
+      });
+
+      expect(binding.wholeBodyKey).toBeUndefined();
+      expect(destinations(binding)).toEqual({
+        name: "body",
+        queue: "body",
+        tenant_id: "body",
+      });
+      expect(binding.inputSchema.required).toEqual([
+        "name",
+        "queue",
+        "tenant_id",
+      ]);
+    });
+
+    it("merges what a body declares beside its $ref", () => {
+      const binding = bindBody(
+        {
+          $ref: "#/components/schemas/Tenant",
+          properties: { name: { type: "string" } },
+          required: ["name"],
+        },
+        "3.1.0",
+      );
+
+      expect(destinations(binding)).toEqual({
+        name: "body",
+        tenant_id: "body",
+      });
+      expect(binding.inputSchema.required).toEqual(["name", "tenant_id"]);
+    });
+
+    it("keeps a requirement an allOf body adds to its branches", () => {
+      const binding = bindBody({
+        allOf: [
+          {
+            properties: { name: { type: "string" }, tag: { type: "string" } },
+            type: "object",
+          },
+        ],
+        required: ["tag"],
+      });
+
+      expect(binding.inputSchema.required).toEqual(["tag"]);
+    });
+
+    it("keeps its own declaration of a property it restates from a branch", () => {
+      const binding = bindBody({
+        allOf: [{ $ref: "#/components/schemas/Tenant" }],
+        properties: { tenant_id: { format: "uuid", type: "string" } },
+      });
+
+      expect(binding.inputSchema.properties?.tenant_id).toEqual({
+        format: "uuid",
+        type: "string",
+      });
+    });
+
+    // Flattened from its own properties, the body was sent without what its
+    // branches require, and a call that supplied that was refused.
+    it.each(["anyOf", "oneOf"])(
+      "keeps a body offering alternatives with %s whole",
+      (composition) => {
+        const binding = bindBody({
+          [composition]: [{ $ref: "#/components/schemas/Tenant" }, QUEUE],
+          properties: { name: { type: "string" } },
+          required: ["name"],
+          type: "object",
+        });
+
+        expect(binding.wholeBodyKey).toBe("body");
+        expect(destinations(binding)).toEqual({ body: "body" });
+        expect(binding.inputSchema.required).toEqual(["body"]);
+        expect(binding.inputSchema.properties?.body).toMatchObject({
+          [composition]: [{ $ref: "#/$defs/Tenant" }, QUEUE],
+          properties: { name: { type: "string" } },
+        });
+        expect(binding.inputSchema.$defs).toHaveProperty("Tenant");
+      },
+    );
+
+    it.each(["anyOf", "oneOf"])(
+      "keeps an allOf body whole when a branch offers alternatives with %s",
+      (composition) => {
+        const binding = bindBody({
+          allOf: [
+            { $ref: "#/components/schemas/Tenant" },
+            {
+              [composition]: [{ required: ["a"] }, { required: ["b"] }],
+              properties: { a: { type: "string" }, b: { type: "string" } },
+              type: "object",
+            },
+          ],
+        });
+
+        expect(binding.wholeBodyKey).toBe("body");
+      },
+    );
+
+    it.each(["anyOf", "oneOf"])(
+      "still flattens an object with %s inside one of its properties",
+      (composition) => {
+        const field = {
+          [composition]: [{ type: "string" }, { type: "integer" }],
+        };
+        const binding = bindBody({
+          properties: { name: field },
+          required: ["name"],
+          type: "object",
+        });
+
+        expect(binding.wholeBodyKey).toBeUndefined();
+        expect(destinations(binding)).toEqual({ name: "body" });
+        expect(binding.inputSchema.properties?.name).toEqual(field);
+      },
+    );
+  });
+
   it("exposes a non-object body as a single argument", () => {
     const [{ binding }] = bind({
       openapi: "3.0.3",

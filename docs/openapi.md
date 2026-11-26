@@ -171,9 +171,13 @@ more often than one asked to nest a body under `body` and parameters under
 `params`.
 
 A request body defined by `$ref`, or composed with `allOf`, is followed and
-flattened too. A body with no properties to flatten — an array, a scalar, or a
-dictionary that only declares `additionalProperties` — becomes a single `body`
-argument instead.
+flattened too, along with any properties and requirements it declares beside
+them. A body with no properties to flatten — an array, a scalar, or a dictionary
+that only declares `additionalProperties` — becomes a single `body` argument
+instead. So does one that offers alternatives with `anyOf` or `oneOf`, at the
+top level or in an `allOf` branch: a flat argument list cannot say which
+combination of them a call has to meet, so the whole body is one argument,
+validated against its entire schema.
 
 A JSON body the operation marks `required` is sent as `{}` when no argument
 fills it: one whose properties are all optional, called with only a path
