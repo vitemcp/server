@@ -1,4 +1,5 @@
-import { chmod, mkdir, readdir, rm, stat } from "fs/promises";
+import { createHash } from "crypto";
+import { chmod, mkdir, readdir, rm, stat, writeFile } from "fs/promises";
 import { join } from "path";
 import {
   afterAll,
@@ -62,6 +63,13 @@ vi.mock("fs/promises", async (importOriginal) => {
 });
 
 const TEST_DIR = join(process.cwd(), ".test-disk-store");
+
+/**
+ * The file a key's entry is stored in. Spelled out rather than asked of the
+ * store, since entries already on disk depend on it staying put.
+ */
+const entryName = (key: string) =>
+  `sha256.${createHash("sha256").update(key).digest("hex")}.json`;
 
 describe("DiskStore", () => {
   beforeAll(async () => {
@@ -248,10 +256,115 @@ describe("DiskStore", () => {
 
     // Verify file was created in the correct directory
     const files = await readdir(TEST_DIR);
-    expect(files.length).toBe(1);
-    expect(files[0]).toMatch(/^_________malicious\.json$/);
+    expect(files).toEqual([entryName("../../../malicious")]);
 
     store.destroy();
+  });
+
+  it("should keep keys that differ only in punctuation or case apart", async () => {
+    const store = new DiskStore({ directory: TEST_DIR });
+    // The first three used to share `client_a_b.json`, and so did the last
+    // wherever letter case is folded, as it is on macOS and Windows.
+    const keys = ["client:a.b", "client:a_b", "client/a/b", "client:A.B"];
+
+    for (const key of keys) {
+      await store.save(key, key);
+    }
+
+    for (const key of keys) {
+      expect(await store.get(key)).toBe(key);
+    }
+    expect(await store.size()).toBe(keys.length);
+
+    await store.delete("client:a.b");
+
+    expect(await store.get("client:a.b")).toBeNull();
+    expect(await store.get("client:a_b")).toBe("client:a_b");
+
+    store.destroy();
+  });
+
+  it("should not give the key away in the file name", async () => {
+    const store = new DiskStore({ directory: TEST_DIR });
+
+    await store.save("code:an-authorization-code", "value");
+
+    const files = await readdir(TEST_DIR);
+    expect(files).toEqual([entryName("code:an-authorization-code")]);
+    expect(files[0]).not.toContain("an-authorization-code");
+
+    store.destroy();
+  });
+
+  it("should store a key too long for a file name", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const store = new DiskStore({ directory: TEST_DIR });
+    const key = `client:https://example.com/${"a/".repeat(200)}`;
+
+    await store.save(key, "value");
+
+    expect(await store.get(key)).toBe("value");
+    expect(await store.take(key)).toBe("value");
+    // A miss, which used to be logged as ENAMETOOLONG.
+    expect(await store.get(key)).toBeNull();
+    expect(await readdir(TEST_DIR)).toEqual([]);
+    expect(error).not.toHaveBeenCalled();
+
+    error.mockRestore();
+    store.destroy();
+  });
+
+  describe("entries an earlier version wrote", () => {
+    const writeLegacy = async (name: string, value: unknown) => {
+      await mkdir(TEST_DIR, { recursive: true });
+      await writeFile(
+        join(TEST_DIR, name),
+        JSON.stringify({ expiresAt: Number.MAX_SAFE_INTEGER, value }),
+      );
+    };
+
+    it("should still be read, taken and deleted", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+
+      await writeLegacy("code_abc.json", "old");
+      expect(await store.get("code:abc")).toBe("old");
+      expect(await store.take("code:abc")).toBe("old");
+      expect(await store.get("code:abc")).toBeNull();
+
+      await writeLegacy("code_abc.json", "old");
+      await store.delete("code:abc");
+      expect(await readdir(TEST_DIR)).toEqual([]);
+
+      store.destroy();
+    });
+
+    it("should be replaced, not shadowed, by a save", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+      await writeLegacy("code_abc.json", "old");
+
+      await store.save("code:abc", "new");
+
+      expect(await readdir(TEST_DIR)).toEqual([entryName("code:abc")]);
+      expect(await store.take("code:abc")).toBe("new");
+      // Spent, so the old file must not hand it out again.
+      expect(await store.take("code:abc")).toBeNull();
+
+      store.destroy();
+    });
+
+    it("should be cleared by a save without touching another key's entry", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+
+      // `a_3ab.json` is where an earlier version kept `a_3ab`, and what
+      // escaping `:` as `_3a` would name the file of `a:b`.
+      await store.save("a:b", "colon");
+      await store.save("a_3ab", "underscore");
+
+      expect(await store.get("a:b")).toBe("colon");
+      expect(await store.get("a_3ab")).toBe("underscore");
+
+      store.destroy();
+    });
   });
 
   it("should handle concurrent operations", async () => {
@@ -323,7 +436,7 @@ describe("DiskStore", () => {
       await store.save("key", "first");
       await store.save("key", "second");
 
-      expect(await readdir(TEST_DIR)).toEqual(["key.json"]);
+      expect(await readdir(TEST_DIR)).toEqual([entryName("key")]);
 
       store.destroy();
     });
@@ -333,10 +446,10 @@ describe("DiskStore", () => {
       const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
       // A directory where the entry belongs, which rename() cannot replace.
-      await mkdir(join(TEST_DIR, "key.json"), { recursive: true });
+      await mkdir(join(TEST_DIR, entryName("key")), { recursive: true });
 
       await expect(store.save("key", "value")).rejects.toThrow();
-      expect(await readdir(TEST_DIR)).toEqual(["key.json"]);
+      expect(await readdir(TEST_DIR)).toEqual([entryName("key")]);
 
       error.mockRestore();
       store.destroy();
@@ -367,7 +480,7 @@ describe("DiskStore", () => {
 
           expect(renameFailures.calls).toBe(3);
           expect(await store.get("key")).toBe("second");
-          expect(await readdir(TEST_DIR)).toEqual(["key.json"]);
+          expect(await readdir(TEST_DIR)).toEqual([entryName("key")]);
 
           store.destroy();
         },
@@ -387,7 +500,7 @@ describe("DiskStore", () => {
         });
         expect(renameFailures.calls).toBe(6);
         expect(await store.get("key")).toBe("first");
-        expect(await readdir(TEST_DIR)).toEqual(["key.json"]);
+        expect(await readdir(TEST_DIR)).toEqual([entryName("key")]);
 
         error.mockRestore();
         store.destroy();
@@ -512,8 +625,8 @@ describe("DiskStore", () => {
     it("should keep stored credentials unreadable by group and other", async () => {
       const store = new DiskStore({ directory: TEST_DIR });
 
-      // The key becomes the filename, so a listable directory leaks the
-      // authorization code even to someone who cannot read the file.
+      // The directory too: an earlier version named an entry after its key,
+      // so listing it gave an authorization code away.
       await store.save("code:an-authorization-code", {
         accessToken: "AT",
         refreshToken: "RT",
@@ -521,7 +634,7 @@ describe("DiskStore", () => {
 
       const [directoryMode, fileMode] = await Promise.all([
         stat(TEST_DIR).then((stats) => stats.mode),
-        stat(join(TEST_DIR, "code_an-authorization-code.json")).then(
+        stat(join(TEST_DIR, entryName("code:an-authorization-code"))).then(
           (stats) => stats.mode,
         ),
       ]);
@@ -534,7 +647,7 @@ describe("DiskStore", () => {
 
     it("should tighten an entry left with a looser mode when it is next written", async () => {
       const store = new DiskStore({ directory: TEST_DIR });
-      const file = join(TEST_DIR, "token-key.json");
+      const file = join(TEST_DIR, entryName("token-key"));
 
       // As an entry written by an earlier version would have been.
       await store.save("token-key", { accessToken: "AT-old" });

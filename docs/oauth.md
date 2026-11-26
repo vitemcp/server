@@ -705,16 +705,23 @@ const authProxy = new OAuthProxy({
 });
 ```
 
-`DiskStore` cleans up expired entries on its own interval, sanitizes keys
-against directory traversal, and both writes and claims entries with an atomic
-`rename()` — so several processes sharing one directory are safe. It is
-host-local, not a network-distributed store.
+`DiskStore` cleans up expired entries on its own interval, names each entry
+after a SHA-256 digest of its key, and both writes and claims entries with an
+atomic `rename()` — so several processes sharing one directory are safe. The
+digest keeps a key from escaping the directory, sharing a file with another key,
+or showing in a directory listing. It is host-local, not a network-distributed
+store.
 
 It creates the directory `0700` and each entry `0600`, keeping codes and tokens
 off-limits to other users on the host. The directory's mode is applied when it
 is created and an entry's when it is written, so a directory carried over from
 an older release keeps whatever it has until then — run `chmod -R go-rwx` on it
 once when upgrading.
+
+Entries an older release wrote, named after their keys, are still read, and each
+is replaced by a digest-named file the next time its key is saved. Don't run an
+older release against the same directory alongside a newer one: it cannot see
+the new names.
 
 ### Encryption
 
@@ -985,7 +992,7 @@ Keep secrets in the environment, never in source.
 | XSS                 | HTML escaping in the consent screen                 |
 | CSRF                | State parameter validation                          |
 | Replay              | Single-use authorization codes                      |
-| Directory traversal | Key sanitization in `DiskStore`                     |
+| Directory traversal | Digest-named entries in `DiskStore`                 |
 | Mix-up              | RFC 9207 `iss` validation on callback               |
 
 To report a vulnerability, see [SECURITY.md](../SECURITY.md).
