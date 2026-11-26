@@ -748,6 +748,35 @@ server.addTool({
 });
 ```
 
+#### Passing the caller's context
+
+`embedded()` runs a loader outside any request, so by default its
+`context.auth` is `undefined` and `canAccess` is not consulted. Pass the tool's
+`context` to resolve the URI as `resources/read` would for that caller: the
+loader receives that context, `auth` included, and a resource or template whose
+`canAccess` refuses the caller is not found.
+
+```js
+server.addTool({
+  name: "get_my_profile",
+  description: "Retrieve the caller's own profile",
+  parameters: z.object({}),
+  execute: async (args, context) => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded("user://me", context),
+        },
+      ],
+    };
+  },
+});
+```
+
+Pass it whenever the URI comes from the tool's arguments, so the tool cannot
+reach a resource its caller could not read directly.
+
 ### Prompts
 
 [Prompts](https://modelcontextprotocol.io/docs/concepts/prompts) enable servers to define reusable prompt templates and workflows that clients can easily surface to users and LLMs. They provide a powerful way to standardize and share common LLM interactions.

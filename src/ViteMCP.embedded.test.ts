@@ -9,7 +9,9 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
+import { runWithTestServer } from "./testHarness.js";
 import { ViteMCP } from "./ViteMCP.js";
 
 describe("embedded()", () => {
@@ -168,6 +170,140 @@ describe("embedded()", () => {
       ];
 
       expect(viaEmbedded).toEqual(viaRead);
+    });
+  });
+});
+
+/**
+ * A loader only ever got a context built outside any request, so one that
+ * scoped what it returned to the caller served every tool that embedded it the
+ * anonymous version, though the tool itself knew the caller.
+ */
+describe("embedded() with the calling tool's context", () => {
+  type Session = { role: "admin" | "user"; userId: string };
+
+  const admin = (auth: Session | undefined) => auth?.role === "admin";
+
+  /** Every caller is `u1`, a user: what `canAccess` is checked against. */
+  const createServer = () => {
+    const server = new ViteMCP<Session>({
+      authenticate: async () => ({ role: "user", userId: "u1" }),
+      name: "Test",
+      version: "1.0.0",
+    });
+
+    server.addResource({
+      load: async (context) => ({ text: `profile of ${context.auth?.userId}` }),
+      mimeType: "text/plain",
+      name: "Profile",
+      uri: "user://me",
+    });
+    server.addResourceTemplate({
+      arguments: [{ name: "id" }],
+      load: async ({ id }, context) => ({
+        text: `note ${id} of ${context.auth?.userId}`,
+      }),
+      mimeType: "text/plain",
+      name: "Note",
+      uriTemplate: "notes://{id}",
+    });
+    server.addResource({
+      canAccess: admin,
+      load: async () => ({ text: "dossier" }),
+      mimeType: "text/plain",
+      name: "Dossier",
+      uri: "admin://dossier",
+    });
+    server.addResourceTemplate({
+      arguments: [{ name: "id" }],
+      canAccess: admin,
+      load: async ({ id }) => ({ text: `record ${id}` }),
+      mimeType: "text/plain",
+      name: "Record",
+      uriTemplate: "admin://records/{id}",
+    });
+    server.addTool({
+      description: "Embeds the resource at a URI",
+      execute: async ({ uri, withContext }, context) => ({
+        content: [
+          {
+            resource: await server.embedded(
+              uri,
+              withContext ? context : undefined,
+            ),
+            type: "resource",
+          },
+        ],
+      }),
+      name: "embed",
+      parameters: z.object({ uri: z.string(), withContext: z.boolean() }),
+    });
+
+    return server;
+  };
+
+  const embed = async (client: Client, uri: string, withContext: boolean) =>
+    (await client.callTool({
+      arguments: { uri, withContext },
+      name: "embed",
+    })) as {
+      content: Array<{ resource?: { text: string }; text?: string }>;
+      isError?: boolean;
+    };
+
+  const textOf = async (client: Client, uri: string, withContext: boolean) => {
+    const result = await embed(client, uri, withContext);
+
+    expect(result.isError).toBeFalsy();
+
+    return result.content[0].resource?.text;
+  };
+
+  it("hands a resource loader the caller's auth", async () => {
+    await runWithTestServer({
+      run: async ({ client }) => {
+        expect(await textOf(client, "user://me", true)).toBe("profile of u1");
+      },
+      server: createServer,
+    });
+  });
+
+  it("hands a resource template loader the caller's auth", async () => {
+    await runWithTestServer({
+      run: async ({ client }) => {
+        expect(await textOf(client, "notes://a", true)).toBe("note a of u1");
+      },
+      server: createServer,
+    });
+  });
+
+  it("does not reach what canAccess refuses the caller", async () => {
+    await runWithTestServer({
+      run: async ({ client }) => {
+        for (const uri of ["admin://dossier", "admin://records/1"]) {
+          const result = await embed(client, uri, true);
+
+          expect(result.isError).toBe(true);
+          expect(result.content[0].text).toContain(
+            `Resource not found: ${uri}`,
+          );
+        }
+      },
+      server: createServer,
+    });
+  });
+
+  // Without a caller there is nobody to check, as before: the loader runs
+  // outside any request.
+  it("loads with no auth, and without consulting canAccess, given no context", async () => {
+    await runWithTestServer({
+      run: async ({ client }) => {
+        expect(await textOf(client, "user://me", false)).toBe(
+          "profile of undefined",
+        );
+        expect(await textOf(client, "admin://dossier", false)).toBe("dossier");
+      },
+      server: createServer,
     });
   });
 });

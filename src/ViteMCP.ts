@@ -829,16 +829,38 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   /**
    * Resolves a resource (or resource template) URI to an embeddable resource
    * body, for returning inline from a tool.
+   *
+   * Pass the calling tool's `context` to resolve the URI as `resources/read`
+   * would for that caller: the loader receives that context, `auth` included,
+   * and a resource or template whose `canAccess` refuses the caller is not
+   * found. Without one, the loader runs outside any request, with `auth`
+   * undefined, and `canAccess` is not consulted.
    */
-  public async embedded(uri: string): Promise<LoadedResource> {
-    const direct = this.#resources.find((resource) => resource.uri === uri);
+  public async embedded(
+    uri: string,
+    context?: LoadContext<T>,
+  ): Promise<LoadedResource> {
+    // Loaders were only ever handed a context built here, so one that scoped
+    // what it returned to the caller served the anonymous version to every
+    // tool that embedded it. The caller's context brings the caller's access
+    // along with its `auth`: otherwise a tool embedding a URI it was handed
+    // could reach what `resources/read` refuses that same caller.
+    const visible = (entry: {
+      canAccess?: (auth: T | undefined) => boolean;
+    }): boolean =>
+      !context || !entry.canAccess || entry.canAccess(context.auth);
+    // No `release()` for a context built here: one built outside a request has
+    // no source signals to stop mirroring. A caller's context is the caller's
+    // to release.
+    const loadContext = (): LoadContext<T> =>
+      context ?? this.#makeContext(undefined, undefined).context;
+
+    const direct = this.#resources.find(
+      (resource) => resource.uri === uri && visible(resource),
+    );
 
     if (direct) {
-      // No `release()` here or below: a context built outside a request has no
-      // source signals to stop mirroring.
-      const loaded = await direct.load(
-        this.#makeContext(undefined, undefined).context,
-      );
+      const loaded = await direct.load(loadContext());
       const first = Array.isArray(loaded) ? loaded[0] : loaded;
 
       if (!first) {
@@ -855,6 +877,10 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     }
 
     for (const template of this.#resourceTemplates) {
+      if (!visible(template)) {
+        continue;
+      }
+
       // Matched as `resources/read` matches it, so a URI reaches the same
       // template, with the same arguments, whichever way it is asked for. A
       // matcher that let `{id}` take a `/` had `docs://{id}` claim
@@ -868,7 +894,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
 
       const loaded = await template.load(
         params as Record<string, string>,
-        this.#makeContext(undefined, undefined).context,
+        loadContext(),
       );
       const first = Array.isArray(loaded) ? loaded[0] : loaded;
 
