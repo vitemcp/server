@@ -1013,9 +1013,11 @@ trailing slash.
 server restarted without persistent storage, key material differs between
 instances, or clocks are skewed.
 
-**"PKCE validation failed"** — the client's `code_verifier` does not match the
-`code_challenge` it sent. Confirm the client stores the verifier across the
-redirect and sends the same one it derived the challenge from.
+**"Invalid PKCE verifier"** — the client's `code_verifier` does not match the
+`code_challenge` it sent, or is not a verifier RFC 7636 allows: 43 to 128
+characters drawn from `A-Z`, `a-z`, `0-9`, `-`, `.`, `_` and `~`. Confirm the
+client stores the verifier across the redirect and sends the same one it derived
+the challenge from.
 
 **"Unsupported code_challenge_method"** — the client asked for `plain` or an
 unrecognised method. Have it use `S256`; if it truly cannot, set

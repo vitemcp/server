@@ -68,7 +68,7 @@ describe("PKCEUtils", () => {
     });
 
     it("should validate plain challenge correctly", () => {
-      const verifier = "test-verifier";
+      const verifier = PKCEUtils.generateVerifier(43);
       const challenge = PKCEUtils.generateChallenge(verifier, "plain");
 
       const valid = PKCEUtils.validateChallenge(verifier, challenge, "plain");
@@ -91,6 +91,40 @@ describe("PKCEUtils", () => {
     it("should reject empty verifier or challenge", () => {
       expect(PKCEUtils.validateChallenge("", "challenge", "S256")).toBe(false);
       expect(PKCEUtils.validateChallenge("verifier", "", "S256")).toBe(false);
+    });
+
+    // RFC 7636 §4.1: code-verifier = 43*128unreserved. One outside that
+    // grammar must not redeem a code, though its challenge matches.
+    it.each([
+      ["a single character", "a"],
+      ["one character too short", "a".repeat(42)],
+      ["one character too long", "a".repeat(129)],
+      ["outside the unreserved set", `${"a".repeat(42)}+`],
+      ["holding a space", `${"a".repeat(42)} `],
+      ["holding a non-ASCII letter", `${"a".repeat(42)}é`],
+    ])("should reject a verifier %s", (_, verifier) => {
+      for (const method of ["plain", "S256"] as const) {
+        const challenge = PKCEUtils.generateChallenge(verifier, method);
+
+        expect(PKCEUtils.validateChallenge(verifier, challenge, method)).toBe(
+          false,
+        );
+      }
+    });
+
+    it("should accept verifiers at both length bounds and every unreserved character", () => {
+      const unreserved =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+
+      for (const verifier of ["a".repeat(43), "a".repeat(128), unreserved]) {
+        for (const method of ["plain", "S256"] as const) {
+          const challenge = PKCEUtils.generateChallenge(verifier, method);
+
+          expect(PKCEUtils.validateChallenge(verifier, challenge, method)).toBe(
+            true,
+          );
+        }
+      }
     });
 
     // Regression tests for CWE-208 (observable timing discrepancy). Both

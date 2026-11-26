@@ -8,6 +8,12 @@ import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import type { PKCEPair } from "../types.js";
 
 /**
+ * RFC 7636 §4.1: `code-verifier = 43*128unreserved`, where `unreserved` is
+ * `ALPHA / DIGIT / "-" / "." / "_" / "~"`.
+ */
+const CODE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
+
+/**
  * PKCE utility class for generating and validating code challenges
  */
 export class PKCEUtils {
@@ -80,6 +86,15 @@ export class PKCEUtils {
     method: string,
   ): boolean {
     if (!verifier || !challenge) {
+      return false;
+    }
+
+    // A verifier is only as strong as it is long. Checked against its
+    // challenge alone, a one-character verifier redeemed its code, and whoever
+    // intercepted that code could recover such a verifier from the challenge
+    // in the authorization request — 66 hashes at most — which is the attack
+    // PKCE exists to stop. RFC 7636 §4.1 requires at least 43 characters.
+    if (!CODE_VERIFIER.test(verifier)) {
       return false;
     }
 

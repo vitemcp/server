@@ -41,11 +41,13 @@ describe("OAuth proxy end-to-end", () => {
   const CALLBACK = "https://client.example.com/callback";
 
   /** Registers a client and walks authorize -> upstream -> callback. */
-  const runFlow = async (proxy: OAuthProxy) => {
+  const runFlow = async (
+    proxy: OAuthProxy,
+    pkce = PKCEUtils.generatePair("S256"),
+  ) => {
     const dcr = await proxy.registerClient({
       redirect_uris: [CALLBACK],
     });
-    const pkce = PKCEUtils.generatePair("S256");
 
     const authorizeResponse = await proxy.authorize({
       client_id: dcr.client_id,
@@ -162,6 +164,36 @@ describe("OAuth proxy end-to-end", () => {
         refresh_token: first.refresh_token!,
       }),
     ).rejects.toThrow();
+  });
+
+  it("refuses a code_verifier outside RFC 7636's grammar, though it matches its challenge", async () => {
+    upstream = await startFakeAuthorizationServer();
+    const proxy = makeProxy(upstream);
+
+    // One character, so its S256 challenge is one of 66 hashes: whoever
+    // intercepts the code can read the verifier back off the challenge.
+    const verifier = "a";
+    const { callbackResponse, dcr } = await runFlow(proxy, {
+      challenge: PKCEUtils.generateChallenge(verifier, "S256"),
+      verifier,
+    });
+    const clientCode = new URL(
+      callbackResponse.headers.get("Location") ?? "",
+    ).searchParams.get("code");
+
+    await expect(
+      proxy.exchangeAuthorizationCode({
+        client_id: dcr.client_id,
+        client_secret: dcr.client_secret,
+        code: clientCode!,
+        code_verifier: verifier,
+        grant_type: "authorization_code",
+        redirect_uri: CALLBACK,
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_grant",
+      description: "Invalid PKCE verifier",
+    });
   });
 
   it("parses a form-encoded token response (GitHub Apps shape)", async () => {
