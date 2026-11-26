@@ -732,4 +732,71 @@ describe("EdgeViteMCP request body cap", () => {
     expect(response.status).toBe(200);
     expect(received).toEqual([2 * MIB]);
   });
+
+  // The SDK reads the body again, under a cap of its own: 4 MiB by default.
+  it("accepts a body under a maxBodySize raised past the SDK's 4 MiB", async () => {
+    const { received, server } = measuring({ maxBodySize: 8 * MIB });
+    const response = await post(server, callWith(5 * MIB));
+
+    expect(response.status).toBe(200);
+    expect(received).toEqual([5 * MIB]);
+  });
+});
+
+/**
+ * The elements one tool call's arguments may hold, as on `ViteMCP`: the body
+ * cap does not bound what validating a call can cost.
+ */
+describe("EdgeViteMCP tool input limit", () => {
+  const counting = (options: { maxToolInputElements?: number } = {}) => {
+    const server = new EdgeViteMCP({
+      name: "TestServer",
+      version: "1.0.0",
+      ...options,
+    });
+
+    server.addTool({
+      description: "Reports how many items it was sent",
+      execute: async ({ items }) => `received ${items.length}`,
+      name: "count",
+      parameters: z.object({ items: z.array(z.number()) }),
+    });
+
+    return server;
+  };
+
+  /** The call's result; `{ items }` counts its one member and each item. */
+  const count = async (server: EdgeViteMCP, items: number) =>
+    (
+      await call(server, "tools/call", {
+        arguments: { items: Array.from({ length: items }, () => 0) },
+        name: "count",
+      })
+    ).result as { content: [{ text: string }]; isError?: boolean };
+
+  it("refuses a call over 10,000 by default", async () => {
+    const server = counting();
+
+    expect((await count(server, 9_999)).isError).toBeFalsy();
+
+    const refused = await count(server, 10_000);
+
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toContain(
+      "more than the maximum of 10000 elements",
+    );
+  });
+
+  it("admits more once maxToolInputElements is raised", async () => {
+    expect(
+      (await count(counting({ maxToolInputElements: 50_000 }), 20_000)).isError,
+    ).toBeFalsy();
+  });
+
+  it.each([0, -1, Number.NaN])(
+    "refuses a maxToolInputElements of %s when the server is created",
+    (maxToolInputElements) => {
+      expect(() => counting({ maxToolInputElements })).toThrow(RangeError);
+    },
+  );
 });

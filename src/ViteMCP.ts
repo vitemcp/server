@@ -52,6 +52,7 @@ import { withoutTrailingSlash } from "./auth/utils/trailingSlash.js";
 import { cancelResponseBody } from "./cancelResponseBody.js";
 import { formatBytes } from "./formatBytes.js";
 import { ownKeysOnly } from "./ownKeysOnly.js";
+import { resolveMaxToolInputElements } from "./toolInputLimit.js";
 import {
   type JsonSchemaConverter,
   toSdkSchema,
@@ -532,6 +533,17 @@ export type ServerOptions<T extends ViteMCPAuth> = {
   icons?: Icon[];
   instructions?: string;
   logger?: Logger;
+  /**
+   * Most array elements and object members, counted together, that one
+   * `tools/call` may carry in its arguments (default: 10,000). A call over it
+   * gets an error result before any schema sees it. Pass `Infinity` to lift
+   * the limit.
+   *
+   * `httpStream.maxBodySize` alone does not bound the cost of validating a
+   * call: half a million invalid elements fit in 1 MiB, and Zod kept half a
+   * gigabyte of issues reporting them.
+   */
+  maxToolInputElements?: number;
   name: string;
   oauth?: {
     authorizationServer?: Record<string, unknown>;
@@ -697,6 +709,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   #honoApp = new Hono();
   #httpServer: http.Server | https.Server | null = null;
   #logger: Logger;
+  #maxToolInputElements: number;
   #options: ServerOptions<T>;
   #prompts: Prompt<T>[] = [];
   /**
@@ -718,6 +731,9 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
   public constructor(options: ServerOptions<T>) {
     this.#options = options;
     this.#logger = options.logger ?? console;
+    this.#maxToolInputElements = resolveMaxToolInputElements(
+      options.maxToolInputElements,
+    );
 
     // An AuthProvider supplies the authenticate hook. Resolved here rather
     // than inside the HTTP path so the wiring is not silently absent on
@@ -1151,6 +1167,7 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         // client could never take effect.
         capabilities: era === "legacy" ? {} : { logging: {} },
         instructions: this.#options.instructions,
+        maxToolInputElements: this.#maxToolInputElements,
       },
     );
 
@@ -1664,6 +1681,8 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     sslCert?: string;
     sslKey?: string;
   }): Promise<void> {
+    const maxBodySize = config.maxBodySize ?? OAUTH_PROXY_MAX_BODY_SIZE;
+
     this.#handler = createMcpHandler(
       // Authentication has already run in the route below, which is the only
       // place that can turn a refusal into an HTTP status. What reaches here
@@ -1680,6 +1699,10 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
         // Tradeoff: `server/discover` advertises only 2026-07-28, so legacy
         // requests are answered unadvertised and skip Mcp-* validation.
         legacy: config.legacy ?? "stateless",
+        // The SDK reads the body again, under a cap of its own: 4 MiB unless
+        // told otherwise, which refused bodies a larger `maxBodySize` admits.
+        // The request listener has applied this one already.
+        maxRequestBodySize: maxBodySize,
         ...(config.enableJsonResponse ? { responseMode: "json" as const } : {}),
         onerror: (error) => this.#logger.error("[ViteMCP error]", error),
       },
@@ -1761,7 +1784,6 @@ export class ViteMCP<T extends ViteMCPAuth = ViteMCPAuth> {
     });
 
     const app = this.#honoApp;
-    const maxBodySize = config.maxBodySize ?? OAUTH_PROXY_MAX_BODY_SIZE;
 
     const useTls = Boolean(config.sslCert && config.sslKey);
 

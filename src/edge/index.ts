@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { formatBytes } from "../formatBytes.js";
 import { ownKeysOnly } from "../ownKeysOnly.js";
+import { resolveMaxToolInputElements } from "../toolInputLimit.js";
 import {
   type JsonSchemaConverter,
   toSdkSchema,
@@ -89,6 +90,13 @@ export interface EdgeViteMCPOptions {
    * memory. Routes added through `getApp()` are not covered.
    */
   maxBodySize?: number;
+  /**
+   * Most array elements and object members, counted together, that one
+   * `tools/call` may carry in its arguments (default: 10,000, as on
+   * `ViteMCP`). A call over it gets an error result before any schema sees
+   * it. Pass `Infinity` to lift the limit.
+   */
+  maxToolInputElements?: number;
   /**
    * Base path for MCP endpoints (default: "/mcp")
    */
@@ -191,6 +199,7 @@ export class EdgeViteMCP {
   #honoApp = new Hono();
   #logger: EdgeLogger;
   #maxBodySize: number;
+  #maxToolInputElements: number;
   #mcpPath: string;
   #name: string;
   #prompts: EdgePrompt[] = [];
@@ -209,6 +218,9 @@ export class EdgeViteMCP {
     this.#version = options.version;
     this.#logger = options.logger ?? console;
     this.#maxBodySize = options.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
+    this.#maxToolInputElements = resolveMaxToolInputElements(
+      options.maxToolInputElements,
+    );
     this.#mcpPath = options.mcpPath ?? "/mcp";
   }
 
@@ -260,7 +272,11 @@ export class EdgeViteMCP {
         );
       }
 
-      this.#handler ??= createMcpHandler(() => this.#buildServer());
+      // The SDK reads the body again, under a cap of its own: 4 MiB unless
+      // told otherwise, which refused bodies a larger `maxBodySize` admits.
+      this.#handler ??= createMcpHandler(() => this.#buildServer(), {
+        maxRequestBodySize: this.#maxBodySize,
+      });
       return this.#handler.fetch(capped);
     }
 
@@ -275,11 +291,14 @@ export class EdgeViteMCP {
   async #buildServer(): Promise<McpServer> {
     // `description` was accepted and then left out here, so a server that set
     // it — as the README's Workers example does — advertised none.
-    const server = new McpServer({
-      description: this.#description,
-      name: this.#name,
-      version: this.#version,
-    });
+    const server = new McpServer(
+      {
+        description: this.#description,
+        name: this.#name,
+        version: this.#version,
+      },
+      { maxToolInputElements: this.#maxToolInputElements },
+    );
 
     // A tool whose schema cannot be advertised is left out rather than allowed
     // to fail the request: `tools/list` describes every tool at once, so one

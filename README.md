@@ -1797,6 +1797,36 @@ const transport = new StreamableHTTPClientTransport(
 await client.connect(transport);
 ```
 
+#### Request limits
+
+Two limits bound what one request can make the server do:
+
+- `httpStream.maxBodySize` caps the MCP endpoint's request body, in bytes
+  (default: 1 MiB). A larger body is refused with a `400`, without being held
+  in memory.
+- `maxToolInputElements` caps how many array elements and object members,
+  counted together, one `tools/call` may carry in its arguments (default:
+  10,000). A call over it gets an error result before any schema validates it.
+  The body cap alone does not bound what validation costs: half a million
+  invalid elements fit in 1 MiB.
+
+```ts
+const server = new ViteMCP({
+  name: "Bulk importer",
+  version: "1.0.0",
+  // Its tools take arrays of up to 50,000 numbers.
+  maxToolInputElements: 60_000,
+});
+
+server.start({
+  transportType: "httpStream",
+  httpStream: { port: 8080, maxBodySize: 4 * 1024 * 1024 },
+});
+```
+
+`maxToolInputElements` applies on every transport, stdio included. Pass
+`Infinity` to lift it.
+
 #### HTTPS Support
 
 Pass SSL certificates to terminate TLS directly:
@@ -2059,7 +2089,7 @@ When running on edge runtimes:
 - **No filesystem access**: Use fetch APIs for external data
 - **V8 Isolates**: Fast cold starts and efficient resource usage
 - **Global deployment**: Automatic distribution to edge locations
-- **Request size**: The MCP endpoint refuses a body over `maxBodySize` (1 MiB by default, as on Node). Routes added through `getApp()` are not covered
+- **Request size**: The MCP endpoint refuses a body over `maxBodySize` (1 MiB by default, as on Node), and a tool call whose arguments hold more than `maxToolInputElements` elements (10,000 by default, as on Node). Routes added through `getApp()` are not covered
 - **Schema libraries**: Zod, ArkType and Valibot describe a tool as they do on Node. Any other library that carries no JSON Schema of its own is not converted here: a tool written in one is left out and reported through the logger
 
 #### Custom Routes on Edge
