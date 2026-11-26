@@ -110,6 +110,34 @@ describe("EdgeViteMCP", () => {
     expect(body.result).toBeDefined();
   });
 
+  it("advertises the description it was given in serverInfo", async () => {
+    const serverInfo = async (server: EdgeViteMCP) =>
+      (
+        (await call(server, "server/discover")).result._meta as Record<
+          string,
+          unknown
+        >
+      )["io.modelcontextprotocol/serverInfo"];
+
+    expect(
+      await serverInfo(
+        new EdgeViteMCP({
+          description: "MCP server running on Cloudflare Workers",
+          name: "TestServer",
+          version: "1.0.0",
+        }),
+      ),
+    ).toEqual({
+      description: "MCP server running on Cloudflare Workers",
+      name: "TestServer",
+      version: "1.0.0",
+    });
+    expect(await serverInfo(makeServer())).toStrictEqual({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+  });
+
   it("should list tools", async () => {
     const server = makeServer();
 

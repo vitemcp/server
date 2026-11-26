@@ -77,6 +77,10 @@ export interface EdgeTool<TParams = unknown> {
  * Options for EdgeViteMCP
  */
 export interface EdgeViteMCPOptions {
+  /**
+   * What this server is, for a human reading a client's server list.
+   * Advertised in `serverInfo`, as `ViteMCP` advertises its own.
+   */
   description?: string;
   logger?: EdgeLogger;
   /**
@@ -182,6 +186,7 @@ const invalidRequest = (description: string): Response =>
   );
 
 export class EdgeViteMCP {
+  #description: string | undefined;
   #handler: null | ReturnType<typeof createMcpHandler> = null;
   #honoApp = new Hono();
   #logger: EdgeLogger;
@@ -199,6 +204,7 @@ export class EdgeViteMCP {
   #version: string;
 
   constructor(options: EdgeViteMCPOptions) {
+    this.#description = options.description;
     this.#name = options.name;
     this.#version = options.version;
     this.#logger = options.logger ?? console;
@@ -267,7 +273,10 @@ export class EdgeViteMCP {
   }
 
   async #buildServer(): Promise<McpServer> {
+    // `description` was accepted and then left out here, so a server that set
+    // it — as the README's Workers example does — advertised none.
     const server = new McpServer({
+      description: this.#description,
       name: this.#name,
       version: this.#version,
     });
