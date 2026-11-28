@@ -325,8 +325,10 @@ staging host.
   `explode: true`: an array of scalars is repeated once per entry. Anything
   nested — an object, or an array of objects — is bracketed
   (`metadata[order]=42`, `items[0][price]=p1`), which is what the APIs
-  accepting nested form bodies read. The request body's `encoding` object is
-  not consulted.
+  accepting nested form bodies read. A `null` field, array entry or object
+  member is left out, as it is in a query, rather than sent as the text `null`;
+  a JSON body keeps its `null`. The request body's `encoding` object is not
+  consulted.
 - **A body on a `GET`** is legal in OpenAPI and rejected by `fetch`, so it is
   left out of the schema rather than advertised and then refused.
 - **No response validation** beyond the optional `outputSchema`.

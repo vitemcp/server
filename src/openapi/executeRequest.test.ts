@@ -895,6 +895,92 @@ describe("building the request", () => {
     expect(body.get("items[0][price]")).toBe("p1");
     expect(body.get("items[1][price]")).toBe("p2");
   });
+
+  describe("a null in the body", () => {
+    const nullableBodySpec = (contentType: string): OpenApiDocument => ({
+      info: { title: "Pets", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/pets": {
+          post: {
+            operationId: "createPet",
+            requestBody: {
+              content: {
+                [contentType]: {
+                  schema: {
+                    properties: {
+                      description: { nullable: true, type: "string" },
+                      items: {
+                        items: {
+                          nullable: true,
+                          properties: { price: { type: "string" } },
+                          type: "object",
+                        },
+                        type: "array",
+                      },
+                      metadata: { type: "object" },
+                      name: { type: "string" },
+                      tag: {
+                        items: { nullable: true, type: "string" },
+                        type: "array",
+                      },
+                    },
+                    type: "object",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.test" }],
+    });
+
+    const nullableArguments = {
+      description: null,
+      items: [{ price: "a" }, null, { price: "b" }],
+      metadata: { order: "7", ref: null },
+      name: "Rex",
+      tag: ["a", null, "b"],
+    };
+
+    // RFC 6570, which a form body follows as a query does, treats `null` as
+    // undefined. Each one here was sent as the text `null`.
+    it("is left out of a form body, as a field, an array entry or an object member", async () => {
+      const { calls, client } = await withRecordedCalls(
+        nullableBodySpec("application/x-www-form-urlencoded"),
+      );
+
+      const result = await client.callTool({
+        arguments: nullableArguments,
+        name: "createPet",
+      });
+
+      expect(result.isError).toBeFalsy();
+      // The entry after the null one is `items[1]`, not `items[2]`.
+      expect([...new URLSearchParams(calls[0].body)]).toEqual([
+        ["items[0][price]", "a"],
+        ["items[1][price]", "b"],
+        ["metadata[order]", "7"],
+        ["name", "Rex"],
+        ["tag", "a"],
+        ["tag", "b"],
+      ]);
+    });
+
+    it("is kept in a JSON body, where it is a value", async () => {
+      const { calls, client } = await withRecordedCalls(
+        nullableBodySpec("application/json"),
+      );
+
+      await client.callTool({
+        arguments: nullableArguments,
+        name: "createPet",
+      });
+
+      expect(JSON.parse(calls[0].body!)).toEqual(nullableArguments);
+    });
+  });
 });
 
 describe("reading the response", () => {

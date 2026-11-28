@@ -205,19 +205,27 @@ const appendFormValue = (
   name: string,
   value: unknown,
 ): void => {
-  if (value === undefined) {
+  // RFC 6570 treats `null` as undefined, and OpenAPI gives a form field the
+  // query's serialization rules, so a null field, entry or member is left out
+  // as it is in a query. A model fills optional arguments with `null`, and
+  // each was sent as the text `null`, which a server reads as that word.
+  if (value === undefined || value === null) {
     return;
   }
 
   if (Array.isArray(value)) {
+    // Its null entries go before indexing, so the entries after one keep
+    // consecutive indices rather than leaving a hole in the array the server
+    // rebuilds.
+    const entries = value.filter((entry) => entry !== null);
     // A flat array keeps OpenAPI's `explode: true` default and repeats the
     // key. Indices appear only once an entry is itself nested, where repeating
     // the key would run every entry's fields together into one.
-    const nested = value.some(
+    const nested = entries.some(
       (entry) => typeof entry === "object" && entry !== null,
     );
 
-    for (const [index, entry] of value.entries()) {
+    for (const [index, entry] of entries.entries()) {
       appendFormValue(form, nested ? `${name}[${index}]` : name, entry);
     }
 
